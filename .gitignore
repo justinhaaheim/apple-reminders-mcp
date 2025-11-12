@@ -1,0 +1,14 @@
+# Swift build artifacts
+.build/
+.swiftpm/
+*.xcodeproj
+*.xcworkspace
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Claude Code settings
+.claude/
