@@ -1,0 +1,24 @@
+{
+  "configurations": [
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:apple-reminders-mcp}",
+      "name": "Debug apple-reminders-mcp",
+      "target": "apple-reminders-mcp",
+      "configuration": "debug",
+      "preLaunchTask": "swift: Build Debug apple-reminders-mcp"
+    },
+    {
+      "type": "swift",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:apple-reminders-mcp}",
+      "name": "Release apple-reminders-mcp",
+      "target": "apple-reminders-mcp",
+      "configuration": "release",
+      "preLaunchTask": "swift: Build Release apple-reminders-mcp"
+    }
+  ]
+}
