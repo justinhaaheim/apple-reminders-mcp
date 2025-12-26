@@ -1,0 +1,17 @@
+# NOTE: These are ignored by default by prettier
+# **/.git
+# **/.svn
+# **/.hg
+# **/node_modules
+
+# Build artifacts
+.build
+**/dist
+
+# Swift files (no Prettier plugin available)
+*.swift
+
+# temp
+/tmp
+
+**/CLAUDE.md

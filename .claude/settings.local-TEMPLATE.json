@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(cat:*)",
+      "Bash(cp:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(head:*)",
+      "Bash(ls:*)",
+      "Bash(mkdir:*)",
+      "Bash(rm:*)",
+      "Bash(chmod:*)",
+
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git fetch:*)",
+      "Bash(git log:*)",
+      "Bash(git rebase:*)",
+      "Bash(git show:*)",
+      "Bash(git status:*)",
+
+      "Bash(npm install:*)",
+      "Bash(npm list:*)",
+      "Bash(npm run:*)",
+      "Bash(npm search:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(npm update:*)",
+      "Bash(npm view:*)",
+
+      "Bash(bun install:*)",
+      "Bash(bun list:*)",
+      "Bash(bun run:*)",
+      "Bash(bun search:*)",
+      "Bash(bun uninstall:*)",
+      "Bash(bun update:*)",
+      "Bash(bun view:*)",
+
+      "Bash(npx eslint:*)",
+      "Bash(npx expo install:*)",
+      "Bash(npx gluestack-ui init)",
+      "Bash(npx gluestack-ui@latest add:*)",
+      "Bash(npx playwright:*)",
+      "Bash(npx prettier:*)",
+      "Bash(npx tsc:*)",
+
+      "Bash(ffmpeg:*)",
+      "Bash(ffprobe:*)",
+      "Bash(maestro test:*)",
+
+      "mcp__ide__getDiagnostics",
+
+      "WebFetch(domain:gluestack.io)"
+    ],
+    "deny": [],
+    "defaultMode": "acceptEdits"
+  }
+}

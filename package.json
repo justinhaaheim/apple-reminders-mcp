@@ -1,0 +1,28 @@
+{
+  "name": "apple-reminders-mcp",
+  "description": "MCP server for Apple Reminders on macOS",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "swift build -c release",
+    "build:debug": "swift build",
+    "run": ".build/release/apple-reminders-mcp",
+    "test": "swift test",
+    "prettier-check": "prettier --check .",
+    "prettier": "prettier --write .",
+    "prettier:write:file": "prettier --write --ignore-unknown",
+    "signal": "bun run prettier-check",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "husky": "9.1.7",
+    "lint-staged": "^14.0.1",
+    "prettier": "3.6.2"
+  },
+  "lint-staged": {
+    "**/*": "prettier --check --ignore-unknown"
+  },
+  "trustedDependencies": [
+    "@justinhaaheim/version-manager"
+  ]
+}

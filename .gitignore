@@ -10,5 +10,12 @@
 # Logs
 *.log
 
-# Claude Code settings
-.claude/
+# Node.js
+node_modules/
+bun.lockb
+
+# Claude Code local settings (keep settings.json, ignore local)
+.claude/settings.local.json
+
+# Temp
+/tmp

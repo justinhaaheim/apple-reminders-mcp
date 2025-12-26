@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "terminal-notifier -title \"Claude Code - $(basename \"$PWD\")\" -subtitle \"Input Required\" -message \"Claude is waiting for your input\" -sound default"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|MultiEdit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path' | { read file_path; bun run prettier:write:file -- \"$file_path\"; }"
+          }
+        ]
+      }
+    ]
+  }
+}

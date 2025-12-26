@@ -46,6 +46,7 @@ The MCP server communicates via JSON-RPC over stdin/stdout. The test scripts sen
 ### Example Request/Response
 
 **Request** (list all reminder lists):
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -59,6 +60,7 @@ The MCP server communicates via JSON-RPC over stdin/stdout. The test scripts sen
 ```
 
 **Response**:
+
 ```json
 {
   "jsonrpc": "2.0",
@@ -107,6 +109,7 @@ The server logs to stderr, which you can see by redirecting:
 ```
 
 Example log output:
+
 ```
 [2025-11-10T04:46:21Z] Successfully obtained access to Reminders
 [2025-11-10T04:46:21Z] Apple Reminders MCP Server running on stdio
@@ -143,6 +146,7 @@ Once testing is complete, integrate with Claude Desktop by adding to:
 ```
 
 Then restart Claude Desktop. The server implements the full MCP protocol including:
+
 - `initialize` - Initial handshake with protocol version, capabilities, and usage instructions
 - `tools/list` - Lists all available tools
 - `tools/call` - Executes a specific tool

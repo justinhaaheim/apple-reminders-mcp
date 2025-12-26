@@ -33,6 +33,7 @@ Apple Reminders is a full-featured **task management system**, not just for simp
 
 1. Clone this repository
 2. Build the Swift package:
+
 ```bash
 swift build -c release
 ```
