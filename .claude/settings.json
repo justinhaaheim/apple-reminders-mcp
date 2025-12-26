@@ -4,15 +4,12 @@
     "allow": [
       "Bash(cat:*)",
       "Bash(cp:*)",
-      // "Bash(find:*)",
       "Bash(grep:*)",
       "Bash(head:*)",
       "Bash(ls:*)",
       "Bash(mkdir:*)",
-      // "Bash(chmod:*)",
       "Bash(unzip:*)",
 
-      // "// Git Commands",
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git fetch:*)",
@@ -21,7 +18,6 @@
       "Bash(git show:*)",
       "Bash(git status:*)",
 
-      // "// Bun Commands",
       "Bash(bun install:*)",
       "Bash(bun list:*)",
       "Bash(bun run:*)",
@@ -29,18 +25,12 @@
       "Bash(bun remove:*)",
       "Bash(bun pm:*)",
 
-      // "// Code Quality",
       "Bash(npx eslint:*)",
       "Bash(npx prettier:*)",
       "Bash(npx tsc:*)",
 
-      // "// GitHub CLI",
-      // "Bash(gh api:*)",
-
-      // "// IDE Tools",
       "mcp__ide__getDiagnostics",
 
-      // "// Web Access",
       "WebSearch",
       "WebFetch(domain:github.com)"
     ],
@@ -49,7 +39,6 @@
   },
   "sandbox": {
     "enabled": true
-    // "autoAllowBashIfSandboxed": false
   },
 
   "hooks": {
