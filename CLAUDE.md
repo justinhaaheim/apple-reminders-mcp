@@ -24,6 +24,7 @@ Apple Reminders MCP Server - A Model Context Protocol server that provides Claud
 
 ### Testing
 - `bun run test` - Run TypeScript tests (isolated to test lists, safe)
+- `bun run test:cleanup` - Delete leftover test lists (with confirmation prompt)
 - `./test/interactive.sh` - Interactive MCP protocol debugging
 
 **Test Safety**: Tests run with `AR_MCP_TEST_MODE=1` which restricts all write operations to lists prefixed with `[AR-MCP TEST]`. This prevents tests from modifying your real reminders.

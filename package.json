@@ -8,6 +8,7 @@
     "build:debug": "swift build",
     "run": ".build/release/apple-reminders-mcp",
     "test": "bun test",
+    "test:cleanup": "bun test/cleanup-test-lists.ts",
     "prettier-check": "prettier --check .",
     "prettier": "prettier --write .",
     "prettier:write:file": "prettier --write --ignore-unknown",
@@ -15,6 +16,8 @@
     "prepare": "husky"
   },
   "devDependencies": {
+    "@types/node": "25.0.3",
+    "bun-types": "1.3.5",
     "husky": "9.1.7",
     "lint-staged": "^14.0.1",
     "prettier": "3.6.2"
