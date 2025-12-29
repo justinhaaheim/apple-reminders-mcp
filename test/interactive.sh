@@ -3,11 +3,13 @@
 # Interactive test for Apple Reminders MCP Server
 # This lets you send individual requests and see responses
 
-EXECUTABLE=".build/release/apple-reminders-mcp"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+EXECUTABLE="$PROJECT_ROOT/.build/release/apple-reminders-mcp"
 
 if [ ! -f "$EXECUTABLE" ]; then
     echo "Error: Executable not found at $EXECUTABLE"
-    echo "Run: swift build -c release"
+    echo "Run: bun run build"
     exit 1
 fi
 

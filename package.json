@@ -7,7 +7,7 @@
     "build": "swift build -c release",
     "build:debug": "swift build",
     "run": ".build/release/apple-reminders-mcp",
-    "test": "swift test",
+    "test": "bun test",
     "prettier-check": "prettier --check .",
     "prettier": "prettier --write .",
     "prettier:write:file": "prettier --write --ignore-unknown",

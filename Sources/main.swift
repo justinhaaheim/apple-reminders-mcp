@@ -1,6 +1,21 @@
 import Foundation
 import EventKit
 
+// MARK: - Test Mode Configuration
+
+struct TestModeConfig {
+    static let envVar = "AR_MCP_TEST_MODE"
+    static let testListPrefix = "[AR-MCP TEST]"
+
+    static var isEnabled: Bool {
+        ProcessInfo.processInfo.environment[envVar] == "1"
+    }
+
+    static func isTestList(_ name: String) -> Bool {
+        name.hasPrefix(testListPrefix)
+    }
+}
+
 // MARK: - MCP Protocol Types
 
 struct MCPRequest: Codable {
@@ -160,6 +175,62 @@ class RemindersManager {
     private let eventStore = EKEventStore()
     private var hasAccess = false
 
+    // MARK: - Test Mode Validation
+
+    private func validateTestModeForListCreation(name: String) throws {
+        guard TestModeConfig.isEnabled else { return }
+
+        guard TestModeConfig.isTestList(name) else {
+            throw NSError(
+                domain: "RemindersManager",
+                code: 100,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "TEST MODE: Cannot create list '\(name)'. " +
+                    "List name must start with '\(TestModeConfig.testListPrefix)'"]
+            )
+        }
+    }
+
+    private func validateTestModeForReminderCreation(listName: String) throws {
+        guard TestModeConfig.isEnabled else { return }
+
+        guard TestModeConfig.isTestList(listName) else {
+            throw NSError(
+                domain: "RemindersManager",
+                code: 101,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "TEST MODE: Cannot create reminder in list '\(listName)'. " +
+                    "Target list must start with '\(TestModeConfig.testListPrefix)'"]
+            )
+        }
+    }
+
+    private func validateTestModeForReminderModification(id: String) throws {
+        guard TestModeConfig.isEnabled else { return }
+
+        guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
+            throw NSError(
+                domain: "RemindersManager",
+                code: 102,
+                userInfo: [NSLocalizedDescriptionKey: "Reminder not found"]
+            )
+        }
+
+        guard let listName = reminder.calendar?.title,
+              TestModeConfig.isTestList(listName) else {
+            let actualList = reminder.calendar?.title ?? "unknown"
+            throw NSError(
+                domain: "RemindersManager",
+                code: 103,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "TEST MODE: Cannot modify reminder in list '\(actualList)'. " +
+                    "Reminder must be in a list starting with '\(TestModeConfig.testListPrefix)'"]
+            )
+        }
+    }
+
+    // MARK: - Access
+
     func requestAccess() async throws {
         hasAccess = try await eventStore.requestFullAccessToReminders()
         if !hasAccess {
@@ -178,6 +249,8 @@ class RemindersManager {
     }
 
     func createReminderList(name: String) throws -> String {
+        try validateTestModeForListCreation(name: name)
+
         // Create a new calendar for reminders
         let calendar = EKCalendar(for: .reminder, eventStore: eventStore)
         calendar.title = name
@@ -357,6 +430,8 @@ class RemindersManager {
     }
 
     func createReminder(title: String, listName: String, notes: String?, dueDate: String?) throws -> String {
+        try validateTestModeForReminderCreation(listName: listName)
+
         let calendars = eventStore.calendars(for: .reminder).filter { $0.title == listName }
         guard let calendar = calendars.first else {
             throw NSError(domain: "RemindersManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "List '\(listName)' not found"])
@@ -401,6 +476,8 @@ class RemindersManager {
     }
 
     func completeReminder(id: String) throws {
+        try validateTestModeForReminderModification(id: id)
+
         guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
             throw NSError(domain: "RemindersManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "Reminder not found"])
         }
@@ -410,6 +487,8 @@ class RemindersManager {
     }
 
     func deleteReminder(id: String) throws {
+        try validateTestModeForReminderModification(id: id)
+
         guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
             throw NSError(domain: "RemindersManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "Reminder not found"])
         }
@@ -418,6 +497,8 @@ class RemindersManager {
     }
 
     func updateReminder(id: String, title: String?, notes: String?, dueDate: String?, priority: Int?) throws {
+        try validateTestModeForReminderModification(id: id)
+
         guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
             throw NSError(domain: "RemindersManager", code: 5, userInfo: [NSLocalizedDescriptionKey: "Reminder not found"])
         }
@@ -481,6 +562,10 @@ class MCPServer {
         } catch {
             logError("Failed to get access to Reminders: \(error)")
             exit(1)
+        }
+
+        if TestModeConfig.isEnabled {
+            log("TEST MODE ENABLED - Write operations restricted to lists prefixed with '\(TestModeConfig.testListPrefix)'")
         }
 
         log("Apple Reminders MCP Server running on stdio")
