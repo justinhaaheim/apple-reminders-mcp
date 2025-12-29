@@ -333,6 +333,20 @@ extension EKReminderPriority {
 
 ## Progress Log
 
+### 2025-12-29
+
+- Added test mode (`AR_MCP_TEST_MODE=1`) to protect real reminders during testing
+  - Write operations restricted to lists prefixed with `[AR-MCP TEST]`
+  - Validation in `RemindersManager` for create/update/delete/complete operations
+- Created TypeScript test suite using `bun test`:
+  - `test/mcp-client.ts` - MCP client utility for spawning server
+  - `test/readonly.test.ts` - Read-only operation tests (tools, lists)
+  - `test/crud.test.ts` - CRUD tests isolated to test list
+  - `test/test-mode.test.ts` - Verify test mode restrictions work
+- Moved `test-interactive.sh` to `test/interactive.sh`
+- Deleted old bash test scripts
+- Tests are now completely safe - cannot modify real reminders
+
 ### 2025-12-26
 
 - Forked farmerajf/apple-reminders-mcp to ~/Dev/apple-reminders-mcp
