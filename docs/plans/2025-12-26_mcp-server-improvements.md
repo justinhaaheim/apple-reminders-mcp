@@ -9,9 +9,17 @@ Enhance this MCP server to provide Claude iOS-level Reminders functionality on m
 - Batch operations for efficiency
 - API parity with Claude iOS where sensible
 
-## Status: PLANNING
+## Status: IN PROGRESS
 
-Forked from [farmerajf/apple-reminders-mcp](https://github.com/farmerajf/apple-reminders-mcp). Project tooling set up. Ready to implement improvements.
+Forked from [farmerajf/apple-reminders-mcp](https://github.com/farmerajf/apple-reminders-mcp). Test infrastructure complete. Ready for feature implementation.
+
+**Completed:**
+
+- ✅ Test mode (`AR_MCP_TEST_MODE=1`) - protects real reminders
+- ✅ TypeScript test suite with bun test (15 tests)
+- ✅ Test list cleanup script
+
+**Next:** Phase 1 - Alarms
 
 ---
 
