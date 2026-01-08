@@ -19,7 +19,16 @@ Forked from [farmerajf/apple-reminders-mcp](https://github.com/farmerajf/apple-r
 - ✅ TypeScript test suite with bun test (15 tests)
 - ✅ Test list cleanup script
 
-**Next:** Phase 1 - Alarms
+**Priority Order:**
+
+1. Batch Operations (M2)
+2. Audit Log & Data Safety (M3)
+3. Enhanced Search (M4)
+4. Recurrence (M5)
+5. Alarms (M6)
+6. URL & Minor Fields (M7)
+
+**Next:** Batch Operations - design and implement bulk create/update/delete/complete
 
 ---
 

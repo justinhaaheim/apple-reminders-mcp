@@ -16,16 +16,35 @@ Establish a test suite that can't accidentally modify real reminders.
 - [x] TypeScript test suite with bun test
 - [x] Cleanup script for leftover test lists
 
-### M2: Alarms Support
+### M2: Batch Operations ⬅️ NEXT
 
-Add alarm/notification support to reminders.
+Efficient bulk operations - critical for productivity workflows.
 
-- [ ] `alarms` parameter on create/update
-- [ ] Absolute alarms (specific date/time)
-- [ ] Relative alarms (X seconds before due date)
-- [ ] Return alarms in list responses
+- [ ] Create multiple reminders in one call
+- [ ] Update multiple reminders in one call
+- [ ] Delete multiple reminders in one call
+- [ ] Complete multiple reminders in one call
 
-### M3: Recurrence Support
+### M3: Audit Log & Data Safety
+
+Paranoid-level logging and data protection. Never lose data, always know what happened.
+
+- [ ] Detailed operation logging (what model requested, what server did)
+- [ ] Capture before/after state for all modifications
+- [ ] Persist audit log (file or database)
+- [ ] Add `list_recent_operations` tool - let model review its own actions
+- [ ] Add `undo_operation` tool - revert a specific change
+- [ ] Consider: snapshot/backup before destructive operations
+
+### M4: Enhanced Search
+
+Improve reminder discovery.
+
+- [ ] Text search in titles/notes (`query` parameter)
+- [ ] Date range filtering (dateFrom/dateTo)
+- [ ] Result limiting (`limit` parameter)
+
+### M5: Recurrence Support
 
 Add repeating reminder support.
 
@@ -34,29 +53,22 @@ Add repeating reminder support.
 - [ ] Days of week, interval support
 - [ ] End conditions (count, date)
 
-### M4: Enhanced Search
+### M6: Alarms Support
 
-Improve reminder discovery.
+Add alarm/notification support to reminders.
 
-- [ ] Text search in titles/notes
-- [ ] Date range filtering (dateFrom/dateTo)
-- [ ] Result limiting
+- [ ] `alarms` parameter on create/update
+- [ ] Absolute alarms (specific date/time)
+- [ ] Relative alarms (X seconds before due date)
+- [ ] Return alarms in list responses
 
-### M5: URL & Minor Fields
+### M7: URL & Minor Fields
 
 Complete feature parity with Claude iOS.
 
 - [ ] URL attachment support
 - [ ] startDate (separate from dueDate)
 - [ ] Explicit dueDateIncludesTime boolean
-
-### M6: Batch Operations
-
-Efficient bulk operations.
-
-- [ ] Create multiple reminders in one call
-- [ ] Update multiple reminders in one call
-- [ ] Delete multiple reminders in one call
 
 ---
 
@@ -68,11 +80,11 @@ Efficient bulk operations.
 
 ## Next Actions
 
-1. **Start Phase 1: Alarms** - Add `alarms` array parameter to `create_reminder` and `update_reminder`. This is high priority and self-contained. EventKit API is straightforward (`EKAlarm`).
+1. **Design batch operations API** - Decide: new tools (`create_reminders`, `update_reminders`) vs. modifying existing tools to accept arrays. Consider Claude iOS API shape for reference.
 
-2. **Add alarm response data** - Update `listReminders`, `getTodayReminders`, and response formatting to include alarm information for existing reminders.
+2. **Implement batch create** - Add `create_reminders` tool that accepts an array of reminders grouped by list. Return array of results with IDs.
 
-3. **Research recurrence API** - Review EventKit's `EKRecurrenceRule` API to understand complexity before implementing. Consider starting with simple cases (daily, weekly, monthly) vs full RRULE.
+3. **Implement batch update/delete/complete** - Add remaining batch operations. Consider transaction semantics (all-or-nothing vs. partial success).
 
 ---
 
@@ -84,6 +96,7 @@ Efficient bulk operations.
 - [ ] List search filter for `list_reminder_lists`
 - [ ] Consider tool renaming to match Claude iOS (`reminder_create_v0` style)
 - [ ] Code refactoring to multiple Swift files (if complexity warrants)
+- [ ] Add `listId` support alongside `list_name` for more robust list identification
 
 ### Bugs / Issues
 
@@ -91,17 +104,18 @@ _(none currently tracked)_
 
 ### Ideas
 
-- Add `listId` support alongside `list_name` for more robust list identification
-- Consider AppleScript fallback for operations EventKit can't do (like deleting lists)
+- AppleScript fallback for operations EventKit can't do (like deleting lists)
 - Explore Swift testing options (mocking EKEventStore is tricky)
+- Export/import functionality for backup purposes
 
 ---
 
 ## Open Questions
 
-1. **Breaking changes** - Maintain backward compatibility with existing tool schemas, or clean break?
-2. **Batch operations** - New tools (`create_reminders`) or modify existing (`create_reminder` accepts array)?
-3. **Recurrence complexity** - Start with common cases or implement full RRULE support?
+1. **Batch operations design** - New tools (`create_reminders`) or modify existing (`create_reminder` accepts array)? Leaning toward new tools for clarity.
+2. **Audit log storage** - JSON file? SQLite? How long to retain?
+3. **Undo granularity** - Undo individual operations or support "undo last N operations"?
+4. **Recurrence complexity** - Start with common cases or implement full RRULE support?
 
 ---
 
@@ -113,7 +127,8 @@ _(none currently tracked)_
 - Added test mode with `AR_MCP_TEST_MODE=1`
 - Created TypeScript test suite (15 tests)
 - Added cleanup script for test lists
-- Created this ROADMAP.md
+- Created ROADMAP.md
+- Reprioritized: Batch ops → Audit/Safety → Search → Recurrence → Alarms → URL
 
 ### 2025-12-26
 
