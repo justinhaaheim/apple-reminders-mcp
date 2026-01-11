@@ -350,6 +350,16 @@ extension EKReminderPriority {
 
 ## Progress Log
 
+### 2026-01-10
+
+- Implemented batch operations (M2):
+  - Added 4 new MCP tools: `create_reminders`, `update_reminders`, `delete_reminders`, `complete_reminders`
+  - Added input validation layer with Codable structs (like Zod pattern)
+  - Each operation returns per-item success/failure with summary
+  - All batch operations respect test mode restrictions
+  - Added `test/batch.test.ts` with comprehensive tests
+- All 24 tests passing
+
 ### 2025-12-29
 
 - Added test mode (`AR_MCP_TEST_MODE=1`) to protect real reminders during testing

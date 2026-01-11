@@ -16,16 +16,16 @@ Establish a test suite that can't accidentally modify real reminders.
 - [x] TypeScript test suite with bun test
 - [x] Cleanup script for leftover test lists
 
-### M2: Batch Operations ⬅️ NEXT
+### M2: Batch Operations ✅
 
 Efficient bulk operations - critical for productivity workflows.
 
-- [ ] Create multiple reminders in one call
-- [ ] Update multiple reminders in one call
-- [ ] Delete multiple reminders in one call
-- [ ] Complete multiple reminders in one call
+- [x] Create multiple reminders in one call (`create_reminders`)
+- [x] Update multiple reminders in one call (`update_reminders`)
+- [x] Delete multiple reminders in one call (`delete_reminders`)
+- [x] Complete multiple reminders in one call (`complete_reminders`)
 
-### M3: Audit Log & Data Safety
+### M3: Audit Log & Data Safety ⬅️ NEXT
 
 Paranoid-level logging and data protection. Never lose data, always know what happened.
 
@@ -80,11 +80,11 @@ Complete feature parity with Claude iOS.
 
 ## Next Actions
 
-1. **Design batch operations API** - Decide: new tools (`create_reminders`, `update_reminders`) vs. modifying existing tools to accept arrays. Consider Claude iOS API shape for reference.
+1. **Design audit log schema** - Define what gets logged: timestamps, operation type, input params, result, before/after state. Decide storage format (JSON lines? SQLite?).
 
-2. **Implement batch create** - Add `create_reminders` tool that accepts an array of reminders grouped by list. Return array of results with IDs.
+2. **Implement operation logging** - Add logging hooks to all write operations in RemindersManager. Capture before/after state for modifications.
 
-3. **Implement batch update/delete/complete** - Add remaining batch operations. Consider transaction semantics (all-or-nothing vs. partial success).
+3. **Add `list_recent_operations` tool** - Let Claude review recent operations. Useful for debugging and building trust.
 
 ---
 
@@ -112,14 +112,21 @@ _(none currently tracked)_
 
 ## Open Questions
 
-1. **Batch operations design** - New tools (`create_reminders`) or modify existing (`create_reminder` accepts array)? Leaning toward new tools for clarity.
-2. **Audit log storage** - JSON file? SQLite? How long to retain?
-3. **Undo granularity** - Undo individual operations or support "undo last N operations"?
-4. **Recurrence complexity** - Start with common cases or implement full RRULE support?
+1. **Audit log storage** - JSON file? SQLite? How long to retain?
+2. **Undo granularity** - Undo individual operations or support "undo last N operations"?
+3. **Recurrence complexity** - Start with common cases or implement full RRULE support?
 
 ---
 
 ## Progress Log
+
+### 2026-01-10
+
+- ✅ Completed M2: Batch Operations
+- Added 4 batch tools: `create_reminders`, `update_reminders`, `delete_reminders`, `complete_reminders`
+- Implemented input validation layer (Codable structs, like Zod pattern)
+- Partial success support with per-item results + summary
+- 24 tests passing (added batch.test.ts)
 
 ### 2025-12-29
 

@@ -169,6 +169,72 @@ struct AnyCodable: Codable {
     }
 }
 
+// MARK: - Batch Operation Input Types
+
+struct CreateReminderItem: Codable {
+    let title: String
+    let list_name: String
+    let notes: String?
+    let due_date: String?
+}
+
+struct CreateRemindersInput: Codable {
+    let reminders: [CreateReminderItem]
+}
+
+struct UpdateReminderItem: Codable {
+    let reminder_id: String
+    let title: String?
+    let notes: String?
+    let due_date: String?
+    let priority: Int?
+}
+
+struct UpdateRemindersInput: Codable {
+    let updates: [UpdateReminderItem]
+}
+
+struct BatchIdsInput: Codable {
+    let reminder_ids: [String]
+}
+
+// MARK: - Input Validation
+
+struct ValidationError: Error, LocalizedError {
+    let message: String
+
+    init(_ message: String) {
+        self.message = message
+    }
+
+    var errorDescription: String? {
+        return message
+    }
+}
+
+func validate<T: Codable>(_ arguments: [String: AnyCodable], as type: T.Type) throws -> T {
+    // Convert AnyCodable dictionary to regular dictionary, then to JSON data
+    let rawDict = arguments.mapValues { $0.value }
+    let data = try JSONSerialization.data(withJSONObject: rawDict)
+
+    let decoder = JSONDecoder()
+    do {
+        return try decoder.decode(T.self, from: data)
+    } catch let DecodingError.keyNotFound(key, context) {
+        let path = context.codingPath.map { $0.stringValue }.joined(separator: ".")
+        let fullPath = path.isEmpty ? key.stringValue : "\(path).\(key.stringValue)"
+        throw ValidationError("Missing required field: '\(fullPath)'")
+    } catch let DecodingError.typeMismatch(expectedType, context) {
+        let field = context.codingPath.last?.stringValue ?? "unknown"
+        throw ValidationError("Invalid type for '\(field)': expected \(expectedType)")
+    } catch let DecodingError.valueNotFound(_, context) {
+        let field = context.codingPath.last?.stringValue ?? "unknown"
+        throw ValidationError("Null value not allowed for '\(field)'")
+    } catch {
+        throw ValidationError("Invalid input: \(error.localizedDescription)")
+    }
+}
+
 // MARK: - Reminders Manager
 
 class RemindersManager {
@@ -548,6 +614,100 @@ class RemindersManager {
 
         try eventStore.save(reminder, commit: true)
     }
+
+    // MARK: - Batch Operations
+
+    func createReminders(items: [CreateReminderItem]) -> [[String: Any]] {
+        var results: [[String: Any]] = []
+
+        for item in items {
+            var result: [String: Any] = ["title": item.title]
+
+            do {
+                let id = try createReminder(
+                    title: item.title,
+                    listName: item.list_name,
+                    notes: item.notes,
+                    dueDate: item.due_date
+                )
+                result["success"] = true
+                result["reminder_id"] = id
+            } catch {
+                result["success"] = false
+                result["error"] = error.localizedDescription
+            }
+
+            results.append(result)
+        }
+
+        return results
+    }
+
+    func updateReminders(updates: [UpdateReminderItem]) -> [[String: Any]] {
+        var results: [[String: Any]] = []
+
+        for update in updates {
+            var result: [String: Any] = ["reminder_id": update.reminder_id]
+
+            do {
+                try updateReminder(
+                    id: update.reminder_id,
+                    title: update.title,
+                    notes: update.notes,
+                    dueDate: update.due_date,
+                    priority: update.priority
+                )
+                result["success"] = true
+            } catch {
+                result["success"] = false
+                result["error"] = error.localizedDescription
+            }
+
+            results.append(result)
+        }
+
+        return results
+    }
+
+    func deleteReminders(ids: [String]) -> [[String: Any]] {
+        var results: [[String: Any]] = []
+
+        for id in ids {
+            var result: [String: Any] = ["reminder_id": id]
+
+            do {
+                try deleteReminder(id: id)
+                result["success"] = true
+            } catch {
+                result["success"] = false
+                result["error"] = error.localizedDescription
+            }
+
+            results.append(result)
+        }
+
+        return results
+    }
+
+    func completeReminders(ids: [String]) -> [[String: Any]] {
+        var results: [[String: Any]] = []
+
+        for id in ids {
+            var result: [String: Any] = ["reminder_id": id]
+
+            do {
+                try completeReminder(id: id)
+                result["success"] = true
+            } catch {
+                result["success"] = false
+                result["error"] = error.localizedDescription
+            }
+
+            results.append(result)
+        }
+
+        return results
+    }
 }
 
 // MARK: - MCP Server
@@ -846,6 +1006,63 @@ class MCPServer {
                     ],
                     required: ["reminder_id"]
                 )
+            ),
+            // Batch operations
+            MCPResponse.Result.Tool(
+                name: "create_reminders",
+                description: "Create multiple reminders in a single call. Each reminder specifies its own list. Returns per-item results with success/failure status.",
+                inputSchema: MCPResponse.Result.Tool.InputSchema(
+                    type: "object",
+                    properties: [
+                        "reminders": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "array",
+                            description: "Array of reminders to create. Each item should have: title (required), list_name (required), notes (optional), due_date (optional)"
+                        )
+                    ],
+                    required: ["reminders"]
+                )
+            ),
+            MCPResponse.Result.Tool(
+                name: "update_reminders",
+                description: "Update multiple reminders in a single call. Returns per-item results with success/failure status.",
+                inputSchema: MCPResponse.Result.Tool.InputSchema(
+                    type: "object",
+                    properties: [
+                        "updates": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "array",
+                            description: "Array of updates. Each item should have: reminder_id (required), and any of: title, notes, due_date, priority"
+                        )
+                    ],
+                    required: ["updates"]
+                )
+            ),
+            MCPResponse.Result.Tool(
+                name: "delete_reminders",
+                description: "Delete multiple reminders in a single call. Returns per-item results with success/failure status.",
+                inputSchema: MCPResponse.Result.Tool.InputSchema(
+                    type: "object",
+                    properties: [
+                        "reminder_ids": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "array",
+                            description: "Array of reminder IDs to delete"
+                        )
+                    ],
+                    required: ["reminder_ids"]
+                )
+            ),
+            MCPResponse.Result.Tool(
+                name: "complete_reminders",
+                description: "Mark multiple reminders as completed in a single call. Returns per-item results with success/failure status.",
+                inputSchema: MCPResponse.Result.Tool.InputSchema(
+                    type: "object",
+                    properties: [
+                        "reminder_ids": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "array",
+                            description: "Array of reminder IDs to mark as completed"
+                        )
+                    ],
+                    required: ["reminder_ids"]
+                )
             )
         ]
     }
@@ -930,6 +1147,67 @@ class MCPServer {
             try remindersManager.updateReminder(id: id, title: title, notes: notes, dueDate: dueDate, priority: priority)
             let result = ["success": true, "reminder_id": id] as [String : Any]
             return try toJSON(result)
+
+        // Batch operations
+        case "create_reminders":
+            let input = try validate(arguments, as: CreateRemindersInput.self)
+            let results = remindersManager.createReminders(items: input.reminders)
+            let succeeded = results.filter { $0["success"] as? Bool == true }.count
+            let failed = results.count - succeeded
+            let response: [String: Any] = [
+                "results": results,
+                "summary": [
+                    "total": results.count,
+                    "succeeded": succeeded,
+                    "failed": failed
+                ]
+            ]
+            return try toJSON(response)
+
+        case "update_reminders":
+            let input = try validate(arguments, as: UpdateRemindersInput.self)
+            let results = remindersManager.updateReminders(updates: input.updates)
+            let succeeded = results.filter { $0["success"] as? Bool == true }.count
+            let failed = results.count - succeeded
+            let response: [String: Any] = [
+                "results": results,
+                "summary": [
+                    "total": results.count,
+                    "succeeded": succeeded,
+                    "failed": failed
+                ]
+            ]
+            return try toJSON(response)
+
+        case "delete_reminders":
+            let input = try validate(arguments, as: BatchIdsInput.self)
+            let results = remindersManager.deleteReminders(ids: input.reminder_ids)
+            let succeeded = results.filter { $0["success"] as? Bool == true }.count
+            let failed = results.count - succeeded
+            let response: [String: Any] = [
+                "results": results,
+                "summary": [
+                    "total": results.count,
+                    "succeeded": succeeded,
+                    "failed": failed
+                ]
+            ]
+            return try toJSON(response)
+
+        case "complete_reminders":
+            let input = try validate(arguments, as: BatchIdsInput.self)
+            let results = remindersManager.completeReminders(ids: input.reminder_ids)
+            let succeeded = results.filter { $0["success"] as? Bool == true }.count
+            let failed = results.count - succeeded
+            let response: [String: Any] = [
+                "results": results,
+                "summary": [
+                    "total": results.count,
+                    "succeeded": succeeded,
+                    "failed": failed
+                ]
+            ]
+            return try toJSON(response)
 
         default:
             throw NSError(domain: "MCPServer", code: 404, userInfo: [NSLocalizedDescriptionKey: "Unknown tool: \(name)"])
