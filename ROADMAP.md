@@ -36,13 +36,13 @@ Paranoid-level logging and data protection. Never lose data, always know what ha
 - [ ] Add `undo_operation` tool - revert a specific change
 - [ ] Consider: snapshot/backup before destructive operations
 
-### M4: Enhanced Search
+### M4: Enhanced Search ✅
 
 Improve reminder discovery.
 
-- [ ] Text search in titles/notes (`query` parameter)
-- [ ] Date range filtering (dateFrom/dateTo)
-- [ ] Result limiting (`limit` parameter)
+- [x] `search_reminders` tool with text search, date range, status, limit
+- [x] `search_reminder_lists` tool with text search
+- [x] Modeled after Claude iOS `reminder_search_v0` API
 
 ### M5: Recurrence Support
 
@@ -80,11 +80,11 @@ Complete feature parity with Claude iOS.
 
 ## Next Actions
 
-1. **Design audit log schema** - Define what gets logged: timestamps, operation type, input params, result, before/after state. Decide storage format (JSON lines? SQLite?).
+1. **Implement recurrence support (M5)** - Add `recurrence` parameter to create/update. Start with common patterns: daily, weekly, monthly.
 
-2. **Implement operation logging** - Add logging hooks to all write operations in RemindersManager. Capture before/after state for modifications.
+2. **Implement alarm support (M6)** - Add `alarms` parameter for notifications. Support absolute and relative alarms.
 
-3. **Add `list_recent_operations` tool** - Let Claude review recent operations. Useful for debugging and building trust.
+3. **Design audit log schema (M3)** - Define what gets logged: timestamps, operation type, input params, result, before/after state.
 
 ---
 
@@ -119,6 +119,15 @@ _(none currently tracked)_
 ---
 
 ## Progress Log
+
+### 2026-01-18
+
+- ✅ Completed M4: Enhanced Search
+- Added `search_reminders` tool (text search, date range, status filter, limit)
+- Added `search_reminder_lists` tool (text search)
+- Modeled after Claude iOS `reminder_search_v0` API
+- 38 tests passing
+- Pushed to GitHub: https://github.com/justinhaaheim/apple-reminders-mcp
 
 ### 2026-01-10
 

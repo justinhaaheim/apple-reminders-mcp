@@ -350,6 +350,16 @@ extension EKReminderPriority {
 
 ## Progress Log
 
+### 2026-01-18
+
+- Implemented enhanced search (M4):
+  - Added `search_reminders` tool with: text search, list filter, status filter, date range, limit
+  - Added `search_reminder_lists` tool with text search
+  - Modeled after Claude iOS `reminder_search_v0` API
+  - Added `test/search.test.ts` with 14 new tests
+- All 38 tests passing
+- Created GitHub repo: https://github.com/justinhaaheim/apple-reminders-mcp
+
 ### 2026-01-10
 
 - Implemented batch operations (M2):

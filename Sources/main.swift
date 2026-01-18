@@ -708,6 +708,193 @@ class RemindersManager {
 
         return results
     }
+
+    // MARK: - Search Operations
+
+    func searchReminders(
+        searchText: String?,
+        listId: String?,
+        listName: String?,
+        status: String?,
+        dateFrom: String?,
+        dateTo: String?,
+        limit: Int?
+    ) -> [[String: Any]] {
+        let startTime = Date()
+        log("Starting searchReminders")
+
+        // Determine which calendars to search
+        let calendars: [EKCalendar]
+        if let listId = listId {
+            // Filter by list ID
+            calendars = eventStore.calendars(for: .reminder).filter { $0.calendarIdentifier == listId }
+            if calendars.isEmpty {
+                log("List with ID '\(listId)' not found")
+                return []
+            }
+        } else if let listName = listName {
+            // Filter by list name
+            calendars = eventStore.calendars(for: .reminder).filter { $0.title == listName }
+            if calendars.isEmpty {
+                log("List '\(listName)' not found")
+                return []
+            }
+        } else {
+            calendars = eventStore.calendars(for: .reminder)
+        }
+
+        // Fetch all reminders from selected calendars
+        let predicate = eventStore.predicateForReminders(in: calendars)
+        var allReminders: [EKReminder] = []
+        let semaphore = DispatchSemaphore(value: 0)
+
+        eventStore.fetchReminders(matching: predicate) { reminders in
+            if let reminders = reminders {
+                allReminders = reminders
+            }
+            semaphore.signal()
+        }
+
+        semaphore.wait()
+
+        let fetchTime = Date().timeIntervalSince(startTime)
+        log("Fetched \(allReminders.count) reminders in \(Int(fetchTime * 1000))ms")
+
+        // Parse date filters
+        let fromDate = parseDate(dateFrom)
+        let toDate = parseDate(dateTo)
+
+        // Determine if we're filtering completed or incomplete
+        let showCompleted = status?.lowercased() == "completed"
+
+        // Apply filters
+        var filtered = allReminders.filter { reminder in
+            // Status filter
+            if reminder.isCompleted != showCompleted {
+                return false
+            }
+
+            // Text search filter
+            if let searchText = searchText, !searchText.isEmpty {
+                let searchLower = searchText.lowercased()
+                let titleMatch = reminder.title?.lowercased().contains(searchLower) ?? false
+                let notesMatch = reminder.notes?.lowercased().contains(searchLower) ?? false
+                if !titleMatch && !notesMatch {
+                    return false
+                }
+            }
+
+            // Date range filter
+            if showCompleted {
+                // For completed reminders, filter by completion date
+                guard let completionDate = reminder.completionDate else {
+                    return false
+                }
+                if let fromDate = fromDate, completionDate < fromDate {
+                    return false
+                }
+                if let toDate = toDate, completionDate > toDate {
+                    return false
+                }
+            } else {
+                // For incomplete reminders, filter by due date
+                if fromDate != nil || toDate != nil {
+                    guard let dueDate = reminder.dueDateComponents?.date else {
+                        return false // No due date, exclude when date filter is active
+                    }
+                    if let fromDate = fromDate, dueDate < fromDate {
+                        return false
+                    }
+                    if let toDate = toDate, dueDate > toDate {
+                        return false
+                    }
+                }
+            }
+
+            return true
+        }
+
+        log("After filtering: \(filtered.count) reminders")
+
+        // Apply limit
+        let maxResults = limit ?? 100
+        if filtered.count > maxResults {
+            filtered = Array(filtered.prefix(maxResults))
+            log("Limited to \(maxResults) results")
+        }
+
+        // Convert to response format
+        let result = filtered.map { reminder -> [String: Any] in
+            var dict: [String: Any] = [
+                "id": reminder.calendarItemIdentifier,
+                "name": reminder.title ?? "",
+                "completed": reminder.isCompleted
+            ]
+
+            if let notes = reminder.notes, !notes.isEmpty {
+                dict["body"] = notes
+            }
+
+            if let dueDate = reminder.dueDateComponents?.date {
+                let formatter = ISO8601DateFormatter()
+                dict["dueDate"] = formatter.string(from: dueDate)
+            }
+
+            if let completionDate = reminder.completionDate {
+                let formatter = ISO8601DateFormatter()
+                dict["completionDate"] = formatter.string(from: completionDate)
+            }
+
+            if let calendar = reminder.calendar {
+                dict["listId"] = calendar.calendarIdentifier
+                dict["listName"] = calendar.title
+            }
+
+            dict["priority"] = reminder.priority
+
+            return dict
+        }
+
+        let totalTime = Date().timeIntervalSince(startTime)
+        log("Total search took \(Int(totalTime * 1000))ms")
+
+        return result
+    }
+
+    func searchReminderLists(searchText: String?) -> [[String: Any]] {
+        var calendars = eventStore.calendars(for: .reminder)
+
+        // Apply text filter if provided
+        if let searchText = searchText, !searchText.isEmpty {
+            let searchLower = searchText.lowercased()
+            calendars = calendars.filter { $0.title.lowercased().contains(searchLower) }
+        }
+
+        return calendars.map { calendar in
+            [
+                "id": calendar.calendarIdentifier,
+                "name": calendar.title
+            ]
+        }
+    }
+
+    private func parseDate(_ dateString: String?) -> Date? {
+        guard let dateString = dateString, !dateString.isEmpty else {
+            return nil
+        }
+
+        // Try ISO8601 first
+        let iso8601Formatter = ISO8601DateFormatter()
+        if let date = iso8601Formatter.date(from: dateString) {
+            return date
+        }
+
+        // Try date-only format
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyy-MM-dd"
+        dateFormatter.timeZone = TimeZone.current
+        return dateFormatter.date(from: dateString)
+    }
 }
 
 // MARK: - MCP Server
@@ -1063,6 +1250,59 @@ class MCPServer {
                     ],
                     required: ["reminder_ids"]
                 )
+            ),
+            // Search operations
+            MCPResponse.Result.Tool(
+                name: "search_reminders",
+                description: "Search and filter reminders with flexible criteria. Supports text search, date ranges, and status filtering.",
+                inputSchema: MCPResponse.Result.Tool.InputSchema(
+                    type: "object",
+                    properties: [
+                        "search_text": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "string",
+                            description: "Text to search for in reminder titles and notes (case-insensitive)"
+                        ),
+                        "list_id": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "string",
+                            description: "Filter by specific list ID"
+                        ),
+                        "list_name": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "string",
+                            description: "Filter by list name (used if list_id not provided)"
+                        ),
+                        "status": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "string",
+                            description: "Filter by status: 'incomplete' or 'completed' (default: 'incomplete')"
+                        ),
+                        "date_from": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "string",
+                            description: "For incomplete: due after this date. For completed: completed after this date. ISO 8601 or YYYY-MM-DD format."
+                        ),
+                        "date_to": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "string",
+                            description: "For incomplete: due before this date. For completed: completed before this date. ISO 8601 or YYYY-MM-DD format."
+                        ),
+                        "limit": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "integer",
+                            description: "Maximum number of reminders to return (default: 100)"
+                        )
+                    ],
+                    required: nil
+                )
+            ),
+            MCPResponse.Result.Tool(
+                name: "search_reminder_lists",
+                description: "Search for reminder lists by name.",
+                inputSchema: MCPResponse.Result.Tool.InputSchema(
+                    type: "object",
+                    properties: [
+                        "search_text": MCPResponse.Result.Tool.InputSchema.Property(
+                            type: "string",
+                            description: "Text to search for in list names (case-insensitive)"
+                        )
+                    ],
+                    required: nil
+                )
             )
         ]
     }
@@ -1208,6 +1448,34 @@ class MCPServer {
                 ]
             ]
             return try toJSON(response)
+
+        // Search operations
+        case "search_reminders":
+            let searchText = arguments["search_text"]?.value as? String
+            let listId = arguments["list_id"]?.value as? String
+            let listName = arguments["list_name"]?.value as? String
+            let status = arguments["status"]?.value as? String
+            let dateFrom = arguments["date_from"]?.value as? String
+            let dateTo = arguments["date_to"]?.value as? String
+            let limit = arguments["limit"]?.value as? Int
+
+            let reminders = remindersManager.searchReminders(
+                searchText: searchText,
+                listId: listId,
+                listName: listName,
+                status: status,
+                dateFrom: dateFrom,
+                dateTo: dateTo,
+                limit: limit
+            )
+            let result = ["reminders": reminders, "count": reminders.count] as [String : Any]
+            return try toJSON(result)
+
+        case "search_reminder_lists":
+            let searchText = arguments["search_text"]?.value as? String
+            let lists = remindersManager.searchReminderLists(searchText: searchText)
+            let result = ["lists": lists, "count": lists.count] as [String : Any]
+            return try toJSON(result)
 
         default:
             throw NSError(domain: "MCPServer", code: 404, userInfo: [NSLocalizedDescriptionKey: "Unknown tool: \(name)"])
