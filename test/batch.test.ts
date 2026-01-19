@@ -1,6 +1,8 @@
 /**
  * Batch operation tests for the Apple Reminders MCP server.
- * Tests create_reminders, update_reminders, delete_reminders, complete_reminders.
+ * Tests create_reminders, update_reminders, delete_reminders.
+ *
+ * Updated for the new 6-tool API.
  */
 
 import {describe, test, expect, beforeAll, afterAll} from 'bun:test';
@@ -23,59 +25,57 @@ describe('Batch operations', () => {
     test('creates multiple reminders at once', async () => {
       const result = await client.callTool('create_reminders', {
         reminders: [
-          {title: 'Batch Reminder 1', list_name: testListName},
-          {title: 'Batch Reminder 2', list_name: testListName},
+          {title: 'Batch Reminder 1', list: {name: testListName}},
+          {title: 'Batch Reminder 2', list: {name: testListName}},
           {
             title: 'Batch Reminder 3',
-            list_name: testListName,
+            list: {name: testListName},
             notes: 'With notes',
           },
         ],
       });
 
-      expect(result.results).toBeDefined();
-      expect(result.results.length).toBe(3);
-      expect(result.summary.total).toBe(3);
-      expect(result.summary.succeeded).toBe(3);
-      expect(result.summary.failed).toBe(0);
+      // Success returns array of reminders
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{id: string; title: string}>;
+      expect(reminders.length).toBe(3);
 
-      // All should succeed
-      for (const item of result.results) {
-        expect(item.success).toBe(true);
-        expect(item.reminder_id).toBeDefined();
+      for (const reminder of reminders) {
+        expect(reminder.id).toBeDefined();
+        expect(reminder.title).toBeDefined();
       }
     });
 
     test('handles partial failure (bad list name)', async () => {
       const result = await client.callTool('create_reminders', {
         reminders: [
-          {title: 'Good Reminder', list_name: testListName},
-          {title: 'Bad Reminder', list_name: 'NonexistentList12345'},
+          {title: 'Good Reminder', list: {name: testListName}},
+          {title: 'Bad Reminder', list: {name: 'NonexistentList12345'}},
         ],
       });
 
-      expect(result.results.length).toBe(2);
-      expect(result.summary.succeeded).toBe(1);
-      expect(result.summary.failed).toBe(1);
+      // Partial failure returns {created, failed}
+      expect(result.created).toBeDefined();
+      expect(result.failed).toBeDefined();
+      expect(Array.isArray(result.created)).toBe(true);
+      expect(Array.isArray(result.failed)).toBe(true);
+      expect(result.created.length).toBe(1);
+      expect(result.failed.length).toBe(1);
 
-      // First should succeed
-      expect(result.results[0].success).toBe(true);
-
-      // Second should fail (list not found OR test mode violation)
-      expect(result.results[1].success).toBe(false);
-      expect(result.results[1].error).toBeDefined();
+      // Check the failure details
+      const failure = result.failed[0] as {index: number; error: string};
+      expect(failure.index).toBe(1);
+      expect(failure.error).toBeDefined();
     });
 
     test('validates required fields', async () => {
-      // Missing list_name should cause validation error
-      try {
-        await client.callTool('create_reminders', {
-          reminders: [{title: 'Missing List'}],
-        });
-        // If we get here, check for per-item error
-      } catch {
-        // Expected - validation error
-      }
+      // Missing title should cause error
+      const result = await client.callTool('create_reminders', {
+        reminders: [{list: {name: testListName}}],
+      });
+
+      expect(result._isError).toBe(true);
+      expect(result.error).toContain('title');
     });
   });
 
@@ -84,36 +84,42 @@ describe('Batch operations', () => {
       // Create reminders first
       const createResult = await client.callTool('create_reminders', {
         reminders: [
-          {title: 'Update Target 1', list_name: testListName},
-          {title: 'Update Target 2', list_name: testListName},
+          {title: 'Update Target 1', list: {name: testListName}},
+          {title: 'Update Target 2', list: {name: testListName}},
         ],
       });
 
-      const ids = createResult.results.map(
-        (r: {reminder_id: string}) => r.reminder_id,
-      );
+      expect(Array.isArray(createResult)).toBe(true);
+      const created = createResult as Array<{id: string}>;
+      const ids = created.map((r) => r.id);
 
       // Update them
       const updateResult = await client.callTool('update_reminders', {
-        updates: [
-          {reminder_id: ids[0], title: 'Updated Title 1'},
-          {reminder_id: ids[1], notes: 'Added notes'},
+        reminders: [
+          {id: ids[0], title: 'Updated Title 1'},
+          {id: ids[1], notes: 'Added notes'},
         ],
       });
 
-      expect(updateResult.results.length).toBe(2);
-      expect(updateResult.summary.succeeded).toBe(2);
-      expect(updateResult.summary.failed).toBe(0);
+      expect(Array.isArray(updateResult)).toBe(true);
+      const updated = updateResult as Array<{id: string}>;
+      expect(updated.length).toBe(2);
     });
 
     test('handles non-existent reminder ID', async () => {
       const result = await client.callTool('update_reminders', {
-        updates: [{reminder_id: 'fake-id-12345', title: 'Will Fail'}],
+        reminders: [{id: 'fake-id-12345', title: 'Will Fail'}],
       });
 
-      expect(result.results.length).toBe(1);
-      expect(result.results[0].success).toBe(false);
-      expect(result.results[0].error).toBeDefined();
+      // Partial failure returns {updated, failed}
+      expect(result.updated).toBeDefined();
+      expect(result.failed).toBeDefined();
+      expect(result.updated.length).toBe(0);
+      expect(result.failed.length).toBe(1);
+
+      const failure = result.failed[0] as {id: string; error: string};
+      expect(failure.id).toBe('fake-id-12345');
+      expect(failure.error).toContain('not found');
     });
   });
 
@@ -122,68 +128,81 @@ describe('Batch operations', () => {
       // Create reminders first
       const createResult = await client.callTool('create_reminders', {
         reminders: [
-          {title: 'Delete Target 1', list_name: testListName},
-          {title: 'Delete Target 2', list_name: testListName},
+          {title: 'Delete Target 1', list: {name: testListName}},
+          {title: 'Delete Target 2', list: {name: testListName}},
         ],
       });
 
-      const ids = createResult.results.map(
-        (r: {reminder_id: string}) => r.reminder_id,
-      );
+      expect(Array.isArray(createResult)).toBe(true);
+      const created = createResult as Array<{id: string}>;
+      const ids = created.map((r) => r.id);
 
       // Delete them
       const deleteResult = await client.callTool('delete_reminders', {
-        reminder_ids: ids,
+        ids,
       });
 
-      expect(deleteResult.results.length).toBe(2);
-      expect(deleteResult.summary.succeeded).toBe(2);
-      expect(deleteResult.summary.failed).toBe(0);
+      expect(deleteResult.deleted).toBeDefined();
+      expect(deleteResult.failed).toBeDefined();
+      expect(deleteResult.deleted.length).toBe(2);
+      expect(deleteResult.failed.length).toBe(0);
     });
 
     test('handles non-existent reminder ID', async () => {
       const result = await client.callTool('delete_reminders', {
-        reminder_ids: ['fake-id-99999'],
+        ids: ['fake-id-99999'],
       });
 
-      expect(result.results.length).toBe(1);
-      expect(result.results[0].success).toBe(false);
-      expect(result.results[0].error).toBeDefined();
+      expect(result.deleted.length).toBe(0);
+      expect(result.failed.length).toBe(1);
+
+      const failure = result.failed[0] as {id: string; error: string};
+      expect(failure.id).toBe('fake-id-99999');
+      expect(failure.error).toContain('not found');
     });
   });
 
-  describe('complete_reminders', () => {
+  describe('complete via update_reminders', () => {
     test('completes multiple reminders at once', async () => {
       // Create reminders first
       const createResult = await client.callTool('create_reminders', {
         reminders: [
-          {title: 'Complete Target 1', list_name: testListName},
-          {title: 'Complete Target 2', list_name: testListName},
+          {title: 'Complete Target 1', list: {name: testListName}},
+          {title: 'Complete Target 2', list: {name: testListName}},
         ],
       });
 
-      const ids = createResult.results.map(
-        (r: {reminder_id: string}) => r.reminder_id,
-      );
+      expect(Array.isArray(createResult)).toBe(true);
+      const created = createResult as Array<{id: string}>;
+      const ids = created.map((r) => r.id);
 
-      // Complete them
-      const completeResult = await client.callTool('complete_reminders', {
-        reminder_ids: ids,
+      // Complete them using update_reminders
+      const completeResult = await client.callTool('update_reminders', {
+        reminders: ids.map((id) => ({id, completed: true})),
       });
 
-      expect(completeResult.results.length).toBe(2);
-      expect(completeResult.summary.succeeded).toBe(2);
-      expect(completeResult.summary.failed).toBe(0);
+      expect(Array.isArray(completeResult)).toBe(true);
+      const completed = completeResult as Array<{
+        id: string;
+        isCompleted: boolean;
+      }>;
+      expect(completed.length).toBe(2);
+
+      for (const reminder of completed) {
+        expect(reminder.isCompleted).toBe(true);
+      }
     });
 
-    test('handles non-existent reminder ID', async () => {
-      const result = await client.callTool('complete_reminders', {
-        reminder_ids: ['fake-id-88888'],
+    test('handles non-existent reminder ID for completion', async () => {
+      const result = await client.callTool('update_reminders', {
+        reminders: [{id: 'fake-id-88888', completed: true}],
       });
 
-      expect(result.results.length).toBe(1);
-      expect(result.results[0].success).toBe(false);
-      expect(result.results[0].error).toBeDefined();
+      expect(result.updated.length).toBe(0);
+      expect(result.failed.length).toBe(1);
+
+      const failure = result.failed[0] as {id: string; error: string};
+      expect(failure.error).toContain('not found');
     });
   });
 });

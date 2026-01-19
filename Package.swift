@@ -12,9 +12,15 @@ let package = Package(
             targets: ["AppleRemindersMCP"]
         )
     ],
+    dependencies: [
+        .package(url: "https://github.com/adam-fowler/jmespath.swift", from: "1.0.0")
+    ],
     targets: [
         .executableTarget(
             name: "AppleRemindersMCP",
+            dependencies: [
+                .product(name: "JMESPath", package: "jmespath.swift")
+            ],
             path: "Sources"
         )
     ]
