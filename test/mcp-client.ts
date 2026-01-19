@@ -1,6 +1,8 @@
 /**
  * MCP Client utility for testing the Apple Reminders MCP server.
  * Spawns the server process and communicates via JSON-RPC over stdin/stdout.
+ *
+ * Updated for the new 6-tool API.
  */
 
 import {spawn, type Subprocess} from 'bun';
@@ -23,6 +25,7 @@ interface MCPResponse {
     content?: Array<{type: string; text: string}>;
     tools?: Array<{name: string; description: string}>;
     protocolVersion?: string;
+    isError?: boolean;
   };
   error?: {
     code: number;
@@ -31,8 +34,6 @@ interface MCPResponse {
 }
 
 interface ToolResult {
-  success?: boolean;
-  error?: string;
   [key: string]: unknown;
 }
 
@@ -156,6 +157,7 @@ export class MCPClient {
 
   /**
    * Call an MCP tool and return the parsed result.
+   * The new API returns tool errors with isError: true rather than success: false.
    */
   async callTool(
     toolName: string,
@@ -167,18 +169,24 @@ export class MCPClient {
     });
 
     if (response.error) {
-      return {success: false, error: response.error.message};
+      return {_isError: true, error: response.error.message};
     }
 
     const content = response.result?.content?.[0];
     if (!content || content.type !== 'text') {
-      return {success: false, error: 'No content in response'};
+      return {_isError: true, error: 'No content in response'};
+    }
+
+    // Check if this is an error response (plain text error message with isError: true)
+    if (response.result?.isError) {
+      return {_isError: true, error: content.text};
     }
 
     try {
       return JSON.parse(content.text) as ToolResult;
     } catch {
-      return {success: false, error: `Failed to parse: ${content.text}`};
+      // If parsing fails, it might be a plain text error
+      return {_isError: true, error: content.text};
     }
   }
 
@@ -197,11 +205,11 @@ export class MCPClient {
     const uuid = randomUUID().split('-')[0];
     this.testListName = `${TEST_LIST_PREFIX} - TMP (${uuid})`;
 
-    const result = await this.callTool('create_reminder_list', {
+    const result = await this.callTool('create_list', {
       name: this.testListName,
     });
 
-    if (!result.success) {
+    if (result._isError) {
       throw new Error(`Failed to create test list: ${result.error}`);
     }
 
@@ -220,26 +228,46 @@ export class MCPClient {
 
   /**
    * Create a reminder in the test list and track it for cleanup.
+   * Uses the new create_reminders batch API.
    */
   async createTestReminder(
     title: string,
-    options: {notes?: string; due_date?: string} = {},
+    options: {notes?: string; dueDate?: string; priority?: string} = {},
   ): Promise<string> {
     if (!this.testListName) {
       throw new Error('Test list not created yet');
     }
 
-    const result = await this.callTool('create_reminder', {
-      title,
-      list_name: this.testListName,
-      ...options,
+    const result = await this.callTool('create_reminders', {
+      reminders: [
+        {
+          title,
+          list: {name: this.testListName},
+          ...options,
+        },
+      ],
     });
 
-    if (!result.success || !result.reminder_id) {
-      throw new Error(`Failed to create reminder: ${result.error}`);
+    // New API returns array of created reminders or {created, failed}
+    let reminderId: string | undefined;
+
+    if (Array.isArray(result)) {
+      // Success - array of created reminders
+      reminderId = (result[0] as {id: string})?.id;
+    } else if (result.created && Array.isArray(result.created)) {
+      // Partial success - some created, some failed
+      reminderId = (result.created[0] as {id: string})?.id;
     }
 
-    const reminderId = result.reminder_id as string;
+    if (!reminderId) {
+      const error = result._isError
+        ? result.error
+        : result.failed
+          ? JSON.stringify(result.failed)
+          : 'Unknown error';
+      throw new Error(`Failed to create reminder: ${error}`);
+    }
+
     this.createdReminderIds.push(reminderId);
     return reminderId;
   }
@@ -248,10 +276,10 @@ export class MCPClient {
    * Clean up all test reminders and close the server.
    */
   async cleanup(): Promise<void> {
-    // Delete all created reminders
-    for (const id of this.createdReminderIds) {
+    // Delete all created reminders using batch delete
+    if (this.createdReminderIds.length > 0) {
       try {
-        await this.callTool('delete_reminder', {reminder_id: id});
+        await this.callTool('delete_reminders', {ids: this.createdReminderIds});
       } catch {
         // Ignore errors during cleanup
       }

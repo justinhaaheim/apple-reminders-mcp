@@ -1,12 +1,14 @@
 /**
- * Search operation tests for the Apple Reminders MCP server.
- * Tests search_reminders and search_reminder_lists tools.
+ * Query operation tests for the Apple Reminders MCP server.
+ * Tests query_reminders with various filters and JMESPath expressions.
+ *
+ * Updated for the new 6-tool API.
  */
 
 import {describe, test, expect, beforeAll, afterAll} from 'bun:test';
 import {MCPClient} from './mcp-client';
 
-describe('Search operations', () => {
+describe('Query operations', () => {
   let client: MCPClient;
   let testListName: string;
 
@@ -19,23 +21,25 @@ describe('Search operations', () => {
       reminders: [
         {
           title: 'Buy groceries',
-          list_name: testListName,
+          list: {name: testListName},
           notes: 'Milk, eggs, bread',
         },
         {
           title: 'Call dentist',
-          list_name: testListName,
-          due_date: '2026-01-20',
+          list: {name: testListName},
+          dueDate: '2026-01-20T10:00:00-05:00',
         },
         {
           title: 'Finish report',
-          list_name: testListName,
+          list: {name: testListName},
           notes: 'Q4 quarterly report',
-          due_date: '2026-01-25',
+          dueDate: '2026-01-25T10:00:00-05:00',
+          priority: 'high',
         },
         {
           title: 'Buy birthday gift',
-          list_name: testListName,
+          list: {name: testListName},
+          priority: 'medium',
         },
       ],
     });
@@ -45,167 +49,223 @@ describe('Search operations', () => {
     await client.cleanup();
   });
 
-  describe('search_reminders', () => {
-    test('searches by text in title', async () => {
-      const result = await client.callTool('search_reminders', {
-        search_text: 'buy',
-        list_name: testListName,
+  describe('query_reminders', () => {
+    test('searches by text in title using JMESPath', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        query: "[?contains(title, 'Buy')]",
       });
 
-      expect(result.reminders).toBeDefined();
-      expect(result.count).toBe(2); // "Buy groceries" and "Buy birthday gift"
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{title: string}>;
+      expect(reminders.length).toBe(2); // "Buy groceries" and "Buy birthday gift"
 
-      const titles = result.reminders.map((r: {name: string}) => r.name);
+      const titles = reminders.map((r) => r.title);
       expect(titles).toContain('Buy groceries');
       expect(titles).toContain('Buy birthday gift');
     });
 
-    test('searches by text in notes', async () => {
-      const result = await client.callTool('search_reminders', {
-        search_text: 'quarterly',
-        list_name: testListName,
+    test('searches by text in notes using JMESPath', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        query: "[?contains(notes || '', 'quarterly')]",
       });
 
-      expect(result.count).toBe(1);
-      expect(result.reminders[0].name).toBe('Finish report');
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{title: string}>;
+      expect(reminders.length).toBe(1);
+      expect(reminders[0].title).toBe('Finish report');
     });
 
-    test('search is case-insensitive', async () => {
-      const result = await client.callTool('search_reminders', {
-        search_text: 'GROCERIES',
-        list_name: testListName,
+    test('filters by list name', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
       });
 
-      expect(result.count).toBe(1);
-      expect(result.reminders[0].name).toBe('Buy groceries');
-    });
-
-    test('filters by list_name', async () => {
-      const result = await client.callTool('search_reminders', {
-        list_name: testListName,
-      });
-
-      expect(result.count).toBeGreaterThanOrEqual(4);
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{listName: string}>;
+      expect(reminders.length).toBeGreaterThanOrEqual(4);
 
       // All results should be from our test list
-      for (const reminder of result.reminders) {
+      for (const reminder of reminders) {
         expect(reminder.listName).toBe(testListName);
       }
     });
 
-    test('filters by date range', async () => {
-      const result = await client.callTool('search_reminders', {
-        list_name: testListName,
-        date_from: '2026-01-19',
-        date_to: '2026-01-21',
+    test('filters by priority using JMESPath', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        query: "[?priority == 'high']",
       });
 
-      // Should only get "Call dentist" (due 2026-01-20)
-      expect(result.count).toBe(1);
-      expect(result.reminders[0].name).toBe('Call dentist');
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{title: string; priority: string}>;
+      expect(reminders.length).toBe(1);
+      expect(reminders[0].title).toBe('Finish report');
+      expect(reminders[0].priority).toBe('high');
+    });
+
+    test('filters reminders with any priority set', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        query: "[?priority != 'none']",
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{priority: string}>;
+      // Should have "Finish report" (high) and "Buy birthday gift" (medium)
+      expect(reminders.length).toBe(2);
+
+      for (const reminder of reminders) {
+        expect(reminder.priority).not.toBe('none');
+      }
     });
 
     test('respects limit parameter', async () => {
-      const result = await client.callTool('search_reminders', {
-        list_name: testListName,
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
         limit: 2,
       });
 
-      expect(result.count).toBe(2);
+      expect(Array.isArray(result)).toBe(true);
+      expect((result as Array<unknown>).length).toBe(2);
     });
 
     test('filters completed reminders', async () => {
       // First, complete one reminder
-      const searchResult = await client.callTool('search_reminders', {
-        search_text: 'dentist',
-        list_name: testListName,
+      const queryResult = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        query: "[?contains(title, 'dentist')]",
       });
-      const reminderId = searchResult.reminders[0].id;
 
-      await client.callTool('complete_reminder', {
-        reminder_id: reminderId,
+      expect(Array.isArray(queryResult)).toBe(true);
+      const found = queryResult as Array<{id: string}>;
+      const reminderId = found[0].id;
+
+      // Complete it
+      await client.callTool('update_reminders', {
+        reminders: [{id: reminderId, completed: true}],
       });
 
       // Search for completed reminders
-      const completedResult = await client.callTool('search_reminders', {
-        list_name: testListName,
+      const completedResult = await client.callTool('query_reminders', {
+        list: {name: testListName},
         status: 'completed',
       });
 
-      expect(completedResult.count).toBeGreaterThanOrEqual(1);
+      expect(Array.isArray(completedResult)).toBe(true);
+      const completed = completedResult as Array<{title: string}>;
+      expect(completed.length).toBeGreaterThanOrEqual(1);
 
-      const completedTitles = completedResult.reminders.map(
-        (r: {name: string}) => r.name,
-      );
+      const completedTitles = completed.map((r) => r.title);
       expect(completedTitles).toContain('Call dentist');
     });
 
     test('returns empty array for no matches', async () => {
-      const result = await client.callTool('search_reminders', {
-        search_text: 'xyznonexistent123',
-        list_name: testListName,
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        query: "[?contains(title, 'xyznonexistent123')]",
       });
 
-      expect(result.count).toBe(0);
-      expect(result.reminders).toEqual([]);
+      expect(Array.isArray(result)).toBe(true);
+      expect((result as Array<unknown>).length).toBe(0);
     });
 
     test('includes listId and listName in results', async () => {
-      const result = await client.callTool('search_reminders', {
-        list_name: testListName,
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
         limit: 1,
       });
 
-      expect(result.reminders[0].listId).toBeDefined();
-      expect(result.reminders[0].listName).toBe(testListName);
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{listId: string; listName: string}>;
+      expect(reminders[0].listId).toBeDefined();
+      expect(reminders[0].listName).toBe(testListName);
+    });
+
+    test('sorts by priority', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        sortBy: 'priority',
+        status: 'incomplete',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{priority: string}>;
+
+      // High priority should come first
+      if (reminders.length > 0 && reminders[0].priority !== 'none') {
+        // First non-none priority should be high
+        const priorities = reminders.map((r) => r.priority);
+        const highIndex = priorities.indexOf('high');
+        const mediumIndex = priorities.indexOf('medium');
+        const lowIndex = priorities.indexOf('low');
+
+        if (highIndex !== -1 && mediumIndex !== -1) {
+          expect(highIndex).toBeLessThan(mediumIndex);
+        }
+        if (mediumIndex !== -1 && lowIndex !== -1) {
+          expect(mediumIndex).toBeLessThan(lowIndex);
+        }
+      }
+    });
+
+    test('projects fields using JMESPath', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        query: '[*].{name: title, due: dueDate}',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const projected = result as Array<{name: string; due: string | null}>;
+      expect(projected.length).toBeGreaterThan(0);
+
+      // Should only have name and due fields
+      for (const item of projected) {
+        expect(item.name).toBeDefined();
+        // due may be null for reminders without due date
+        expect('due' in item).toBe(true);
+      }
     });
   });
 
-  describe('search_reminder_lists', () => {
-    test('returns all lists when no search text', async () => {
-      const result = await client.callTool('search_reminder_lists', {});
+  describe('get_lists', () => {
+    test('returns all lists', async () => {
+      const result = await client.callTool('get_lists', {});
 
-      expect(result.lists).toBeDefined();
-      expect(result.count).toBeGreaterThan(0);
+      expect(Array.isArray(result)).toBe(true);
+      const lists = result as Array<{
+        id: string;
+        name: string;
+        isDefault: boolean;
+      }>;
+      expect(lists.length).toBeGreaterThan(0);
     });
 
-    test('filters lists by search text', async () => {
-      const result = await client.callTool('search_reminder_lists', {
-        search_text: 'AR-MCP TEST',
-      });
+    test('includes id, name, and isDefault for each list', async () => {
+      const result = await client.callTool('get_lists', {});
 
-      expect(result.count).toBeGreaterThanOrEqual(1);
+      expect(Array.isArray(result)).toBe(true);
+      const lists = result as Array<{
+        id: string;
+        name: string;
+        isDefault: boolean;
+      }>;
 
-      // All results should contain the search text
-      for (const list of result.lists) {
-        expect(list.name.toUpperCase()).toContain('AR-MCP TEST');
-      }
-    });
-
-    test('search is case-insensitive', async () => {
-      const result = await client.callTool('search_reminder_lists', {
-        search_text: 'ar-mcp test',
-      });
-
-      expect(result.count).toBeGreaterThanOrEqual(1);
-    });
-
-    test('returns empty array for no matches', async () => {
-      const result = await client.callTool('search_reminder_lists', {
-        search_text: 'xyznonexistentlist999',
-      });
-
-      expect(result.count).toBe(0);
-      expect(result.lists).toEqual([]);
-    });
-
-    test('includes id and name for each list', async () => {
-      const result = await client.callTool('search_reminder_lists', {});
-
-      for (const list of result.lists) {
+      for (const list of lists) {
         expect(list.id).toBeDefined();
         expect(list.name).toBeDefined();
+        expect(typeof list.isDefault).toBe('boolean');
       }
+    });
+
+    test('exactly one list is marked as default', async () => {
+      const result = await client.callTool('get_lists', {});
+
+      expect(Array.isArray(result)).toBe(true);
+      const lists = result as Array<{isDefault: boolean}>;
+      const defaultLists = lists.filter((l) => l.isDefault);
+      expect(defaultLists.length).toBe(1);
     });
   });
 });

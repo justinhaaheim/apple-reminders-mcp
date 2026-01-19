@@ -1,5 +1,6 @@
 import Foundation
 import EventKit
+import JMESPath
 
 // MARK: - Test Mode Configuration
 
@@ -77,6 +78,7 @@ struct MCPResponse: Codable {
         let capabilities: Capabilities?
         let serverInfo: ServerInfo?
         let instructions: String?
+        let isError: Bool?
 
         struct Content: Codable {
             let type: String
@@ -99,24 +101,58 @@ struct MCPResponse: Codable {
         struct Tool: Codable {
             let name: String
             let description: String
-            let inputSchema: InputSchema
-
-            struct InputSchema: Codable {
-                let type: String
-                let properties: [String: Property]
-                let required: [String]?
-
-                struct Property: Codable {
-                    let type: String
-                    let description: String
-                }
-            }
+            let inputSchema: JSONValue
         }
     }
 
     struct MCPError: Codable {
         let code: Int
         let message: String
+    }
+}
+
+// MARK: - JSON Value Type for Complex Schemas
+
+enum JSONValue: Codable {
+    case string(String)
+    case int(Int)
+    case double(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+
+        if let bool = try? container.decode(Bool.self) {
+            self = .bool(bool)
+        } else if let int = try? container.decode(Int.self) {
+            self = .int(int)
+        } else if let double = try? container.decode(Double.self) {
+            self = .double(double)
+        } else if let string = try? container.decode(String.self) {
+            self = .string(string)
+        } else if let array = try? container.decode([JSONValue].self) {
+            self = .array(array)
+        } else if let object = try? container.decode([String: JSONValue].self) {
+            self = .object(object)
+        } else {
+            self = .null
+        }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value): try container.encode(value)
+        case .int(let value): try container.encode(value)
+        case .double(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        case .object(let value): try container.encode(value)
+        case .array(let value): try container.encode(value)
+        case .null: try container.encodeNil()
+        }
     }
 }
 
@@ -142,6 +178,8 @@ struct AnyCodable: Codable {
             value = array.map { $0.value }
         } else if let dictionary = try? container.decode([String: AnyCodable].self) {
             value = dictionary.mapValues { $0.value }
+        } else if container.decodeNil() {
+            value = NSNull()
         } else {
             value = NSNull()
         }
@@ -163,44 +201,152 @@ struct AnyCodable: Codable {
             try container.encode(array.map { AnyCodable($0) })
         case let dictionary as [String: Any]:
             try container.encode(dictionary.mapValues { AnyCodable($0) })
+        case is NSNull:
+            try container.encodeNil()
         default:
             try container.encodeNil()
         }
     }
 }
 
-// MARK: - Batch Operation Input Types
+// MARK: - API Data Models
 
-struct CreateReminderItem: Codable {
+struct ReminderOutput: Codable {
+    let id: String
     let title: String
-    let list_name: String
     let notes: String?
-    let due_date: String?
+    let listId: String
+    let listName: String
+    let isCompleted: Bool
+    let priority: String  // "none", "low", "medium", "high"
+    let dueDate: String?
+    let completionDate: String?
+    let creationDate: String
+    let modificationDate: String
 }
 
-struct CreateRemindersInput: Codable {
-    let reminders: [CreateReminderItem]
+struct ReminderListOutput: Codable {
+    let id: String
+    let name: String
+    let isDefault: Bool
 }
 
-struct UpdateReminderItem: Codable {
-    let reminder_id: String
+// MARK: - Input Types
+
+struct ListSelector {
+    let name: String?
+    let id: String?
+    let all: Bool?
+
+    init(from dict: [String: Any]?) {
+        guard let dict = dict else {
+            self.name = nil
+            self.id = nil
+            self.all = nil
+            return
+        }
+        self.name = dict["name"] as? String
+        self.id = dict["id"] as? String
+        self.all = dict["all"] as? Bool
+    }
+
+    var isEmpty: Bool {
+        return name == nil && id == nil && all != true
+    }
+}
+
+struct CreateReminderInput {
+    let title: String
+    let notes: String?
+    let list: ListSelector?
+    let dueDate: String?
+    let priority: String?
+}
+
+struct UpdateReminderInput {
+    let id: String
     let title: String?
-    let notes: String?
-    let due_date: String?
-    let priority: Int?
+    let notes: Any?  // Can be String or NSNull to clear
+    let list: ListSelector?
+    let dueDate: Any?  // Can be String or NSNull to clear
+    let priority: String?
+    let completed: Bool?
+    let completedDate: Any?  // Can be String or NSNull to clear
 }
 
-struct UpdateRemindersInput: Codable {
-    let updates: [UpdateReminderItem]
+// MARK: - Priority Conversion
+
+enum Priority: String, CaseIterable {
+    case none = "none"
+    case low = "low"
+    case medium = "medium"
+    case high = "high"
+
+    var internalValue: Int {
+        switch self {
+        case .none: return 0
+        case .low: return 9
+        case .medium: return 5
+        case .high: return 1
+        }
+    }
+
+    static func fromInternal(_ value: Int) -> Priority {
+        switch value {
+        case 0: return .none
+        case 1...4: return .high
+        case 5: return .medium
+        case 6...9: return .low
+        default: return .none
+        }
+    }
+
+    static func fromString(_ string: String) -> Priority? {
+        return Priority(rawValue: string.lowercased())
+    }
 }
 
-struct BatchIdsInput: Codable {
-    let reminder_ids: [String]
+// MARK: - Date Formatting
+
+extension Date {
+    func toISO8601WithTimezone() -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXX"
+        formatter.timeZone = TimeZone.current
+        return formatter.string(from: self)
+    }
+
+    static func fromISO8601(_ string: String) -> Date? {
+        // Try with timezone offset first
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXX"
+        if let date = formatter.date(from: string) {
+            return date
+        }
+
+        // Try ISO8601 standard format
+        let iso8601Formatter = ISO8601DateFormatter()
+        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = iso8601Formatter.date(from: string) {
+            return date
+        }
+
+        iso8601Formatter.formatOptions = [.withInternetDateTime]
+        if let date = iso8601Formatter.date(from: string) {
+            return date
+        }
+
+        // Try date-only format
+        let dateOnly = DateFormatter()
+        dateOnly.dateFormat = "yyyy-MM-dd"
+        dateOnly.timeZone = TimeZone.current
+        return dateOnly.date(from: string)
+    }
 }
 
-// MARK: - Input Validation
+// MARK: - Validation Error
 
-struct ValidationError: Error, LocalizedError {
+struct MCPToolError: Error, LocalizedError {
     let message: String
 
     init(_ message: String) {
@@ -212,237 +358,198 @@ struct ValidationError: Error, LocalizedError {
     }
 }
 
-func validate<T: Codable>(_ arguments: [String: AnyCodable], as type: T.Type) throws -> T {
-    // Convert AnyCodable dictionary to regular dictionary, then to JSON data
-    let rawDict = arguments.mapValues { $0.value }
-    let data = try JSONSerialization.data(withJSONObject: rawDict)
-
-    let decoder = JSONDecoder()
-    do {
-        return try decoder.decode(T.self, from: data)
-    } catch let DecodingError.keyNotFound(key, context) {
-        let path = context.codingPath.map { $0.stringValue }.joined(separator: ".")
-        let fullPath = path.isEmpty ? key.stringValue : "\(path).\(key.stringValue)"
-        throw ValidationError("Missing required field: '\(fullPath)'")
-    } catch let DecodingError.typeMismatch(expectedType, context) {
-        let field = context.codingPath.last?.stringValue ?? "unknown"
-        throw ValidationError("Invalid type for '\(field)': expected \(expectedType)")
-    } catch let DecodingError.valueNotFound(_, context) {
-        let field = context.codingPath.last?.stringValue ?? "unknown"
-        throw ValidationError("Null value not allowed for '\(field)'")
-    } catch {
-        throw ValidationError("Invalid input: \(error.localizedDescription)")
-    }
-}
-
 // MARK: - Reminders Manager
 
 class RemindersManager {
     private let eventStore = EKEventStore()
     private var hasAccess = false
 
-    // MARK: - Test Mode Validation
-
-    private func validateTestModeForListCreation(name: String) throws {
-        guard TestModeConfig.isEnabled else { return }
-
-        guard TestModeConfig.isTestList(name) else {
-            throw NSError(
-                domain: "RemindersManager",
-                code: 100,
-                userInfo: [NSLocalizedDescriptionKey:
-                    "TEST MODE: Cannot create list '\(name)'. " +
-                    "List name must start with '\(TestModeConfig.testListPrefix)'"]
-            )
-        }
-    }
-
-    private func validateTestModeForReminderCreation(listName: String) throws {
-        guard TestModeConfig.isEnabled else { return }
-
-        guard TestModeConfig.isTestList(listName) else {
-            throw NSError(
-                domain: "RemindersManager",
-                code: 101,
-                userInfo: [NSLocalizedDescriptionKey:
-                    "TEST MODE: Cannot create reminder in list '\(listName)'. " +
-                    "Target list must start with '\(TestModeConfig.testListPrefix)'"]
-            )
-        }
-    }
-
-    private func validateTestModeForReminderModification(id: String) throws {
-        guard TestModeConfig.isEnabled else { return }
-
-        guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
-            throw NSError(
-                domain: "RemindersManager",
-                code: 102,
-                userInfo: [NSLocalizedDescriptionKey: "Reminder not found"]
-            )
-        }
-
-        guard let listName = reminder.calendar?.title,
-              TestModeConfig.isTestList(listName) else {
-            let actualList = reminder.calendar?.title ?? "unknown"
-            throw NSError(
-                domain: "RemindersManager",
-                code: 103,
-                userInfo: [NSLocalizedDescriptionKey:
-                    "TEST MODE: Cannot modify reminder in list '\(actualList)'. " +
-                    "Reminder must be in a list starting with '\(TestModeConfig.testListPrefix)'"]
-            )
-        }
-    }
-
     // MARK: - Access
 
     func requestAccess() async throws {
         hasAccess = try await eventStore.requestFullAccessToReminders()
         if !hasAccess {
-            throw NSError(domain: "RemindersManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Access to Reminders denied"])
+            throw MCPToolError("Access to Reminders denied")
         }
     }
 
-    func listReminderLists() -> [[String: Any]] {
+    // MARK: - List Operations
+
+    func getAllLists() -> [ReminderListOutput] {
         let calendars = eventStore.calendars(for: .reminder)
+        let defaultCalendar = eventStore.defaultCalendarForNewReminders()
+
         return calendars.map { calendar in
-            [
-                "id": calendar.calendarIdentifier,
-                "name": calendar.title
-            ]
+            ReminderListOutput(
+                id: calendar.calendarIdentifier,
+                name: calendar.title,
+                isDefault: calendar.calendarIdentifier == defaultCalendar?.calendarIdentifier
+            )
         }
     }
 
-    func createReminderList(name: String) throws -> String {
-        try validateTestModeForListCreation(name: name)
+    func getDefaultList() -> EKCalendar? {
+        return eventStore.defaultCalendarForNewReminders()
+    }
 
-        // Create a new calendar for reminders
+    func resolveList(_ selector: ListSelector?) throws -> [EKCalendar] {
+        let allCalendars = eventStore.calendars(for: .reminder)
+
+        guard let selector = selector, !selector.isEmpty else {
+            // No selector → default list
+            guard let defaultCalendar = eventStore.defaultCalendarForNewReminders() else {
+                throw MCPToolError("No default list found")
+            }
+            return [defaultCalendar]
+        }
+
+        // Validate exactly one key is set
+        let setCount = [selector.id != nil, selector.name != nil, selector.all == true].filter { $0 }.count
+        if setCount != 1 {
+            throw MCPToolError("List selector must specify exactly one of: 'id', 'name', or 'all'")
+        }
+
+        if selector.all == true {
+            return allCalendars
+        }
+
+        if let id = selector.id {
+            guard let match = allCalendars.first(where: { $0.calendarIdentifier == id }) else {
+                throw MCPToolError("No list found with ID: '\(id)'")
+            }
+            return [match]
+        }
+
+        if let name = selector.name {
+            guard let match = allCalendars.first(where: {
+                $0.title.caseInsensitiveCompare(name) == .orderedSame
+            }) else {
+                let available = allCalendars.map { $0.title }.joined(separator: ", ")
+                throw MCPToolError("No list found with name: '\(name)'. Available lists: \(available).")
+            }
+            return [match]
+        }
+
+        throw MCPToolError("Invalid list selector")
+    }
+
+    func resolveListForCreate(_ selector: ListSelector?) throws -> EKCalendar {
+        guard let selector = selector, !selector.isEmpty else {
+            // No selector → default list
+            guard let defaultCalendar = eventStore.defaultCalendarForNewReminders() else {
+                throw MCPToolError("No default list found")
+            }
+            return defaultCalendar
+        }
+
+        // Validate: only name or id allowed (not all)
+        if selector.all == true {
+            throw MCPToolError("Cannot create reminder in 'all' lists. Specify a single list by name or ID.")
+        }
+
+        let setCount = [selector.id != nil, selector.name != nil].filter { $0 }.count
+        if setCount != 1 {
+            throw MCPToolError("List selector must specify exactly one of: 'id' or 'name'")
+        }
+
+        let allCalendars = eventStore.calendars(for: .reminder)
+
+        if let id = selector.id {
+            guard let match = allCalendars.first(where: { $0.calendarIdentifier == id }) else {
+                throw MCPToolError("No list found with ID: '\(id)'")
+            }
+            return match
+        }
+
+        if let name = selector.name {
+            guard let match = allCalendars.first(where: {
+                $0.title.caseInsensitiveCompare(name) == .orderedSame
+            }) else {
+                let available = allCalendars.map { $0.title }.joined(separator: ", ")
+                throw MCPToolError("No list found with name: '\(name)'. Available lists: \(available).")
+            }
+            return match
+        }
+
+        throw MCPToolError("Invalid list selector")
+    }
+
+    func createList(name: String) throws -> ReminderListOutput {
+        // Test mode validation
+        if TestModeConfig.isEnabled && !TestModeConfig.isTestList(name) {
+            throw MCPToolError(
+                "TEST MODE: Cannot create list '\(name)'. " +
+                "List name must start with '\(TestModeConfig.testListPrefix)'"
+            )
+        }
+
         let calendar = EKCalendar(for: .reminder, eventStore: eventStore)
         calendar.title = name
 
-        // Find the best source (iCloud, then default, then any available)
         guard let source = findBestSource() else {
-            throw NSError(domain: "RemindersManager", code: 6, userInfo: [NSLocalizedDescriptionKey: "No available source for creating reminder list"])
+            throw MCPToolError("No available source for creating reminder list")
         }
 
         calendar.source = source
-
-        // Save the calendar
         try eventStore.saveCalendar(calendar, commit: true)
 
         log("Created reminder list '\(name)' with ID: \(calendar.calendarIdentifier)")
-        return calendar.calendarIdentifier
+        return ReminderListOutput(
+            id: calendar.calendarIdentifier,
+            name: calendar.title,
+            isDefault: false
+        )
     }
 
     private func findBestSource() -> EKSource? {
-        // Try to find iCloud source first
         if let iCloudSource = eventStore.sources.first(where: { $0.title == "iCloud" }) {
             return iCloudSource
         }
-
-        // Fall back to default calendar's source
         if let defaultSource = eventStore.defaultCalendarForNewReminders()?.source {
             return defaultSource
         }
-
-        // Last resort: use any available source
         return eventStore.sources.first
     }
 
-    func getTodayReminders() -> [[String: Any]] {
-        let startTime = Date()
-        log("Starting getTodayReminders")
+    // MARK: - Query Operations
 
-        let calendars = eventStore.calendars(for: .reminder)
-        let predicate = eventStore.predicateForReminders(in: calendars)
+    func queryReminders(
+        list: ListSelector?,
+        status: String?,
+        sortBy: String?,
+        query: String?,
+        limit: Int?
+    ) throws -> Any {
+        let startTime = Date()
+        log("Starting queryReminders")
+
+        // 1. Resolve list(s)
+        let calendars = try resolveList(list)
+        log("Resolved \(calendars.count) calendar(s)")
+
+        // 2. Fetch reminders with status filter
+        let statusFilter = status ?? "incomplete"
         var allReminders: [EKReminder] = []
         let semaphore = DispatchSemaphore(value: 0)
 
-        eventStore.fetchReminders(matching: predicate) { reminders in
-            if let reminders = reminders {
-                allReminders = reminders
-            }
-            semaphore.signal()
-        }
-
-        semaphore.wait()
-
-        let fetchTime = Date().timeIntervalSince(startTime)
-        log("Fetched \(allReminders.count) reminders in \(Int(fetchTime * 1000))ms")
-
-        // Get today's date boundaries
-        let calendar = Calendar.current
-        let now = Date()
-        let startOfToday = calendar.startOfDay(for: now)
-        let endOfToday = calendar.date(byAdding: .day, value: 1, to: startOfToday)!
-
-        // Filter for incomplete reminders that are due today or past due
-        let filtered = allReminders.filter { reminder in
-            guard !reminder.isCompleted else { return false }
-            guard let dueDateComponents = reminder.dueDateComponents,
-                  let dueDate = dueDateComponents.date else { return false }
-
-            // Include if due date is today or earlier
-            return dueDate < endOfToday
-        }
-
-        log("Found \(filtered.count) reminders due today or past due")
-
-        let result = filtered.map { reminder -> [String: Any] in
-            var dict: [String: Any] = [
-                "id": reminder.calendarItemIdentifier,
-                "name": reminder.title ?? "",
-                "completed": reminder.isCompleted
-            ]
-
-            if let notes = reminder.notes, !notes.isEmpty {
-                dict["body"] = notes
-            }
-
-            if let dueDate = reminder.dueDateComponents?.date {
-                let formatter = ISO8601DateFormatter()
-                dict["dueDate"] = formatter.string(from: dueDate)
-
-                // Add indicator for past due
-                if dueDate < startOfToday {
-                    dict["pastDue"] = true
-                }
-            }
-
-            if let calendar = reminder.calendar {
-                dict["listName"] = calendar.title
-            }
-
-            dict["priority"] = reminder.priority
-
-            return dict
-        }
-
-        let totalTime = Date().timeIntervalSince(startTime)
-        log("Total operation took \(Int(totalTime * 1000))ms")
-
-        return result
-    }
-
-    func listReminders(listName: String?, showCompleted: Bool) -> [[String: Any]] {
-        let startTime = Date()
-        log("Starting listReminders for list: \(listName ?? "all")")
-
-        let calendars: [EKCalendar]
-        if let listName = listName {
-            calendars = eventStore.calendars(for: .reminder).filter { $0.title == listName }
-            if calendars.isEmpty {
-                log("List '\(listName)' not found")
-                return []
-            }
+        // Determine which predicate to use based on status
+        let predicate: NSPredicate
+        if statusFilter == "completed" {
+            predicate = eventStore.predicateForCompletedReminders(
+                withCompletionDateStarting: nil,
+                ending: nil,
+                calendars: calendars
+            )
+        } else if statusFilter == "incomplete" {
+            predicate = eventStore.predicateForIncompleteReminders(
+                withDueDateStarting: nil,
+                ending: nil,
+                calendars: calendars
+            )
         } else {
-            calendars = eventStore.calendars(for: .reminder)
+            // "all" - fetch all reminders
+            predicate = eventStore.predicateForReminders(in: calendars)
         }
-
-        let predicate = eventStore.predicateForReminders(in: calendars)
-        var allReminders: [EKReminder] = []
-        let semaphore = DispatchSemaphore(value: 0)
 
         eventStore.fetchReminders(matching: predicate) { reminders in
             if let reminders = reminders {
@@ -450,450 +557,327 @@ class RemindersManager {
             }
             semaphore.signal()
         }
-
         semaphore.wait()
 
         let fetchTime = Date().timeIntervalSince(startTime)
         log("Fetched \(allReminders.count) reminders in \(Int(fetchTime * 1000))ms")
 
-        // Filter by completion status
-        let filtered = allReminders.filter { $0.isCompleted == showCompleted }
-        log("After filtering: \(filtered.count) reminders (showCompleted=\(showCompleted))")
+        // Filter by status if using "all" predicate
+        if statusFilter == "completed" {
+            allReminders = allReminders.filter { $0.isCompleted }
+        } else if statusFilter == "incomplete" {
+            allReminders = allReminders.filter { !$0.isCompleted }
+        }
 
-        let result = filtered.map { reminder -> [String: Any] in
-            var dict: [String: Any] = [
-                "id": reminder.calendarItemIdentifier,
-                "name": reminder.title ?? "",
-                "completed": reminder.isCompleted
-            ]
+        // Convert to output format
+        var reminderOutputs = allReminders.map { convertToOutput($0) }
 
-            if let notes = reminder.notes, !notes.isEmpty {
-                dict["body"] = notes
+        // 3. Apply JMESPath if provided
+        if let jmesQuery = query, !jmesQuery.isEmpty {
+            do {
+                let result = try applyJMESPath(reminderOutputs, query: jmesQuery)
+                // Apply limit after JMESPath
+                let maxResults = min(limit ?? 50, 200)
+                if let arrayResult = result as? [Any] {
+                    let limited = Array(arrayResult.prefix(maxResults))
+                    log("JMESPath returned \(arrayResult.count) items, limited to \(limited.count)")
+                    return limited
+                }
+                return result
+            } catch {
+                throw MCPToolError("Invalid JMESPath expression: \(error.localizedDescription). Expression: '\(jmesQuery)'.")
             }
+        }
 
-            if let dueDate = reminder.dueDateComponents?.date {
-                let formatter = ISO8601DateFormatter()
-                dict["dueDate"] = formatter.string(from: dueDate)
-            }
+        // 4. Apply sortBy (only if no JMESPath query)
+        let sortOrder = sortBy ?? "newest"
+        reminderOutputs = applySorting(reminderOutputs, sortBy: sortOrder)
 
-            if let calendar = reminder.calendar {
-                dict["listName"] = calendar.title
-            }
-
-            dict["priority"] = reminder.priority
-
-            // Note: Tags are not accessible via EventKit API
-            // Apple's EventKit framework does not expose the tags feature that exists
-            // in the Reminders app. This is a known limitation with no public API solution.
-
-            return dict
+        // 5. Apply limit
+        let maxResults = min(limit ?? 50, 200)
+        if reminderOutputs.count > maxResults {
+            reminderOutputs = Array(reminderOutputs.prefix(maxResults))
         }
 
         let totalTime = Date().timeIntervalSince(startTime)
-        log("Total operation took \(Int(totalTime * 1000))ms")
+        log("Total query took \(Int(totalTime * 1000))ms, returning \(reminderOutputs.count) reminders")
 
-        return result
+        return reminderOutputs
     }
 
-    func createReminder(title: String, listName: String, notes: String?, dueDate: String?) throws -> String {
-        try validateTestModeForReminderCreation(listName: listName)
+    private func applyJMESPath(_ reminders: [ReminderOutput], query: String) throws -> Any {
+        // Convert reminders to JSON-compatible dictionaries
+        let jsonData = try JSONEncoder().encode(reminders)
+        let jsonObject = try JSONSerialization.jsonObject(with: jsonData)
 
-        let calendars = eventStore.calendars(for: .reminder).filter { $0.title == listName }
-        guard let calendar = calendars.first else {
-            throw NSError(domain: "RemindersManager", code: 2, userInfo: [NSLocalizedDescriptionKey: "List '\(listName)' not found"])
+        // Compile and run JMESPath expression
+        let expression = try JMESExpression.compile(query)
+        let result = try expression.search(json: jsonObject)
+        return result ?? []
+    }
+
+    private func applySorting(_ reminders: [ReminderOutput], sortBy: String) -> [ReminderOutput] {
+        switch sortBy {
+        case "oldest":
+            return reminders.sorted { $0.creationDate < $1.creationDate }
+        case "priority":
+            return reminders.sorted { r1, r2 in
+                let p1 = prioritySortOrder(r1.priority)
+                let p2 = prioritySortOrder(r2.priority)
+                return p1 < p2
+            }
+        case "dueDate":
+            return reminders.sorted { r1, r2 in
+                // Nulls last
+                guard let d1 = r1.dueDate else { return false }
+                guard let d2 = r2.dueDate else { return true }
+                return d1 < d2
+            }
+        case "newest":
+            fallthrough
+        default:
+            return reminders.sorted { $0.creationDate > $1.creationDate }
+        }
+    }
+
+    private func prioritySortOrder(_ priority: String) -> Int {
+        switch priority {
+        case "high": return 0
+        case "medium": return 1
+        case "low": return 2
+        default: return 3  // "none"
+        }
+    }
+
+    private func convertToOutput(_ reminder: EKReminder) -> ReminderOutput {
+        let calendar = reminder.calendar
+
+        return ReminderOutput(
+            id: reminder.calendarItemIdentifier,
+            title: reminder.title ?? "",
+            notes: reminder.notes,
+            listId: calendar?.calendarIdentifier ?? "",
+            listName: calendar?.title ?? "",
+            isCompleted: reminder.isCompleted,
+            priority: Priority.fromInternal(reminder.priority).rawValue,
+            dueDate: reminder.dueDateComponents?.date?.toISO8601WithTimezone(),
+            completionDate: reminder.completionDate?.toISO8601WithTimezone(),
+            creationDate: reminder.creationDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
+            modificationDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone()
+        )
+    }
+
+    // MARK: - Create Operations
+
+    func createReminders(inputs: [CreateReminderInput]) -> (created: [ReminderOutput], failed: [(index: Int, error: String)]) {
+        var created: [ReminderOutput] = []
+        var failed: [(index: Int, error: String)] = []
+
+        for (index, input) in inputs.enumerated() {
+            do {
+                let output = try createSingleReminder(input)
+                created.append(output)
+            } catch {
+                failed.append((index: index, error: error.localizedDescription))
+            }
+        }
+
+        return (created, failed)
+    }
+
+    private func createSingleReminder(_ input: CreateReminderInput) throws -> ReminderOutput {
+        let calendar = try resolveListForCreate(input.list)
+
+        // Test mode validation
+        if TestModeConfig.isEnabled && !TestModeConfig.isTestList(calendar.title) {
+            throw MCPToolError(
+                "TEST MODE: Cannot create reminder in list '\(calendar.title)'. " +
+                "Target list must start with '\(TestModeConfig.testListPrefix)'"
+            )
         }
 
         let reminder = EKReminder(eventStore: eventStore)
         reminder.calendar = calendar
-        reminder.title = title
+        reminder.title = input.title
 
-        if let notes = notes {
+        if let notes = input.notes {
             reminder.notes = notes
         }
 
-        if let dueDateString = dueDate {
-            // Try to parse as ISO8601 first (full datetime)
-            let iso8601Formatter = ISO8601DateFormatter()
-
-            if let date = iso8601Formatter.date(from: dueDateString) {
-                // Full datetime provided - include time components
-                let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
-                reminder.dueDateComponents = components
+        if let dueDateString = input.dueDate {
+            if let date = Date.fromISO8601(dueDateString) {
+                reminder.dueDateComponents = Calendar.current.dateComponents(
+                    [.year, .month, .day, .hour, .minute],
+                    from: date
+                )
             } else {
-                // Try to parse as date-only format (YYYY-MM-DD)
-                let dateFormatter = DateFormatter()
-                dateFormatter.dateFormat = "yyyy-MM-dd"
-                dateFormatter.timeZone = TimeZone.current
-
-                if let date = dateFormatter.date(from: dueDateString) {
-                    // Date only - don't set time components (just year, month, day)
-                    var components = Calendar.current.dateComponents([.year, .month, .day], from: date)
-                    // Explicitly ensure no time components
-                    components.hour = nil
-                    components.minute = nil
-                    components.second = nil
-                    reminder.dueDateComponents = components
-                }
+                throw MCPToolError("Invalid date format: '\(dueDateString)'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.")
             }
         }
 
+        if let priorityString = input.priority {
+            guard let priority = Priority.fromString(priorityString) else {
+                throw MCPToolError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
+            }
+            reminder.priority = priority.internalValue
+        }
+
         try eventStore.save(reminder, commit: true)
-        return reminder.calendarItemIdentifier
+        log("Created reminder '\(input.title)' in list '\(calendar.title)'")
+
+        return convertToOutput(reminder)
     }
 
-    func completeReminder(id: String) throws {
-        try validateTestModeForReminderModification(id: id)
+    // MARK: - Update Operations
 
-        guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
-            throw NSError(domain: "RemindersManager", code: 3, userInfo: [NSLocalizedDescriptionKey: "Reminder not found"])
+    func updateReminders(inputs: [UpdateReminderInput]) -> (updated: [ReminderOutput], failed: [(id: String, error: String)]) {
+        var updated: [ReminderOutput] = []
+        var failed: [(id: String, error: String)] = []
+
+        for input in inputs {
+            do {
+                let output = try updateSingleReminder(input)
+                updated.append(output)
+            } catch {
+                failed.append((id: input.id, error: error.localizedDescription))
+            }
         }
 
-        reminder.isCompleted = true
-        try eventStore.save(reminder, commit: true)
+        return (updated, failed)
     }
 
-    func deleteReminder(id: String) throws {
-        try validateTestModeForReminderModification(id: id)
-
-        guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
-            throw NSError(domain: "RemindersManager", code: 4, userInfo: [NSLocalizedDescriptionKey: "Reminder not found"])
+    private func updateSingleReminder(_ input: UpdateReminderInput) throws -> ReminderOutput {
+        guard let reminder = eventStore.calendarItem(withIdentifier: input.id) as? EKReminder else {
+            throw MCPToolError("No reminder found with ID: '\(input.id)'")
         }
 
-        try eventStore.remove(reminder, commit: true)
-    }
-
-    func updateReminder(id: String, title: String?, notes: String?, dueDate: String?, priority: Int?) throws {
-        try validateTestModeForReminderModification(id: id)
-
-        guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
-            throw NSError(domain: "RemindersManager", code: 5, userInfo: [NSLocalizedDescriptionKey: "Reminder not found"])
+        // Test mode validation
+        if TestModeConfig.isEnabled {
+            guard let listName = reminder.calendar?.title,
+                  TestModeConfig.isTestList(listName) else {
+                let actualList = reminder.calendar?.title ?? "unknown"
+                throw MCPToolError(
+                    "TEST MODE: Cannot modify reminder in list '\(actualList)'. " +
+                    "Reminder must be in a list starting with '\(TestModeConfig.testListPrefix)'"
+                )
+            }
         }
 
-        if let title = title {
+        // Update title
+        if let title = input.title {
             reminder.title = title
         }
 
-        if let notes = notes {
-            reminder.notes = notes
+        // Update notes (can be cleared with null)
+        if let notesValue = input.notes {
+            if notesValue is NSNull {
+                reminder.notes = nil
+            } else if let notes = notesValue as? String {
+                reminder.notes = notes
+            }
         }
 
-        if let dueDateString = dueDate {
-            if dueDateString.isEmpty {
-                // Empty string means clear the due date
+        // Move to different list
+        if let listSelector = input.list, !listSelector.isEmpty {
+            let newCalendar = try resolveListForCreate(listSelector)
+
+            // Test mode validation for target list
+            if TestModeConfig.isEnabled && !TestModeConfig.isTestList(newCalendar.title) {
+                throw MCPToolError(
+                    "TEST MODE: Cannot move reminder to list '\(newCalendar.title)'. " +
+                    "Target list must start with '\(TestModeConfig.testListPrefix)'"
+                )
+            }
+
+            reminder.calendar = newCalendar
+        }
+
+        // Update due date (can be cleared with null)
+        if let dueDateValue = input.dueDate {
+            if dueDateValue is NSNull {
                 reminder.dueDateComponents = nil
-            } else {
-                // Try to parse as ISO8601 first (full datetime)
-                let iso8601Formatter = ISO8601DateFormatter()
-
-                if let date = iso8601Formatter.date(from: dueDateString) {
-                    // Full datetime provided - include time components
-                    let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: date)
-                    reminder.dueDateComponents = components
+            } else if let dueDateString = dueDateValue as? String {
+                if let date = Date.fromISO8601(dueDateString) {
+                    reminder.dueDateComponents = Calendar.current.dateComponents(
+                        [.year, .month, .day, .hour, .minute],
+                        from: date
+                    )
                 } else {
-                    // Try to parse as date-only format (YYYY-MM-DD)
-                    let dateFormatter = DateFormatter()
-                    dateFormatter.dateFormat = "yyyy-MM-dd"
-                    dateFormatter.timeZone = TimeZone.current
-
-                    if let date = dateFormatter.date(from: dueDateString) {
-                        // Date only - don't set time components (just year, month, day)
-                        var components = Calendar.current.dateComponents([.year, .month, .day], from: date)
-                        // Explicitly ensure no time components
-                        components.hour = nil
-                        components.minute = nil
-                        components.second = nil
-                        reminder.dueDateComponents = components
-                    }
+                    throw MCPToolError("Invalid date format: '\(dueDateString)'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.")
                 }
             }
         }
 
-        if let priority = priority {
-            reminder.priority = priority
+        // Update priority
+        if let priorityString = input.priority {
+            guard let priority = Priority.fromString(priorityString) else {
+                throw MCPToolError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
+            }
+            reminder.priority = priority.internalValue
+        }
+
+        // Handle completion - completedDate takes precedence over completed
+        if let completedDateValue = input.completedDate {
+            if completedDateValue is NSNull {
+                reminder.completionDate = nil
+            } else if let completedDateString = completedDateValue as? String {
+                if let date = Date.fromISO8601(completedDateString) {
+                    reminder.completionDate = date
+                } else {
+                    throw MCPToolError("Invalid date format: '\(completedDateString)'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.")
+                }
+            }
+        } else if let completed = input.completed {
+            if completed {
+                reminder.completionDate = Date()
+            } else {
+                reminder.completionDate = nil
+            }
         }
 
         try eventStore.save(reminder, commit: true)
+        log("Updated reminder '\(reminder.title ?? input.id)'")
+
+        return convertToOutput(reminder)
     }
 
-    // MARK: - Batch Operations
+    // MARK: - Delete Operations
 
-    func createReminders(items: [CreateReminderItem]) -> [[String: Any]] {
-        var results: [[String: Any]] = []
-
-        for item in items {
-            var result: [String: Any] = ["title": item.title]
-
-            do {
-                let id = try createReminder(
-                    title: item.title,
-                    listName: item.list_name,
-                    notes: item.notes,
-                    dueDate: item.due_date
-                )
-                result["success"] = true
-                result["reminder_id"] = id
-            } catch {
-                result["success"] = false
-                result["error"] = error.localizedDescription
-            }
-
-            results.append(result)
-        }
-
-        return results
-    }
-
-    func updateReminders(updates: [UpdateReminderItem]) -> [[String: Any]] {
-        var results: [[String: Any]] = []
-
-        for update in updates {
-            var result: [String: Any] = ["reminder_id": update.reminder_id]
-
-            do {
-                try updateReminder(
-                    id: update.reminder_id,
-                    title: update.title,
-                    notes: update.notes,
-                    dueDate: update.due_date,
-                    priority: update.priority
-                )
-                result["success"] = true
-            } catch {
-                result["success"] = false
-                result["error"] = error.localizedDescription
-            }
-
-            results.append(result)
-        }
-
-        return results
-    }
-
-    func deleteReminders(ids: [String]) -> [[String: Any]] {
-        var results: [[String: Any]] = []
+    func deleteReminders(ids: [String]) -> (deleted: [String], failed: [(id: String, error: String)]) {
+        var deleted: [String] = []
+        var failed: [(id: String, error: String)] = []
 
         for id in ids {
-            var result: [String: Any] = ["reminder_id": id]
-
             do {
-                try deleteReminder(id: id)
-                result["success"] = true
+                try deleteSingleReminder(id: id)
+                deleted.append(id)
             } catch {
-                result["success"] = false
-                result["error"] = error.localizedDescription
+                failed.append((id: id, error: error.localizedDescription))
             }
-
-            results.append(result)
         }
 
-        return results
+        return (deleted, failed)
     }
 
-    func completeReminders(ids: [String]) -> [[String: Any]] {
-        var results: [[String: Any]] = []
-
-        for id in ids {
-            var result: [String: Any] = ["reminder_id": id]
-
-            do {
-                try completeReminder(id: id)
-                result["success"] = true
-            } catch {
-                result["success"] = false
-                result["error"] = error.localizedDescription
-            }
-
-            results.append(result)
+    private func deleteSingleReminder(id: String) throws {
+        guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
+            throw MCPToolError("No reminder found with ID: '\(id)'")
         }
 
-        return results
-    }
-
-    // MARK: - Search Operations
-
-    func searchReminders(
-        searchText: String?,
-        listId: String?,
-        listName: String?,
-        status: String?,
-        dateFrom: String?,
-        dateTo: String?,
-        limit: Int?
-    ) -> [[String: Any]] {
-        let startTime = Date()
-        log("Starting searchReminders")
-
-        // Determine which calendars to search
-        let calendars: [EKCalendar]
-        if let listId = listId {
-            // Filter by list ID
-            calendars = eventStore.calendars(for: .reminder).filter { $0.calendarIdentifier == listId }
-            if calendars.isEmpty {
-                log("List with ID '\(listId)' not found")
-                return []
+        // Test mode validation
+        if TestModeConfig.isEnabled {
+            guard let listName = reminder.calendar?.title,
+                  TestModeConfig.isTestList(listName) else {
+                let actualList = reminder.calendar?.title ?? "unknown"
+                throw MCPToolError(
+                    "TEST MODE: Cannot delete reminder in list '\(actualList)'. " +
+                    "Reminder must be in a list starting with '\(TestModeConfig.testListPrefix)'"
+                )
             }
-        } else if let listName = listName {
-            // Filter by list name
-            calendars = eventStore.calendars(for: .reminder).filter { $0.title == listName }
-            if calendars.isEmpty {
-                log("List '\(listName)' not found")
-                return []
-            }
-        } else {
-            calendars = eventStore.calendars(for: .reminder)
         }
 
-        // Fetch all reminders from selected calendars
-        let predicate = eventStore.predicateForReminders(in: calendars)
-        var allReminders: [EKReminder] = []
-        let semaphore = DispatchSemaphore(value: 0)
-
-        eventStore.fetchReminders(matching: predicate) { reminders in
-            if let reminders = reminders {
-                allReminders = reminders
-            }
-            semaphore.signal()
-        }
-
-        semaphore.wait()
-
-        let fetchTime = Date().timeIntervalSince(startTime)
-        log("Fetched \(allReminders.count) reminders in \(Int(fetchTime * 1000))ms")
-
-        // Parse date filters
-        let fromDate = parseDate(dateFrom)
-        let toDate = parseDate(dateTo)
-
-        // Determine if we're filtering completed or incomplete
-        let showCompleted = status?.lowercased() == "completed"
-
-        // Apply filters
-        var filtered = allReminders.filter { reminder in
-            // Status filter
-            if reminder.isCompleted != showCompleted {
-                return false
-            }
-
-            // Text search filter
-            if let searchText = searchText, !searchText.isEmpty {
-                let searchLower = searchText.lowercased()
-                let titleMatch = reminder.title?.lowercased().contains(searchLower) ?? false
-                let notesMatch = reminder.notes?.lowercased().contains(searchLower) ?? false
-                if !titleMatch && !notesMatch {
-                    return false
-                }
-            }
-
-            // Date range filter
-            if showCompleted {
-                // For completed reminders, filter by completion date
-                guard let completionDate = reminder.completionDate else {
-                    return false
-                }
-                if let fromDate = fromDate, completionDate < fromDate {
-                    return false
-                }
-                if let toDate = toDate, completionDate > toDate {
-                    return false
-                }
-            } else {
-                // For incomplete reminders, filter by due date
-                if fromDate != nil || toDate != nil {
-                    guard let dueDate = reminder.dueDateComponents?.date else {
-                        return false // No due date, exclude when date filter is active
-                    }
-                    if let fromDate = fromDate, dueDate < fromDate {
-                        return false
-                    }
-                    if let toDate = toDate, dueDate > toDate {
-                        return false
-                    }
-                }
-            }
-
-            return true
-        }
-
-        log("After filtering: \(filtered.count) reminders")
-
-        // Apply limit
-        let maxResults = limit ?? 100
-        if filtered.count > maxResults {
-            filtered = Array(filtered.prefix(maxResults))
-            log("Limited to \(maxResults) results")
-        }
-
-        // Convert to response format
-        let result = filtered.map { reminder -> [String: Any] in
-            var dict: [String: Any] = [
-                "id": reminder.calendarItemIdentifier,
-                "name": reminder.title ?? "",
-                "completed": reminder.isCompleted
-            ]
-
-            if let notes = reminder.notes, !notes.isEmpty {
-                dict["body"] = notes
-            }
-
-            if let dueDate = reminder.dueDateComponents?.date {
-                let formatter = ISO8601DateFormatter()
-                dict["dueDate"] = formatter.string(from: dueDate)
-            }
-
-            if let completionDate = reminder.completionDate {
-                let formatter = ISO8601DateFormatter()
-                dict["completionDate"] = formatter.string(from: completionDate)
-            }
-
-            if let calendar = reminder.calendar {
-                dict["listId"] = calendar.calendarIdentifier
-                dict["listName"] = calendar.title
-            }
-
-            dict["priority"] = reminder.priority
-
-            return dict
-        }
-
-        let totalTime = Date().timeIntervalSince(startTime)
-        log("Total search took \(Int(totalTime * 1000))ms")
-
-        return result
-    }
-
-    func searchReminderLists(searchText: String?) -> [[String: Any]] {
-        var calendars = eventStore.calendars(for: .reminder)
-
-        // Apply text filter if provided
-        if let searchText = searchText, !searchText.isEmpty {
-            let searchLower = searchText.lowercased()
-            calendars = calendars.filter { $0.title.lowercased().contains(searchLower) }
-        }
-
-        return calendars.map { calendar in
-            [
-                "id": calendar.calendarIdentifier,
-                "name": calendar.title
-            ]
-        }
-    }
-
-    private func parseDate(_ dateString: String?) -> Date? {
-        guard let dateString = dateString, !dateString.isEmpty else {
-            return nil
-        }
-
-        // Try ISO8601 first
-        let iso8601Formatter = ISO8601DateFormatter()
-        if let date = iso8601Formatter.date(from: dateString) {
-            return date
-        }
-
-        // Try date-only format
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd"
-        dateFormatter.timeZone = TimeZone.current
-        return dateFormatter.date(from: dateString)
+        try eventStore.remove(reminder, commit: true)
+        log("Deleted reminder '\(reminder.title ?? id)'")
     }
 }
 
@@ -925,7 +909,6 @@ class MCPServer {
     private func handleRequest(_ line: String) {
         guard let data = line.data(using: .utf8) else { return }
 
-        // Try to decode the request to get the ID for error responses
         var requestId: MCPRequest.RequestID?
         if let partialRequest = try? JSONDecoder().decode(MCPRequest.self, from: data) {
             requestId = partialRequest.id
@@ -937,7 +920,6 @@ class MCPServer {
             sendResponse(response)
         } catch {
             logError("Error processing request: \(error)")
-            // Send error response back to client
             sendErrorResponse(id: requestId ?? .int(-1), code: -32603, message: error.localizedDescription)
         }
     }
@@ -955,30 +937,25 @@ class MCPServer {
         switch request.method {
         case "initialize":
             let instructions = """
-            This server provides comprehensive access to Apple Reminders for both reminders AND task management.
+            Apple Reminders MCP Server - Access Apple Reminders with 6 powerful tools.
 
-            Apple Reminders is a full-featured task management system, not just for simple reminders. Use it for:
-            - Tasks and todo items (with or without due dates)
-            - Project management (create separate lists for different projects)
-            - Daily task planning and scheduling
-            - Recurring tasks and deadlines
-            - Priority-based task organization
+            TOOLS:
+            • query_reminders - Search and filter reminders with JMESPath support
+            • get_lists - Get all reminder lists
+            • create_list - Create a new list
+            • create_reminders - Create one or more reminders
+            • update_reminders - Update reminders (including mark complete/incomplete)
+            • delete_reminders - Delete reminders
 
-            USAGE BEST PRACTICES:
-            1. Use list_today_reminders to get an overview of what's due today or overdue
-            2. Create separate lists for different contexts (Work, Personal, Projects, Shopping, etc.)
-            3. Use list_reminder_lists to see existing lists before creating new ones
-            4. Dates can be provided in two formats:
-               - Full datetime: "2025-11-15T10:00:00Z" (with specific time)
-               - Date-only: "2025-11-15" (no specific time, all-day reminder)
-            5. Priority levels: 0=none, 1-4=high, 5=medium, 6-9=low
-            6. Tags and categories are not available via the API (EventKit limitation)
+            QUICK START:
+            1. Call query_reminders with {} to see incomplete reminders from default list
+            2. Use get_lists to see all available lists
+            3. Specify list by name: {"list": {"name": "Work"}}
+            4. Specify list by ID: {"list": {"id": "x-apple-..."}}
+            5. Search all lists: {"list": {"all": true}}
 
-            SUGGESTED WORKFLOWS:
-            - Morning planning: Use list_today_reminders to review what's due
-            - Task capture: Create reminders quickly without due dates, organize later
-            - Project setup: Create a new list for each project, then add tasks
-            - Weekly review: List all incomplete reminders across all lists
+            PRIORITY: Use "none", "low", "medium", or "high" (not numbers)
+            DATES: ISO 8601 with timezone, e.g., "2024-01-15T10:00:00-05:00"
             """
 
             return MCPResponse(
@@ -992,9 +969,10 @@ class MCPServer {
                     ),
                     serverInfo: MCPResponse.Result.ServerInfo(
                         name: "apple-reminders",
-                        version: "1.0.0"
+                        version: "2.0.0"
                     ),
-                    instructions: instructions
+                    instructions: instructions,
+                    isError: nil
                 ),
                 error: nil
             )
@@ -1008,7 +986,8 @@ class MCPServer {
                     protocolVersion: nil,
                     capabilities: nil,
                     serverInfo: nil,
-                    instructions: nil
+                    instructions: nil,
+                    isError: nil
                 ),
                 error: nil
             )
@@ -1016,469 +995,535 @@ class MCPServer {
         case "tools/call":
             guard let params = request.params,
                   let toolName = params.name else {
-                throw NSError(domain: "MCPServer", code: 400, userInfo: [NSLocalizedDescriptionKey: "Missing tool name"])
+                throw MCPToolError("Missing tool name")
             }
 
-            // Handle tool execution errors gracefully and return them in the result content
-            let resultText: String
             do {
-                resultText = try callTool(toolName, arguments: params.arguments ?? [:])
+                let resultText = try callTool(toolName, arguments: params.arguments ?? [:])
+                return MCPResponse(
+                    id: request.id,
+                    result: MCPResponse.Result(
+                        content: [MCPResponse.Result.Content(type: "text", text: resultText)],
+                        tools: nil,
+                        protocolVersion: nil,
+                        capabilities: nil,
+                        serverInfo: nil,
+                        instructions: nil,
+                        isError: nil
+                    ),
+                    error: nil
+                )
             } catch {
-                // Return tool errors as content rather than JSON-RPC errors
-                // This provides better error messages to the user
-                let errorDetail: String
-                if let nsError = error as NSError? {
-                    errorDetail = nsError.localizedDescription
-                } else {
-                    errorDetail = error.localizedDescription
-                }
-
-                let errorResult = [
-                    "success": false,
-                    "error": errorDetail
-                ] as [String: Any]
-                resultText = try toJSON(errorResult)
+                // Return tool errors with isError: true
+                let errorMessage = error.localizedDescription
+                return MCPResponse(
+                    id: request.id,
+                    result: MCPResponse.Result(
+                        content: [MCPResponse.Result.Content(type: "text", text: errorMessage)],
+                        tools: nil,
+                        protocolVersion: nil,
+                        capabilities: nil,
+                        serverInfo: nil,
+                        instructions: nil,
+                        isError: true
+                    ),
+                    error: nil
+                )
             }
-
-            return MCPResponse(
-                id: request.id,
-                result: MCPResponse.Result(
-                    content: [MCPResponse.Result.Content(type: "text", text: resultText)],
-                    tools: nil,
-                    protocolVersion: nil,
-                    capabilities: nil,
-                    serverInfo: nil,
-                    instructions: nil
-                ),
-                error: nil
-            )
 
         default:
-            throw NSError(domain: "MCPServer", code: 404, userInfo: [NSLocalizedDescriptionKey: "Unknown method: \(request.method)"])
+            throw MCPToolError("Unknown method: \(request.method)")
         }
     }
 
     private func getTools() -> [MCPResponse.Result.Tool] {
         return [
+            // query_reminders
             MCPResponse.Result.Tool(
-                name: "list_reminder_lists",
-                description: "Get all reminder lists from Apple Reminders",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [:],
-                    required: nil
-                )
+                name: "query_reminders",
+                description: """
+                Query reminders from Apple Reminders.
+
+                **Default behavior (no parameters needed):**
+                - Searches DEFAULT LIST only
+                - Returns INCOMPLETE reminders only
+                - Sorted by NEWEST CREATED first
+                - Limited to 50 results
+
+                **Parameters (all optional):**
+
+                list — Which list to search. Omit for default list.
+                  • {"name": "Work"} → by exact name (case-insensitive)
+                  • {"id": "x-apple-..."} → by exact ID
+                  • {"all": true} → all lists
+
+                status — "incomplete" (default), "completed", or "all"
+
+                sortBy — "newest" (default), "oldest", "priority", "dueDate"
+
+                query — JMESPath expression for advanced filtering (overrides sortBy)
+
+                limit — Max results (default 50, max 200)
+
+                **Examples:**
+
+                Recent incomplete from default list:
+                  {}
+
+                From specific list:
+                  {"list": {"name": "Work"}}
+
+                All lists, completed:
+                  {"list": {"all": true}, "status": "completed"}
+
+                Has any priority set:
+                  {"query": "[?priority != 'none']"}
+
+                High priority only:
+                  {"query": "[?priority == 'high']"}
+
+                Title contains text:
+                  {"query": "[?contains(title, 'meeting')]"}
+
+                **Reminder fields available in JMESPath:**
+                - id, title, notes, listId, listName, isCompleted
+                - priority (string: "none", "low", "medium", "high")
+                - dueDate, completionDate, creationDate, modificationDate (ISO 8601 or null)
+                """,
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "list": .object([
+                            "type": .string("object"),
+                            "description": .string("Which list to search. Omit for default list."),
+                            "properties": .object([
+                                "name": .object(["type": .string("string"), "description": .string("List name (case-insensitive match)")]),
+                                "id": .object(["type": .string("string"), "description": .string("Exact list ID")]),
+                                "all": .object(["type": .string("boolean"), "description": .string("Set true to search all lists")])
+                            ]),
+                            "additionalProperties": .bool(false)
+                        ]),
+                        "status": .object([
+                            "type": .string("string"),
+                            "enum": .array([.string("incomplete"), .string("completed"), .string("all")]),
+                            "default": .string("incomplete"),
+                            "description": .string("Filter by completion status")
+                        ]),
+                        "sortBy": .object([
+                            "type": .string("string"),
+                            "enum": .array([.string("newest"), .string("oldest"), .string("priority"), .string("dueDate")]),
+                            "default": .string("newest"),
+                            "description": .string("Sort order. Ignored if 'query' includes sorting.")
+                        ]),
+                        "query": .object([
+                            "type": .string("string"),
+                            "description": .string("JMESPath expression for advanced filtering/projection. Applied after list and status filters.")
+                        ]),
+                        "limit": .object([
+                            "type": .string("integer"),
+                            "minimum": .int(1),
+                            "maximum": .int(200),
+                            "default": .int(50),
+                            "description": .string("Maximum results to return")
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
             ),
+
+            // get_lists
             MCPResponse.Result.Tool(
-                name: "create_reminder_list",
-                description: "Create a new reminder list in Apple Reminders",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "name": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "Name of the new reminder list"
-                        )
-                    ],
-                    required: ["name"]
-                )
+                name: "get_lists",
+                description: """
+                Get all available reminder lists.
+
+                Returns list names, IDs, and which one is the default. Call this if you need to know what lists exist before querying reminders.
+
+                **Parameters:** None
+
+                **Example:**
+                  {}
+                """,
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([:]),
+                    "additionalProperties": .bool(false)
+                ])
             ),
+
+            // create_list
             MCPResponse.Result.Tool(
-                name: "list_today_reminders",
-                description: "Get all incomplete reminders that are due today or past due. This is useful for seeing what needs to be done today.",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [:],
-                    required: nil
-                )
+                name: "create_list",
+                description: """
+                Create a new reminder list.
+
+                **Parameters:**
+
+                name (required) — Name for the new list
+
+                **Example:**
+
+                Create a "Groceries" list:
+                  {"name": "Groceries"}
+                """,
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "required": .array([.string("name")]),
+                    "properties": .object([
+                        "name": .object([
+                            "type": .string("string"),
+                            "description": .string("Name for the new list")
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
             ),
-            MCPResponse.Result.Tool(
-                name: "list_reminders",
-                description: "Get reminders from a specific list or all lists. By default, only returns incomplete reminders.",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "list_name": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "Name of the reminder list (optional, if not provided returns all reminders)"
-                        ),
-                        "completed": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "boolean",
-                            description: "Filter by completion status (optional, defaults to false to show only incomplete reminders)"
-                        )
-                    ],
-                    required: nil
-                )
-            ),
-            MCPResponse.Result.Tool(
-                name: "create_reminder",
-                description: "Create a new reminder in Apple Reminders",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "title": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "Title of the reminder"
-                        ),
-                        "list_name": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "Name of the list to add the reminder to (defaults to 'Reminders')"
-                        ),
-                        "notes": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "Additional notes for the reminder (optional)"
-                        ),
-                        "due_date": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "Due date in ISO 8601 format (e.g., '2025-11-15T10:00:00Z') or date-only format (e.g., '2025-11-15') (optional)"
-                        )
-                    ],
-                    required: ["title"]
-                )
-            ),
-            MCPResponse.Result.Tool(
-                name: "complete_reminder",
-                description: "Mark a reminder as completed",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "reminder_id": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "ID of the reminder to complete"
-                        )
-                    ],
-                    required: ["reminder_id"]
-                )
-            ),
-            MCPResponse.Result.Tool(
-                name: "delete_reminder",
-                description: "Delete a reminder",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "reminder_id": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "ID of the reminder to delete"
-                        )
-                    ],
-                    required: ["reminder_id"]
-                )
-            ),
-            MCPResponse.Result.Tool(
-                name: "update_reminder",
-                description: "Update an existing reminder's properties (title, notes, due date, or priority)",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "reminder_id": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "ID of the reminder to update"
-                        ),
-                        "title": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "New title for the reminder (optional)"
-                        ),
-                        "notes": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "New notes for the reminder (optional)"
-                        ),
-                        "due_date": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "New due date in ISO 8601 format (e.g., '2025-11-15T10:00:00Z'), date-only format (e.g., '2025-11-15'), or empty string to clear (optional)"
-                        ),
-                        "priority": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "New priority level 0-9, where 0=none, 1-4=high, 5=medium, 6-9=low (optional)"
-                        )
-                    ],
-                    required: ["reminder_id"]
-                )
-            ),
-            // Batch operations
+
+            // create_reminders
             MCPResponse.Result.Tool(
                 name: "create_reminders",
-                description: "Create multiple reminders in a single call. Each reminder specifies its own list. Returns per-item results with success/failure status.",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "reminders": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "array",
-                            description: "Array of reminders to create. Each item should have: title (required), list_name (required), notes (optional), due_date (optional)"
-                        )
-                    ],
-                    required: ["reminders"]
-                )
+                description: """
+                Create one or more reminders.
+
+                **Parameters:**
+
+                reminders — Array of reminder objects to create. Each object:
+                  • title (required) — Reminder title
+                  • notes — Body text
+                  • list — Target list as {"name": "..."} or {"id": "..."}. Default list if omitted.
+                  • dueDate — ISO 8601 datetime (e.g., "2024-01-15T10:00:00-05:00")
+                  • priority — "none", "low", "medium", or "high"
+
+                **Examples:**
+
+                Single reminder:
+                  {"reminders": [{"title": "Buy milk"}]}
+
+                With details:
+                  {"reminders": [{"title": "Call dentist", "list": {"name": "Personal"}, "dueDate": "2024-01-20T09:00:00-05:00", "priority": "high"}]}
+
+                Batch create:
+                  {"reminders": [
+                    {"title": "Buy milk"},
+                    {"title": "Buy eggs"},
+                    {"title": "Buy bread", "priority": "low"}
+                  ]}
+                """,
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "required": .array([.string("reminders")]),
+                    "properties": .object([
+                        "reminders": .object([
+                            "type": .string("array"),
+                            "minItems": .int(1),
+                            "items": .object([
+                                "type": .string("object"),
+                                "required": .array([.string("title")]),
+                                "properties": .object([
+                                    "title": .object([
+                                        "type": .string("string"),
+                                        "description": .string("Reminder title")
+                                    ]),
+                                    "notes": .object([
+                                        "type": .string("string"),
+                                        "description": .string("Reminder notes/body text")
+                                    ]),
+                                    "list": .object([
+                                        "type": .string("object"),
+                                        "description": .string("Target list. Uses default list if omitted."),
+                                        "properties": .object([
+                                            "name": .object(["type": .string("string")]),
+                                            "id": .object(["type": .string("string")])
+                                        ]),
+                                        "additionalProperties": .bool(false)
+                                    ]),
+                                    "dueDate": .object([
+                                        "type": .string("string"),
+                                        "description": .string("Due date in ISO 8601 format")
+                                    ]),
+                                    "priority": .object([
+                                        "type": .string("string"),
+                                        "enum": .array([.string("none"), .string("low"), .string("medium"), .string("high")]),
+                                        "description": .string("Priority level")
+                                    ])
+                                ]),
+                                "additionalProperties": .bool(false)
+                            ])
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
             ),
+
+            // update_reminders
             MCPResponse.Result.Tool(
                 name: "update_reminders",
-                description: "Update multiple reminders in a single call. Returns per-item results with success/failure status.",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "updates": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "array",
-                            description: "Array of updates. Each item should have: reminder_id (required), and any of: title, notes, due_date, priority"
-                        )
-                    ],
-                    required: ["updates"]
-                )
+                description: """
+                Update one or more reminders. Only specified fields are changed.
+
+                **Parameters:**
+
+                reminders — Array of update objects. Each object:
+                  • id (required) — Reminder ID to update
+                  • title — New title
+                  • notes — New notes (null to clear)
+                  • list — Move to list as {"name": "..."} or {"id": "..."}
+                  • dueDate — New due date as ISO 8601 (null to clear)
+                  • priority — "none", "low", "medium", or "high"
+                  • completed — true to complete, false to uncomplete
+                  • completedDate — ISO 8601 completion date (null to uncomplete)
+
+                **Examples:**
+
+                Update title:
+                  {"reminders": [{"id": "...", "title": "Buy oat milk"}]}
+
+                Move to different list:
+                  {"reminders": [{"id": "...", "list": {"name": "Groceries"}}]}
+
+                Complete a reminder:
+                  {"reminders": [{"id": "...", "completed": true}]}
+
+                Uncomplete a reminder:
+                  {"reminders": [{"id": "...", "completed": false}]}
+
+                Complete with specific date:
+                  {"reminders": [{"id": "...", "completedDate": "2024-01-15T10:00:00-05:00"}]}
+
+                Clear due date:
+                  {"reminders": [{"id": "...", "dueDate": null}]}
+
+                Batch update (complete multiple):
+                  {"reminders": [
+                    {"id": "abc", "completed": true},
+                    {"id": "def", "completed": true},
+                    {"id": "ghi", "completed": true}
+                  ]}
+                """,
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "required": .array([.string("reminders")]),
+                    "properties": .object([
+                        "reminders": .object([
+                            "type": .string("array"),
+                            "minItems": .int(1),
+                            "items": .object([
+                                "type": .string("object"),
+                                "required": .array([.string("id")]),
+                                "properties": .object([
+                                    "id": .object([
+                                        "type": .string("string"),
+                                        "description": .string("Reminder ID to update")
+                                    ]),
+                                    "title": .object([
+                                        "type": .string("string"),
+                                        "description": .string("New title")
+                                    ]),
+                                    "notes": .object([
+                                        "type": .string("string"),
+                                        "description": .string("New notes. Set to null to clear.")
+                                    ]),
+                                    "list": .object([
+                                        "type": .string("object"),
+                                        "description": .string("Move to this list"),
+                                        "properties": .object([
+                                            "name": .object(["type": .string("string")]),
+                                            "id": .object(["type": .string("string")])
+                                        ]),
+                                        "additionalProperties": .bool(false)
+                                    ]),
+                                    "dueDate": .object([
+                                        "type": .string("string"),
+                                        "description": .string("New due date in ISO 8601 format. Set to null to clear.")
+                                    ]),
+                                    "priority": .object([
+                                        "type": .string("string"),
+                                        "enum": .array([.string("none"), .string("low"), .string("medium"), .string("high")]),
+                                        "description": .string("New priority level")
+                                    ]),
+                                    "completed": .object([
+                                        "type": .string("boolean"),
+                                        "description": .string("Set true to complete, false to uncomplete")
+                                    ]),
+                                    "completedDate": .object([
+                                        "type": .string("string"),
+                                        "description": .string("Completion date in ISO 8601 format. Set to null to uncomplete. Overrides 'completed' if both provided.")
+                                    ])
+                                ]),
+                                "additionalProperties": .bool(false)
+                            ])
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
             ),
+
+            // delete_reminders
             MCPResponse.Result.Tool(
                 name: "delete_reminders",
-                description: "Delete multiple reminders in a single call. Returns per-item results with success/failure status.",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "reminder_ids": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "array",
-                            description: "Array of reminder IDs to delete"
-                        )
-                    ],
-                    required: ["reminder_ids"]
-                )
-            ),
-            MCPResponse.Result.Tool(
-                name: "complete_reminders",
-                description: "Mark multiple reminders as completed in a single call. Returns per-item results with success/failure status.",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "reminder_ids": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "array",
-                            description: "Array of reminder IDs to mark as completed"
-                        )
-                    ],
-                    required: ["reminder_ids"]
-                )
-            ),
-            // Search operations
-            MCPResponse.Result.Tool(
-                name: "search_reminders",
-                description: "Search and filter reminders with flexible criteria. Supports text search, date ranges, and status filtering.",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "search_text": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "Text to search for in reminder titles and notes (case-insensitive)"
-                        ),
-                        "list_id": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "Filter by specific list ID"
-                        ),
-                        "list_name": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "Filter by list name (used if list_id not provided)"
-                        ),
-                        "status": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "Filter by status: 'incomplete' or 'completed' (default: 'incomplete')"
-                        ),
-                        "date_from": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "For incomplete: due after this date. For completed: completed after this date. ISO 8601 or YYYY-MM-DD format."
-                        ),
-                        "date_to": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "For incomplete: due before this date. For completed: completed before this date. ISO 8601 or YYYY-MM-DD format."
-                        ),
-                        "limit": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "integer",
-                            description: "Maximum number of reminders to return (default: 100)"
-                        )
-                    ],
-                    required: nil
-                )
-            ),
-            MCPResponse.Result.Tool(
-                name: "search_reminder_lists",
-                description: "Search for reminder lists by name.",
-                inputSchema: MCPResponse.Result.Tool.InputSchema(
-                    type: "object",
-                    properties: [
-                        "search_text": MCPResponse.Result.Tool.InputSchema.Property(
-                            type: "string",
-                            description: "Text to search for in list names (case-insensitive)"
-                        )
-                    ],
-                    required: nil
-                )
+                description: """
+                Delete one or more reminders permanently.
+
+                **Parameters:**
+
+                ids — Array of reminder IDs to delete
+
+                **Examples:**
+
+                Single delete:
+                  {"ids": ["abc123"]}
+
+                Batch delete:
+                  {"ids": ["abc123", "def456", "ghi789"]}
+                """,
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "required": .array([.string("ids")]),
+                    "properties": .object([
+                        "ids": .object([
+                            "type": .string("array"),
+                            "minItems": .int(1),
+                            "items": .object([
+                                "type": .string("string")
+                            ]),
+                            "description": .string("Array of reminder IDs to delete")
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
             )
         ]
     }
 
     private func callTool(_ name: String, arguments: [String: AnyCodable]) throws -> String {
         switch name {
-        case "list_reminder_lists":
-            let lists = remindersManager.listReminderLists()
-            let result = ["lists": lists, "count": lists.count] as [String : Any]
-            return try toJSON(result)
+        case "get_lists":
+            let lists = remindersManager.getAllLists()
+            return try toJSON(lists)
 
-        case "create_reminder_list":
-            guard let name = arguments["name"]?.value as? String else {
-                throw NSError(domain: "MCPServer", code: 400, userInfo: [NSLocalizedDescriptionKey: "Missing name"])
+        case "create_list":
+            guard let listName = arguments["name"]?.value as? String else {
+                throw MCPToolError("Missing required field: 'name'")
             }
+            let createdList = try remindersManager.createList(name: listName)
+            return try toJSON(createdList)
 
-            let id = try remindersManager.createReminderList(name: name)
-            let result = ["success": true, "list_id": id, "name": name] as [String : Any]
-            return try toJSON(result)
-
-        case "list_today_reminders":
-            let reminders = remindersManager.getTodayReminders()
-            let result = ["reminders": reminders, "count": reminders.count] as [String : Any]
-            return try toJSON(result)
-
-        case "list_reminders":
-            let listName = arguments["list_name"]?.value as? String
-            let showCompleted = arguments["completed"]?.value as? Bool ?? false
-
-            let reminders = remindersManager.listReminders(listName: listName, showCompleted: showCompleted)
-            let result = ["reminders": reminders, "count": reminders.count] as [String : Any]
-            return try toJSON(result)
-
-        case "create_reminder":
-            guard let title = arguments["title"]?.value as? String else {
-                throw NSError(domain: "MCPServer", code: 400, userInfo: [NSLocalizedDescriptionKey: "Missing title"])
-            }
-
-            let listName = arguments["list_name"]?.value as? String ?? "Reminders"
-            let notes = arguments["notes"]?.value as? String
-            let dueDate = arguments["due_date"]?.value as? String
-
-            let id = try remindersManager.createReminder(title: title, listName: listName, notes: notes, dueDate: dueDate)
-            let result = ["success": true, "reminder_id": id, "title": title] as [String : Any]
-            return try toJSON(result)
-
-        case "complete_reminder":
-            guard let id = arguments["reminder_id"]?.value as? String else {
-                throw NSError(domain: "MCPServer", code: 400, userInfo: [NSLocalizedDescriptionKey: "Missing reminder_id"])
-            }
-
-            try remindersManager.completeReminder(id: id)
-            let result = ["success": true, "reminder_id": id] as [String : Any]
-            return try toJSON(result)
-
-        case "delete_reminder":
-            guard let id = arguments["reminder_id"]?.value as? String else {
-                throw NSError(domain: "MCPServer", code: 400, userInfo: [NSLocalizedDescriptionKey: "Missing reminder_id"])
-            }
-
-            try remindersManager.deleteReminder(id: id)
-            let result = ["success": true, "reminder_id": id] as [String : Any]
-            return try toJSON(result)
-
-        case "update_reminder":
-            guard let id = arguments["reminder_id"]?.value as? String else {
-                throw NSError(domain: "MCPServer", code: 400, userInfo: [NSLocalizedDescriptionKey: "Missing reminder_id"])
-            }
-
-            let title = arguments["title"]?.value as? String
-            let notes = arguments["notes"]?.value as? String
-            let dueDate = arguments["due_date"]?.value as? String
-            let priorityValue = arguments["priority"]?.value
-            var priority: Int? = nil
-
-            if let priorityString = priorityValue as? String, let priorityInt = Int(priorityString) {
-                priority = priorityInt
-            } else if let priorityInt = priorityValue as? Int {
-                priority = priorityInt
-            }
-
-            try remindersManager.updateReminder(id: id, title: title, notes: notes, dueDate: dueDate, priority: priority)
-            let result = ["success": true, "reminder_id": id] as [String : Any]
-            return try toJSON(result)
-
-        // Batch operations
-        case "create_reminders":
-            let input = try validate(arguments, as: CreateRemindersInput.self)
-            let results = remindersManager.createReminders(items: input.reminders)
-            let succeeded = results.filter { $0["success"] as? Bool == true }.count
-            let failed = results.count - succeeded
-            let response: [String: Any] = [
-                "results": results,
-                "summary": [
-                    "total": results.count,
-                    "succeeded": succeeded,
-                    "failed": failed
-                ]
-            ]
-            return try toJSON(response)
-
-        case "update_reminders":
-            let input = try validate(arguments, as: UpdateRemindersInput.self)
-            let results = remindersManager.updateReminders(updates: input.updates)
-            let succeeded = results.filter { $0["success"] as? Bool == true }.count
-            let failed = results.count - succeeded
-            let response: [String: Any] = [
-                "results": results,
-                "summary": [
-                    "total": results.count,
-                    "succeeded": succeeded,
-                    "failed": failed
-                ]
-            ]
-            return try toJSON(response)
-
-        case "delete_reminders":
-            let input = try validate(arguments, as: BatchIdsInput.self)
-            let results = remindersManager.deleteReminders(ids: input.reminder_ids)
-            let succeeded = results.filter { $0["success"] as? Bool == true }.count
-            let failed = results.count - succeeded
-            let response: [String: Any] = [
-                "results": results,
-                "summary": [
-                    "total": results.count,
-                    "succeeded": succeeded,
-                    "failed": failed
-                ]
-            ]
-            return try toJSON(response)
-
-        case "complete_reminders":
-            let input = try validate(arguments, as: BatchIdsInput.self)
-            let results = remindersManager.completeReminders(ids: input.reminder_ids)
-            let succeeded = results.filter { $0["success"] as? Bool == true }.count
-            let failed = results.count - succeeded
-            let response: [String: Any] = [
-                "results": results,
-                "summary": [
-                    "total": results.count,
-                    "succeeded": succeeded,
-                    "failed": failed
-                ]
-            ]
-            return try toJSON(response)
-
-        // Search operations
-        case "search_reminders":
-            let searchText = arguments["search_text"]?.value as? String
-            let listId = arguments["list_id"]?.value as? String
-            let listName = arguments["list_name"]?.value as? String
+        case "query_reminders":
+            let listDict = arguments["list"]?.value as? [String: Any]
+            let listSelector = ListSelector(from: listDict)
             let status = arguments["status"]?.value as? String
-            let dateFrom = arguments["date_from"]?.value as? String
-            let dateTo = arguments["date_to"]?.value as? String
+            let sortBy = arguments["sortBy"]?.value as? String
+            let query = arguments["query"]?.value as? String
             let limit = arguments["limit"]?.value as? Int
 
-            let reminders = remindersManager.searchReminders(
-                searchText: searchText,
-                listId: listId,
-                listName: listName,
+            let result = try remindersManager.queryReminders(
+                list: listDict == nil ? nil : listSelector,
                 status: status,
-                dateFrom: dateFrom,
-                dateTo: dateTo,
+                sortBy: sortBy,
+                query: query,
                 limit: limit
             )
-            let result = ["reminders": reminders, "count": reminders.count] as [String : Any]
+
             return try toJSON(result)
 
-        case "search_reminder_lists":
-            let searchText = arguments["search_text"]?.value as? String
-            let lists = remindersManager.searchReminderLists(searchText: searchText)
-            let result = ["lists": lists, "count": lists.count] as [String : Any]
-            return try toJSON(result)
+        case "create_reminders":
+            guard let remindersArray = arguments["reminders"]?.value as? [[String: Any]] else {
+                throw MCPToolError("Missing required field: 'reminders'")
+            }
+
+            var inputs: [CreateReminderInput] = []
+            for (index, dict) in remindersArray.enumerated() {
+                guard let title = dict["title"] as? String else {
+                    throw MCPToolError("Missing required field 'title' in reminder at index \(index)")
+                }
+                inputs.append(CreateReminderInput(
+                    title: title,
+                    notes: dict["notes"] as? String,
+                    list: ListSelector(from: dict["list"] as? [String: Any]),
+                    dueDate: dict["dueDate"] as? String,
+                    priority: dict["priority"] as? String
+                ))
+            }
+
+            let (created, failed) = remindersManager.createReminders(inputs: inputs)
+
+            if failed.isEmpty {
+                return try toJSON(created)
+            } else {
+                let failedOutput = failed.map { ["index": $0.index, "error": $0.error] }
+                let response: [String: Any] = ["created": encodableArray(created), "failed": failedOutput]
+                return try toJSON(response)
+            }
+
+        case "update_reminders":
+            guard let remindersArray = arguments["reminders"]?.value as? [[String: Any]] else {
+                throw MCPToolError("Missing required field: 'reminders'")
+            }
+
+            var inputs: [UpdateReminderInput] = []
+            for (index, dict) in remindersArray.enumerated() {
+                guard let id = dict["id"] as? String else {
+                    throw MCPToolError("Missing required field 'id' in reminder at index \(index)")
+                }
+                inputs.append(UpdateReminderInput(
+                    id: id,
+                    title: dict["title"] as? String,
+                    notes: dict["notes"],
+                    list: ListSelector(from: dict["list"] as? [String: Any]),
+                    dueDate: dict["dueDate"],
+                    priority: dict["priority"] as? String,
+                    completed: dict["completed"] as? Bool,
+                    completedDate: dict["completedDate"]
+                ))
+            }
+
+            let (updated, failed) = remindersManager.updateReminders(inputs: inputs)
+
+            if failed.isEmpty {
+                return try toJSON(updated)
+            } else {
+                let failedOutput = failed.map { ["id": $0.id, "error": $0.error] }
+                let response: [String: Any] = ["updated": encodableArray(updated), "failed": failedOutput]
+                return try toJSON(response)
+            }
+
+        case "delete_reminders":
+            guard let ids = arguments["ids"]?.value as? [String] else {
+                throw MCPToolError("Missing required field: 'ids'")
+            }
+
+            let (deleted, failed) = remindersManager.deleteReminders(ids: ids)
+            let failedOutput = failed.map { ["id": $0.id, "error": $0.error] }
+            let response: [String: Any] = ["deleted": deleted, "failed": failedOutput]
+            return try toJSON(response)
 
         default:
-            throw NSError(domain: "MCPServer", code: 404, userInfo: [NSLocalizedDescriptionKey: "Unknown tool: \(name)"])
+            throw MCPToolError("Unknown tool: \(name)")
+        }
+    }
+
+    private func encodableArray(_ reminders: [ReminderOutput]) -> [[String: Any]] {
+        return reminders.map { reminder in
+            var dict: [String: Any] = [
+                "id": reminder.id,
+                "title": reminder.title,
+                "listId": reminder.listId,
+                "listName": reminder.listName,
+                "isCompleted": reminder.isCompleted,
+                "priority": reminder.priority,
+                "creationDate": reminder.creationDate,
+                "modificationDate": reminder.modificationDate
+            ]
+            if let notes = reminder.notes {
+                dict["notes"] = notes
+            }
+            if let dueDate = reminder.dueDate {
+                dict["dueDate"] = dueDate
+            }
+            if let completionDate = reminder.completionDate {
+                dict["completionDate"] = completionDate
+            }
+            return dict
         }
     }
 
@@ -1496,11 +1541,35 @@ class MCPServer {
     }
 
     private func toJSON(_ object: Any) throws -> String {
+        if let encodable = object as? Encodable {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .prettyPrinted
+            let data = try encoder.encode(AnyEncodable(encodable))
+            guard let string = String(data: data, encoding: .utf8) else {
+                throw MCPToolError("Failed to convert to JSON string")
+            }
+            return string
+        }
+
         let data = try JSONSerialization.data(withJSONObject: object, options: .prettyPrinted)
         guard let string = String(data: data, encoding: .utf8) else {
-            throw NSError(domain: "MCPServer", code: 500, userInfo: [NSLocalizedDescriptionKey: "Failed to convert to JSON string"])
+            throw MCPToolError("Failed to convert to JSON string")
         }
         return string
+    }
+}
+
+// MARK: - AnyEncodable Helper
+
+struct AnyEncodable: Encodable {
+    private let encodable: Encodable
+
+    init(_ encodable: Encodable) {
+        self.encodable = encodable
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try encodable.encode(to: encoder)
     }
 }
 
