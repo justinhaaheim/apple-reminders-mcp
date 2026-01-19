@@ -1,0 +1,14 @@
+{
+  "pins" : [
+    {
+      "identity" : "jmespath.swift",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/adam-fowler/jmespath.swift",
+      "state" : {
+        "revision" : "3877a5060e85ae33e3b9fe51ab581784f65ec80e",
+        "version" : "1.0.3"
+      }
+    }
+  ],
+  "version" : 2
+}
