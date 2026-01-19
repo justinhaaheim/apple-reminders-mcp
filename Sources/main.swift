@@ -17,6 +17,377 @@ struct TestModeConfig {
     }
 }
 
+// MARK: - Mock Mode Configuration
+
+struct MockModeConfig {
+    static let envVar = "AR_MCP_MOCK_MODE"
+
+    static var isEnabled: Bool {
+        ProcessInfo.processInfo.environment[envVar] == "1"
+    }
+}
+
+// MARK: - Reminder Store Protocol
+
+/// Protocol abstracting reminder storage operations.
+/// Allows swapping between real EventKit and mock implementations.
+protocol ReminderStore {
+    func requestAccess() async throws -> Bool
+    func getAllCalendars() -> [ReminderCalendar]
+    func getDefaultCalendar() -> ReminderCalendar?
+    func createCalendar(name: String) throws -> ReminderCalendar
+    func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder]
+    func getReminder(withId id: String) -> Reminder?
+    func saveReminder(_ reminder: Reminder) throws
+    func deleteReminder(_ reminder: Reminder) throws
+}
+
+/// Status filter for fetching reminders
+enum ReminderStatus {
+    case incomplete
+    case completed
+    case all
+}
+
+/// Protocol-agnostic calendar representation
+protocol ReminderCalendar {
+    var id: String { get }
+    var name: String { get }
+}
+
+/// Protocol-agnostic reminder representation
+protocol Reminder {
+    var id: String { get }
+    var title: String { get set }
+    var notes: String? { get set }
+    var calendarId: String { get set }
+    var isCompleted: Bool { get }
+    var priority: Int { get set }
+    var dueDateComponents: DateComponents? { get set }
+    var completionDate: Date? { get set }
+    var creationDate: Date? { get }
+    var lastModifiedDate: Date? { get }
+
+    func getCalendarName(from store: ReminderStore) -> String
+}
+
+// MARK: - EventKit Implementations
+
+/// Wrapper around EKCalendar to conform to ReminderCalendar
+class EKCalendarWrapper: ReminderCalendar {
+    let calendar: EKCalendar
+
+    init(_ calendar: EKCalendar) {
+        self.calendar = calendar
+    }
+
+    var id: String { calendar.calendarIdentifier }
+    var name: String { calendar.title }
+}
+
+/// Wrapper around EKReminder to conform to Reminder
+class EKReminderWrapper: Reminder {
+    let reminder: EKReminder
+    private let eventStore: EKEventStore
+
+    init(_ reminder: EKReminder, eventStore: EKEventStore) {
+        self.reminder = reminder
+        self.eventStore = eventStore
+    }
+
+    var id: String { reminder.calendarItemIdentifier }
+
+    var title: String {
+        get { reminder.title ?? "" }
+        set { reminder.title = newValue }
+    }
+
+    var notes: String? {
+        get { reminder.notes }
+        set { reminder.notes = newValue }
+    }
+
+    var calendarId: String {
+        get { reminder.calendar?.calendarIdentifier ?? "" }
+        set {
+            if let calendar = eventStore.calendar(withIdentifier: newValue) {
+                reminder.calendar = calendar
+            }
+        }
+    }
+
+    var isCompleted: Bool { reminder.isCompleted }
+
+    var priority: Int {
+        get { reminder.priority }
+        set { reminder.priority = newValue }
+    }
+
+    var dueDateComponents: DateComponents? {
+        get { reminder.dueDateComponents }
+        set { reminder.dueDateComponents = newValue }
+    }
+
+    var completionDate: Date? {
+        get { reminder.completionDate }
+        set { reminder.completionDate = newValue }
+    }
+
+    var creationDate: Date? { reminder.creationDate }
+    var lastModifiedDate: Date? { reminder.lastModifiedDate }
+
+    func getCalendarName(from store: ReminderStore) -> String {
+        return reminder.calendar?.title ?? ""
+    }
+}
+
+/// Real EventKit-based reminder store
+class EKReminderStore: ReminderStore {
+    private let eventStore = EKEventStore()
+
+    func requestAccess() async throws -> Bool {
+        return try await eventStore.requestFullAccessToReminders()
+    }
+
+    func getAllCalendars() -> [ReminderCalendar] {
+        return eventStore.calendars(for: .reminder).map { EKCalendarWrapper($0) }
+    }
+
+    func getDefaultCalendar() -> ReminderCalendar? {
+        guard let calendar = eventStore.defaultCalendarForNewReminders() else {
+            return nil
+        }
+        return EKCalendarWrapper(calendar)
+    }
+
+    func createCalendar(name: String) throws -> ReminderCalendar {
+        let calendar = EKCalendar(for: .reminder, eventStore: eventStore)
+        calendar.title = name
+
+        guard let source = findBestSource() else {
+            throw MCPToolError("No available source for creating reminder list")
+        }
+
+        calendar.source = source
+        try eventStore.saveCalendar(calendar, commit: true)
+        return EKCalendarWrapper(calendar)
+    }
+
+    private func findBestSource() -> EKSource? {
+        if let iCloudSource = eventStore.sources.first(where: { $0.title == "iCloud" }) {
+            return iCloudSource
+        }
+        if let defaultSource = eventStore.defaultCalendarForNewReminders()?.source {
+            return defaultSource
+        }
+        return eventStore.sources.first
+    }
+
+    func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder] {
+        let ekCalendars = calendars.compactMap { wrapper -> EKCalendar? in
+            guard let ekWrapper = wrapper as? EKCalendarWrapper else { return nil }
+            return ekWrapper.calendar
+        }
+
+        return await withCheckedContinuation { continuation in
+            let predicate: NSPredicate
+            switch status {
+            case .completed:
+                predicate = eventStore.predicateForCompletedReminders(
+                    withCompletionDateStarting: nil,
+                    ending: nil,
+                    calendars: ekCalendars
+                )
+            case .incomplete:
+                predicate = eventStore.predicateForIncompleteReminders(
+                    withDueDateStarting: nil,
+                    ending: nil,
+                    calendars: ekCalendars
+                )
+            case .all:
+                predicate = eventStore.predicateForReminders(in: ekCalendars)
+            }
+
+            eventStore.fetchReminders(matching: predicate) { reminders in
+                let wrapped = (reminders ?? []).map { EKReminderWrapper($0, eventStore: self.eventStore) }
+                continuation.resume(returning: wrapped)
+            }
+        }
+    }
+
+    func getReminder(withId id: String) -> Reminder? {
+        guard let ekReminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
+            return nil
+        }
+        return EKReminderWrapper(ekReminder, eventStore: eventStore)
+    }
+
+    func saveReminder(_ reminder: Reminder) throws {
+        guard let wrapper = reminder as? EKReminderWrapper else {
+            throw MCPToolError("Invalid reminder type")
+        }
+        try eventStore.save(wrapper.reminder, commit: true)
+    }
+
+    func deleteReminder(_ reminder: Reminder) throws {
+        guard let wrapper = reminder as? EKReminderWrapper else {
+            throw MCPToolError("Invalid reminder type")
+        }
+        try eventStore.remove(wrapper.reminder, commit: true)
+    }
+
+    /// Create a new reminder in the specified calendar
+    func createReminder(in calendar: ReminderCalendar) -> Reminder {
+        guard let wrapper = calendar as? EKCalendarWrapper else {
+            fatalError("Invalid calendar type")
+        }
+        let reminder = EKReminder(eventStore: eventStore)
+        reminder.calendar = wrapper.calendar
+        return EKReminderWrapper(reminder, eventStore: eventStore)
+    }
+}
+
+// MARK: - Mock Implementations
+
+/// Mock calendar for testing
+class MockCalendar: ReminderCalendar {
+    let id: String
+    var name: String
+
+    init(id: String = UUID().uuidString, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+/// Mock reminder for testing
+class MockReminder: Reminder {
+    let id: String
+    var title: String
+    var notes: String?
+    var calendarId: String
+    var priority: Int = 0
+    var dueDateComponents: DateComponents?
+    var completionDate: Date?
+    let creationDate: Date?
+    var lastModifiedDate: Date?
+
+    private weak var store: MockReminderStore?
+
+    var isCompleted: Bool {
+        return completionDate != nil
+    }
+
+    init(
+        id: String = UUID().uuidString,
+        title: String = "",
+        calendarId: String,
+        store: MockReminderStore? = nil
+    ) {
+        self.id = id
+        self.title = title
+        self.calendarId = calendarId
+        self.creationDate = Date()
+        self.lastModifiedDate = Date()
+        self.store = store
+    }
+
+    func getCalendarName(from store: ReminderStore) -> String {
+        guard let mockStore = store as? MockReminderStore else { return "" }
+        return mockStore.calendars.first { $0.id == calendarId }?.name ?? ""
+    }
+
+    func updateModificationDate() {
+        lastModifiedDate = Date()
+    }
+}
+
+/// In-memory mock reminder store for testing
+class MockReminderStore: ReminderStore {
+    var calendars: [MockCalendar] = []
+    var reminders: [MockReminder] = []
+    var defaultCalendarId: String?
+
+    init() {
+        // Create a default list
+        let defaultCalendar = MockCalendar(name: "Reminders")
+        calendars.append(defaultCalendar)
+        defaultCalendarId = defaultCalendar.id
+    }
+
+    func requestAccess() async throws -> Bool {
+        return true
+    }
+
+    func getAllCalendars() -> [ReminderCalendar] {
+        return calendars
+    }
+
+    func getDefaultCalendar() -> ReminderCalendar? {
+        return calendars.first { $0.id == defaultCalendarId }
+    }
+
+    func createCalendar(name: String) throws -> ReminderCalendar {
+        let calendar = MockCalendar(name: name)
+        calendars.append(calendar)
+        return calendar
+    }
+
+    func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder] {
+        let calendarIds = Set(calendars.map { $0.id })
+
+        return reminders.filter { reminder in
+            guard calendarIds.contains(reminder.calendarId) else { return false }
+
+            switch status {
+            case .completed:
+                return reminder.isCompleted
+            case .incomplete:
+                return !reminder.isCompleted
+            case .all:
+                return true
+            }
+        }
+    }
+
+    func getReminder(withId id: String) -> Reminder? {
+        return reminders.first { $0.id == id }
+    }
+
+    func saveReminder(_ reminder: Reminder) throws {
+        guard let mockReminder = reminder as? MockReminder else {
+            throw MCPToolError("Invalid reminder type")
+        }
+
+        mockReminder.updateModificationDate()
+
+        // Check if it's an update or new reminder
+        if let index = reminders.firstIndex(where: { $0.id == mockReminder.id }) {
+            reminders[index] = mockReminder
+        } else {
+            reminders.append(mockReminder)
+        }
+    }
+
+    func deleteReminder(_ reminder: Reminder) throws {
+        guard let mockReminder = reminder as? MockReminder else {
+            throw MCPToolError("Invalid reminder type")
+        }
+
+        guard let index = reminders.firstIndex(where: { $0.id == mockReminder.id }) else {
+            throw MCPToolError("Reminder not found")
+        }
+
+        reminders.remove(at: index)
+    }
+
+    /// Create a new reminder in the specified calendar
+    func createReminder(in calendar: ReminderCalendar) -> MockReminder {
+        let reminder = MockReminder(calendarId: calendar.id, store: self)
+        return reminder
+    }
+}
+
 // MARK: - MCP Protocol Types
 
 struct MCPRequest: Codable {
@@ -361,13 +732,17 @@ struct MCPToolError: Error, LocalizedError {
 // MARK: - Reminders Manager
 
 class RemindersManager {
-    private let eventStore = EKEventStore()
+    private let store: ReminderStore
     private var hasAccess = false
+
+    init(store: ReminderStore) {
+        self.store = store
+    }
 
     // MARK: - Access
 
     func requestAccess() async throws {
-        hasAccess = try await eventStore.requestFullAccessToReminders()
+        hasAccess = try await store.requestAccess()
         if !hasAccess {
             throw MCPToolError("Access to Reminders denied")
         }
@@ -376,28 +751,24 @@ class RemindersManager {
     // MARK: - List Operations
 
     func getAllLists() -> [ReminderListOutput] {
-        let calendars = eventStore.calendars(for: .reminder)
-        let defaultCalendar = eventStore.defaultCalendarForNewReminders()
+        let calendars = store.getAllCalendars()
+        let defaultCalendar = store.getDefaultCalendar()
 
         return calendars.map { calendar in
             ReminderListOutput(
-                id: calendar.calendarIdentifier,
-                name: calendar.title,
-                isDefault: calendar.calendarIdentifier == defaultCalendar?.calendarIdentifier
+                id: calendar.id,
+                name: calendar.name,
+                isDefault: calendar.id == defaultCalendar?.id
             )
         }
     }
 
-    func getDefaultList() -> EKCalendar? {
-        return eventStore.defaultCalendarForNewReminders()
-    }
-
-    func resolveList(_ selector: ListSelector?) throws -> [EKCalendar] {
-        let allCalendars = eventStore.calendars(for: .reminder)
+    func resolveList(_ selector: ListSelector?) throws -> [ReminderCalendar] {
+        let allCalendars = store.getAllCalendars()
 
         guard let selector = selector, !selector.isEmpty else {
             // No selector → default list
-            guard let defaultCalendar = eventStore.defaultCalendarForNewReminders() else {
+            guard let defaultCalendar = store.getDefaultCalendar() else {
                 throw MCPToolError("No default list found")
             }
             return [defaultCalendar]
@@ -414,7 +785,7 @@ class RemindersManager {
         }
 
         if let id = selector.id {
-            guard let match = allCalendars.first(where: { $0.calendarIdentifier == id }) else {
+            guard let match = allCalendars.first(where: { $0.id == id }) else {
                 throw MCPToolError("No list found with ID: '\(id)'")
             }
             return [match]
@@ -422,9 +793,9 @@ class RemindersManager {
 
         if let name = selector.name {
             guard let match = allCalendars.first(where: {
-                $0.title.caseInsensitiveCompare(name) == .orderedSame
+                $0.name.caseInsensitiveCompare(name) == .orderedSame
             }) else {
-                let available = allCalendars.map { $0.title }.joined(separator: ", ")
+                let available = allCalendars.map { $0.name }.joined(separator: ", ")
                 throw MCPToolError("No list found with name: '\(name)'. Available lists: \(available).")
             }
             return [match]
@@ -433,10 +804,10 @@ class RemindersManager {
         throw MCPToolError("Invalid list selector")
     }
 
-    func resolveListForCreate(_ selector: ListSelector?) throws -> EKCalendar {
+    func resolveListForCreate(_ selector: ListSelector?) throws -> ReminderCalendar {
         guard let selector = selector, !selector.isEmpty else {
             // No selector → default list
-            guard let defaultCalendar = eventStore.defaultCalendarForNewReminders() else {
+            guard let defaultCalendar = store.getDefaultCalendar() else {
                 throw MCPToolError("No default list found")
             }
             return defaultCalendar
@@ -452,10 +823,10 @@ class RemindersManager {
             throw MCPToolError("List selector must specify exactly one of: 'id' or 'name'")
         }
 
-        let allCalendars = eventStore.calendars(for: .reminder)
+        let allCalendars = store.getAllCalendars()
 
         if let id = selector.id {
-            guard let match = allCalendars.first(where: { $0.calendarIdentifier == id }) else {
+            guard let match = allCalendars.first(where: { $0.id == id }) else {
                 throw MCPToolError("No list found with ID: '\(id)'")
             }
             return match
@@ -463,9 +834,9 @@ class RemindersManager {
 
         if let name = selector.name {
             guard let match = allCalendars.first(where: {
-                $0.title.caseInsensitiveCompare(name) == .orderedSame
+                $0.name.caseInsensitiveCompare(name) == .orderedSame
             }) else {
-                let available = allCalendars.map { $0.title }.joined(separator: ", ")
+                let available = allCalendars.map { $0.name }.joined(separator: ", ")
                 throw MCPToolError("No list found with name: '\(name)'. Available lists: \(available).")
             }
             return match
@@ -483,32 +854,14 @@ class RemindersManager {
             )
         }
 
-        let calendar = EKCalendar(for: .reminder, eventStore: eventStore)
-        calendar.title = name
+        let calendar = try store.createCalendar(name: name)
 
-        guard let source = findBestSource() else {
-            throw MCPToolError("No available source for creating reminder list")
-        }
-
-        calendar.source = source
-        try eventStore.saveCalendar(calendar, commit: true)
-
-        log("Created reminder list '\(name)' with ID: \(calendar.calendarIdentifier)")
+        log("Created reminder list '\(name)' with ID: \(calendar.id)")
         return ReminderListOutput(
-            id: calendar.calendarIdentifier,
-            name: calendar.title,
+            id: calendar.id,
+            name: calendar.name,
             isDefault: false
         )
-    }
-
-    private func findBestSource() -> EKSource? {
-        if let iCloudSource = eventStore.sources.first(where: { $0.title == "iCloud" }) {
-            return iCloudSource
-        }
-        if let defaultSource = eventStore.defaultCalendarForNewReminders()?.source {
-            return defaultSource
-        }
-        return eventStore.sources.first
     }
 
     // MARK: - Query Operations
@@ -519,7 +872,7 @@ class RemindersManager {
         sortBy: String?,
         query: String?,
         limit: Int?
-    ) throws -> Any {
+    ) async throws -> Any {
         let startTime = Date()
         log("Starting queryReminders")
 
@@ -529,45 +882,20 @@ class RemindersManager {
 
         // 2. Fetch reminders with status filter
         let statusFilter = status ?? "incomplete"
-        var allReminders: [EKReminder] = []
-        let semaphore = DispatchSemaphore(value: 0)
-
-        // Determine which predicate to use based on status
-        let predicate: NSPredicate
-        if statusFilter == "completed" {
-            predicate = eventStore.predicateForCompletedReminders(
-                withCompletionDateStarting: nil,
-                ending: nil,
-                calendars: calendars
-            )
-        } else if statusFilter == "incomplete" {
-            predicate = eventStore.predicateForIncompleteReminders(
-                withDueDateStarting: nil,
-                ending: nil,
-                calendars: calendars
-            )
-        } else {
-            // "all" - fetch all reminders
-            predicate = eventStore.predicateForReminders(in: calendars)
+        let reminderStatus: ReminderStatus
+        switch statusFilter {
+        case "completed":
+            reminderStatus = .completed
+        case "incomplete":
+            reminderStatus = .incomplete
+        default:
+            reminderStatus = .all
         }
 
-        eventStore.fetchReminders(matching: predicate) { reminders in
-            if let reminders = reminders {
-                allReminders = reminders
-            }
-            semaphore.signal()
-        }
-        semaphore.wait()
+        let allReminders = await store.fetchReminders(in: calendars, status: reminderStatus)
 
         let fetchTime = Date().timeIntervalSince(startTime)
         log("Fetched \(allReminders.count) reminders in \(Int(fetchTime * 1000))ms")
-
-        // Filter by status if using "all" predicate
-        if statusFilter == "completed" {
-            allReminders = allReminders.filter { $0.isCompleted }
-        } else if statusFilter == "incomplete" {
-            allReminders = allReminders.filter { !$0.isCompleted }
-        }
 
         // Convert to output format
         var reminderOutputs = allReminders.map { convertToOutput($0) }
@@ -649,15 +977,13 @@ class RemindersManager {
         }
     }
 
-    private func convertToOutput(_ reminder: EKReminder) -> ReminderOutput {
-        let calendar = reminder.calendar
-
+    private func convertToOutput(_ reminder: Reminder) -> ReminderOutput {
         return ReminderOutput(
-            id: reminder.calendarItemIdentifier,
-            title: reminder.title ?? "",
+            id: reminder.id,
+            title: reminder.title,
             notes: reminder.notes,
-            listId: calendar?.calendarIdentifier ?? "",
-            listName: calendar?.title ?? "",
+            listId: reminder.calendarId,
+            listName: reminder.getCalendarName(from: store),
             isCompleted: reminder.isCompleted,
             priority: Priority.fromInternal(reminder.priority).rawValue,
             dueDate: reminder.dueDateComponents?.date?.toISO8601WithTimezone(),
@@ -689,24 +1015,33 @@ class RemindersManager {
         let calendar = try resolveListForCreate(input.list)
 
         // Test mode validation
-        if TestModeConfig.isEnabled && !TestModeConfig.isTestList(calendar.title) {
+        if TestModeConfig.isEnabled && !TestModeConfig.isTestList(calendar.name) {
             throw MCPToolError(
-                "TEST MODE: Cannot create reminder in list '\(calendar.title)'. " +
+                "TEST MODE: Cannot create reminder in list '\(calendar.name)'. " +
                 "Target list must start with '\(TestModeConfig.testListPrefix)'"
             )
         }
 
-        let reminder = EKReminder(eventStore: eventStore)
-        reminder.calendar = calendar
-        reminder.title = input.title
+        // Create reminder using the appropriate store method
+        let reminder: Reminder
+        if let mockStore = store as? MockReminderStore {
+            reminder = mockStore.createReminder(in: calendar)
+        } else if let ekStore = store as? EKReminderStore {
+            reminder = ekStore.createReminder(in: calendar)
+        } else {
+            throw MCPToolError("Unknown store type")
+        }
+
+        var mutableReminder = reminder
+        mutableReminder.title = input.title
 
         if let notes = input.notes {
-            reminder.notes = notes
+            mutableReminder.notes = notes
         }
 
         if let dueDateString = input.dueDate {
             if let date = Date.fromISO8601(dueDateString) {
-                reminder.dueDateComponents = Calendar.current.dateComponents(
+                mutableReminder.dueDateComponents = Calendar.current.dateComponents(
                     [.year, .month, .day, .hour, .minute],
                     from: date
                 )
@@ -719,13 +1054,13 @@ class RemindersManager {
             guard let priority = Priority.fromString(priorityString) else {
                 throw MCPToolError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
             }
-            reminder.priority = priority.internalValue
+            mutableReminder.priority = priority.internalValue
         }
 
-        try eventStore.save(reminder, commit: true)
-        log("Created reminder '\(input.title)' in list '\(calendar.title)'")
+        try store.saveReminder(mutableReminder)
+        log("Created reminder '\(input.title)' in list '\(calendar.name)'")
 
-        return convertToOutput(reminder)
+        return convertToOutput(mutableReminder)
     }
 
     // MARK: - Update Operations
@@ -747,20 +1082,18 @@ class RemindersManager {
     }
 
     private func updateSingleReminder(_ input: UpdateReminderInput) throws -> ReminderOutput {
-        guard let reminder = eventStore.calendarItem(withIdentifier: input.id) as? EKReminder else {
+        guard var reminder = store.getReminder(withId: input.id) else {
             throw MCPToolError("No reminder found with ID: '\(input.id)'")
         }
 
+        let calendarName = reminder.getCalendarName(from: store)
+
         // Test mode validation
-        if TestModeConfig.isEnabled {
-            guard let listName = reminder.calendar?.title,
-                  TestModeConfig.isTestList(listName) else {
-                let actualList = reminder.calendar?.title ?? "unknown"
-                throw MCPToolError(
-                    "TEST MODE: Cannot modify reminder in list '\(actualList)'. " +
-                    "Reminder must be in a list starting with '\(TestModeConfig.testListPrefix)'"
-                )
-            }
+        if TestModeConfig.isEnabled && !TestModeConfig.isTestList(calendarName) {
+            throw MCPToolError(
+                "TEST MODE: Cannot modify reminder in list '\(calendarName)'. " +
+                "Reminder must be in a list starting with '\(TestModeConfig.testListPrefix)'"
+            )
         }
 
         // Update title
@@ -782,14 +1115,14 @@ class RemindersManager {
             let newCalendar = try resolveListForCreate(listSelector)
 
             // Test mode validation for target list
-            if TestModeConfig.isEnabled && !TestModeConfig.isTestList(newCalendar.title) {
+            if TestModeConfig.isEnabled && !TestModeConfig.isTestList(newCalendar.name) {
                 throw MCPToolError(
-                    "TEST MODE: Cannot move reminder to list '\(newCalendar.title)'. " +
+                    "TEST MODE: Cannot move reminder to list '\(newCalendar.name)'. " +
                     "Target list must start with '\(TestModeConfig.testListPrefix)'"
                 )
             }
 
-            reminder.calendar = newCalendar
+            reminder.calendarId = newCalendar.id
         }
 
         // Update due date (can be cleared with null)
@@ -835,8 +1168,8 @@ class RemindersManager {
             }
         }
 
-        try eventStore.save(reminder, commit: true)
-        log("Updated reminder '\(reminder.title ?? input.id)'")
+        try store.saveReminder(reminder)
+        log("Updated reminder '\(reminder.title)'")
 
         return convertToOutput(reminder)
     }
@@ -860,31 +1193,40 @@ class RemindersManager {
     }
 
     private func deleteSingleReminder(id: String) throws {
-        guard let reminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
+        guard let reminder = store.getReminder(withId: id) else {
             throw MCPToolError("No reminder found with ID: '\(id)'")
         }
 
+        let calendarName = reminder.getCalendarName(from: store)
+
         // Test mode validation
-        if TestModeConfig.isEnabled {
-            guard let listName = reminder.calendar?.title,
-                  TestModeConfig.isTestList(listName) else {
-                let actualList = reminder.calendar?.title ?? "unknown"
-                throw MCPToolError(
-                    "TEST MODE: Cannot delete reminder in list '\(actualList)'. " +
-                    "Reminder must be in a list starting with '\(TestModeConfig.testListPrefix)'"
-                )
-            }
+        if TestModeConfig.isEnabled && !TestModeConfig.isTestList(calendarName) {
+            throw MCPToolError(
+                "TEST MODE: Cannot delete reminder in list '\(calendarName)'. " +
+                "Reminder must be in a list starting with '\(TestModeConfig.testListPrefix)'"
+            )
         }
 
-        try eventStore.remove(reminder, commit: true)
-        log("Deleted reminder '\(reminder.title ?? id)'")
+        try store.deleteReminder(reminder)
+        log("Deleted reminder '\(reminder.title)'")
     }
 }
 
 // MARK: - MCP Server
 
 class MCPServer {
-    private let remindersManager = RemindersManager()
+    private let remindersManager: RemindersManager
+
+    init() {
+        // Choose store based on mock mode
+        let store: ReminderStore
+        if MockModeConfig.isEnabled {
+            store = MockReminderStore()
+        } else {
+            store = EKReminderStore()
+        }
+        self.remindersManager = RemindersManager(store: store)
+    }
 
     func start() async {
         do {
@@ -895,6 +1237,10 @@ class MCPServer {
             exit(1)
         }
 
+        if MockModeConfig.isEnabled {
+            log("MOCK MODE ENABLED - Using in-memory storage (no real reminders)")
+        }
+
         if TestModeConfig.isEnabled {
             log("TEST MODE ENABLED - Write operations restricted to lists prefixed with '\(TestModeConfig.testListPrefix)'")
         }
@@ -902,11 +1248,11 @@ class MCPServer {
         log("Apple Reminders MCP Server running on stdio")
 
         while let line = readLine() {
-            handleRequest(line)
+            await handleRequest(line)
         }
     }
 
-    private func handleRequest(_ line: String) {
+    private func handleRequest(_ line: String) async {
         guard let data = line.data(using: .utf8) else { return }
 
         var requestId: MCPRequest.RequestID?
@@ -916,7 +1262,7 @@ class MCPServer {
 
         do {
             let request = try JSONDecoder().decode(MCPRequest.self, from: data)
-            let response = try processRequest(request)
+            let response = try await processRequest(request)
             sendResponse(response)
         } catch {
             logError("Error processing request: \(error)")
@@ -933,7 +1279,7 @@ class MCPServer {
         sendResponse(errorResponse)
     }
 
-    private func processRequest(_ request: MCPRequest) throws -> MCPResponse {
+    private func processRequest(_ request: MCPRequest) async throws -> MCPResponse {
         switch request.method {
         case "initialize":
             let instructions = """
@@ -999,7 +1345,7 @@ class MCPServer {
             }
 
             do {
-                let resultText = try callTool(toolName, arguments: params.arguments ?? [:])
+                let resultText = try await callTool(toolName, arguments: params.arguments ?? [:])
                 return MCPResponse(
                     id: request.id,
                     result: MCPResponse.Result(
@@ -1395,7 +1741,7 @@ class MCPServer {
         ]
     }
 
-    private func callTool(_ name: String, arguments: [String: AnyCodable]) throws -> String {
+    private func callTool(_ name: String, arguments: [String: AnyCodable]) async throws -> String {
         switch name {
         case "get_lists":
             let lists = remindersManager.getAllLists()
@@ -1416,7 +1762,7 @@ class MCPServer {
             let query = arguments["query"]?.value as? String
             let limit = arguments["limit"]?.value as? Int
 
-            let result = try remindersManager.queryReminders(
+            let result = try await remindersManager.queryReminders(
                 list: listDict == nil ? nil : listSelector,
                 status: status,
                 sortBy: sortBy,

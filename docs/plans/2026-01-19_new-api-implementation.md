@@ -66,3 +66,34 @@ Replace the existing 14-tool MCP server with the new 6-tool API defined in the s
 - Build verification (`bun run build`)
 - Test execution (`bun run test`)
 - The Swift code can't be compiled in the web environment
+
+### 2026-01-19: Added Mock Mode Support
+
+**Completed:**
+
+1. Implemented `ReminderStore` protocol to abstract storage operations
+2. Created `EKReminderStore` wrapper for real EventKit
+3. Created `MockReminderStore` with full in-memory storage
+4. Added `AR_MCP_MOCK_MODE=1` environment variable toggle
+5. Updated `MCPClient` test utility to use mock mode by default
+6. Tests now run in mock mode (fast, deterministic, cross-platform)
+
+**Key features:**
+
+- Mock mode starts with a default "Reminders" list
+- All reminder operations work identically in mock and real mode
+- Test mode restrictions work in both modes
+- Real mode can be enabled with `MCPClient.create({mockMode: false})`
+
+**Usage:**
+
+```typescript
+// Default: mock mode (in-memory, fast, works everywhere)
+const client = await MCPClient.create();
+
+// Real EventKit testing (requires macOS)
+const client = await MCPClient.createWithRealEventKit();
+
+// Test mock mode with test restrictions
+const client = await MCPClient.create({mockMode: true, testMode: true});
+```

@@ -2,6 +2,9 @@
  * Tests to verify that test mode restrictions work correctly.
  * These tests verify that the server blocks operations on non-test lists.
  *
+ * Note: These tests use mock mode WITH test mode enabled to test the
+ * test mode restrictions logic.
+ *
  * Updated for the new 6-tool API.
  */
 
@@ -12,7 +15,11 @@ describe('Test mode restrictions', () => {
   let client: MCPClient;
 
   beforeAll(async () => {
-    client = await MCPClient.create();
+    // Use mock mode but WITH test mode enabled to test restrictions
+    client = await MCPClient.create({
+      mockMode: true,
+      testMode: true,
+    });
   });
 
   afterAll(async () => {

@@ -3,6 +3,14 @@
  * Spawns the server process and communicates via JSON-RPC over stdin/stdout.
  *
  * Updated for the new 6-tool API.
+ *
+ * Supports two modes:
+ * - Mock mode (default): Uses in-memory storage, no EventKit access needed
+ * - Real mode: Uses actual Apple Reminders via EventKit (requires macOS)
+ *
+ * Environment variables:
+ * - AR_MCP_MOCK_MODE=1: Enable mock mode (in-memory storage)
+ * - AR_MCP_TEST_MODE=1: Enable test mode (restricts writes to test lists)
  */
 
 import {spawn, type Subprocess} from 'bun';
@@ -37,31 +45,56 @@ interface ToolResult {
   [key: string]: unknown;
 }
 
+interface MCPClientOptions {
+  /** Use mock mode (in-memory storage). Default: true */
+  mockMode?: boolean;
+  /** Use test mode (restricts writes to test lists). Default: true for real mode */
+  testMode?: boolean;
+}
+
 export class MCPClient {
   private process: Subprocess<'pipe', 'pipe', 'pipe'>;
   private requestId = 0;
   private testListName: string | null = null;
   private createdReminderIds: string[] = [];
+  private useMockMode: boolean;
 
-  private constructor(proc: Subprocess<'pipe', 'pipe', 'pipe'>) {
+  private constructor(
+    proc: Subprocess<'pipe', 'pipe', 'pipe'>,
+    useMockMode: boolean,
+  ) {
     this.process = proc;
+    this.useMockMode = useMockMode;
   }
 
   /**
-   * Create a new MCP client with test mode enabled.
+   * Create a new MCP client.
+   *
+   * By default uses mock mode (in-memory storage) which:
+   * - Works on any platform (no macOS/EventKit required)
+   * - Provides fast, deterministic tests
+   * - Starts with a clean slate each time
+   *
+   * For real EventKit testing, use: MCPClient.create({mockMode: false})
    */
-  static async create(): Promise<MCPClient> {
+  static async create(options: MCPClientOptions = {}): Promise<MCPClient> {
+    const {mockMode = true, testMode} = options;
+
+    // For real mode, default to test mode enabled for safety
+    const useTestMode = testMode ?? !mockMode;
+
     const proc = spawn([EXECUTABLE_PATH], {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
       env: {
         ...process.env,
-        AR_MCP_TEST_MODE: '1',
+        AR_MCP_MOCK_MODE: mockMode ? '1' : undefined,
+        AR_MCP_TEST_MODE: useTestMode ? '1' : undefined,
       },
     });
 
-    const client = new MCPClient(proc);
+    const client = new MCPClient(proc, mockMode);
 
     // Wait a bit for the server to start
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -73,23 +106,36 @@ export class MCPClient {
   }
 
   /**
-   * Create a new MCP client WITHOUT test mode (for testing that test mode works).
+   * Create a new MCP client with real EventKit (requires macOS).
+   * Test mode is enabled by default to prevent accidental modification of real data.
    */
-  static async createWithoutTestMode(): Promise<MCPClient> {
-    const proc = spawn([EXECUTABLE_PATH], {
-      stdin: 'pipe',
-      stdout: 'pipe',
-      stderr: 'pipe',
-      env: {
-        ...process.env,
-        AR_MCP_TEST_MODE: undefined,
-      },
+  static async createWithRealEventKit(
+    options: {testMode?: boolean} = {},
+  ): Promise<MCPClient> {
+    return MCPClient.create({
+      mockMode: false,
+      testMode: options.testMode ?? true,
     });
+  }
 
-    const client = new MCPClient(proc);
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    await client.initialize();
-    return client;
+  /**
+   * Create a new MCP client WITHOUT test mode (for testing that test mode works).
+   * WARNING: This can modify real reminders if not in mock mode!
+   */
+  static async createWithoutTestMode(
+    options: {mockMode?: boolean} = {},
+  ): Promise<MCPClient> {
+    return MCPClient.create({
+      mockMode: options.mockMode ?? true,
+      testMode: false,
+    });
+  }
+
+  /**
+   * Check if this client is using mock mode.
+   */
+  isMockMode(): boolean {
+    return this.useMockMode;
   }
 
   private async initialize(): Promise<void> {
@@ -200,10 +246,17 @@ export class MCPClient {
 
   /**
    * Create a unique test list for this test run.
+   * In mock mode, uses a simpler name since there's no conflict risk.
+   * In real mode, uses the test prefix to comply with test mode restrictions.
    */
   async createTestList(): Promise<string> {
     const uuid = randomUUID().split('-')[0];
-    this.testListName = `${TEST_LIST_PREFIX} - TMP (${uuid})`;
+
+    // In mock mode, we can use simpler names since it's all in-memory
+    // In real mode, we need the test prefix for test mode validation
+    this.testListName = this.useMockMode
+      ? `Test List (${uuid})`
+      : `${TEST_LIST_PREFIX} - TMP (${uuid})`;
 
     const result = await this.callTool('create_list', {
       name: this.testListName,
