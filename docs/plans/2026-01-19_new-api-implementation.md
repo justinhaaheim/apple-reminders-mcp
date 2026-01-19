@@ -2,13 +2,13 @@
 
 ## Goal
 
-Replace the existing 14-tool MCP server with the new 6-tool API defined in the spec.
+Replace the existing 14-tool MCP server with a new consolidated API, currently 7 tools.
 
 ## Key Changes Summary
 
 | Current                       | New                                                   |
 | ----------------------------- | ----------------------------------------------------- |
-| 14 separate tools             | 6 consolidated tools                                  |
+| 14 separate tools             | 7 consolidated tools                                  |
 | `name`/`body` fields          | `title`/`notes` fields                                |
 | Priority as integers (0-9)    | Priority as strings ("none", "low", "medium", "high") |
 | `list_name` string parameter  | `list: {name, id, all}` object                        |
@@ -24,6 +24,7 @@ Replace the existing 14-tool MCP server with the new 6-tool API defined in the s
 - [x] Implement `create_reminders` - batch create with partial failure
 - [x] Implement `update_reminders` - includes completion logic
 - [x] Implement `delete_reminders` - batch delete with partial failure
+- [x] Implement `export_reminders` - export to JSON file for backup
 - [x] Remove all old tools
 - [x] Update tests in `test/*.test.ts`
 - [ ] Final verification: `bun run build && bun run test && bun run signal` (requires macOS)
@@ -96,4 +97,44 @@ const client = await MCPClient.createWithRealEventKit();
 
 // Test mock mode with test restrictions
 const client = await MCPClient.create({mockMode: true, testMode: true});
+```
+
+### 2026-01-19: Added export_reminders Tool
+
+**Completed:**
+
+1. Added `export_reminders` tool for bulk data export/backup
+2. Writes to temp directory by default (user moves to permanent location)
+3. Supports custom path with `~` expansion
+4. Optional list filtering and `includeCompleted` flag
+5. Returns small metadata (path, stats, size) - data stays in file
+
+**Key features:**
+
+- File goes to `NSTemporaryDirectory()` with timestamp filename
+- Pretty-printed JSON with all lists and reminders
+- Stats include: lists count, reminders count, completed/incomplete counts
+- Export format includes version and source for future compatibility
+
+**Tool parameters:**
+
+```json
+{
+  "path": "~/Desktop/backup.json", // optional, default: temp
+  "lists": [{"name": "Work"}], // optional, default: all
+  "includeCompleted": true // optional, default: true
+}
+```
+
+**Response example:**
+
+```json
+{
+  "success": true,
+  "path": "/var/folders/.../reminders-export-2026-01-19T103045.json",
+  "exportDate": "2026-01-19T10:30:45-08:00",
+  "stats": {"lists": 5, "reminders": 1523, "completed": 892, "incomplete": 631},
+  "fileSizeBytes": 2048576,
+  "note": "File is in temp directory. Move it to a permanent location to keep it."
+}
 ```

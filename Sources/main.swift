@@ -602,6 +602,33 @@ struct ReminderListOutput: Codable {
     let isDefault: Bool
 }
 
+// MARK: - Export Types
+
+struct ExportStats: Codable {
+    let lists: Int
+    let reminders: Int
+    let completed: Int
+    let incomplete: Int
+}
+
+struct ExportData: Codable {
+    let exportVersion: String
+    let exportDate: String
+    let source: String
+    let stats: ExportStats
+    let lists: [ReminderListOutput]
+    let reminders: [ReminderOutput]
+}
+
+struct ExportResult: Codable {
+    let success: Bool
+    let path: String
+    let exportDate: String
+    let stats: ExportStats
+    let fileSizeBytes: Int
+    let note: String
+}
+
 // MARK: - Input Types
 
 struct ListSelector {
@@ -1210,6 +1237,114 @@ class RemindersManager {
         try store.deleteReminder(reminder)
         log("Deleted reminder '\(reminder.title)'")
     }
+
+    // MARK: - Export Operations
+
+    func exportReminders(
+        path: String?,
+        lists: [ListSelector]?,
+        includeCompleted: Bool
+    ) async throws -> ExportResult {
+        // Generate timestamp for filename
+        let now = Date()
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withFullDate, .withFullTime, .withTimeZone]
+        let exportDate = isoFormatter.string(from: now)
+
+        // Generate filename-safe timestamp
+        let fileFormatter = DateFormatter()
+        fileFormatter.dateFormat = "yyyy-MM-dd'T'HHmmss"
+        let fileTimestamp = fileFormatter.string(from: now)
+
+        // Determine output path
+        let outputPath: String
+        if let customPath = path {
+            // Expand ~ to home directory
+            outputPath = NSString(string: customPath).expandingTildeInPath
+        } else {
+            // Use temp directory with timestamped filename
+            let tempDir = NSTemporaryDirectory()
+            outputPath = (tempDir as NSString).appendingPathComponent("reminders-export-\(fileTimestamp).json")
+        }
+
+        // Determine which calendars to export
+        let calendarsToExport: [ReminderCalendar]
+        if let listSelectors = lists, !listSelectors.isEmpty {
+            // Export specific lists
+            var selectedCalendars: [ReminderCalendar] = []
+            for selector in listSelectors {
+                if let calendar = resolveList(selector) {
+                    selectedCalendars.append(calendar)
+                }
+            }
+            calendarsToExport = selectedCalendars
+        } else {
+            // Export all lists
+            calendarsToExport = store.getAllCalendars()
+        }
+
+        // Fetch reminders
+        let status: ReminderStatus = includeCompleted ? .all : .incomplete
+        let reminders = await store.fetchReminders(in: calendarsToExport, status: status)
+
+        // Convert to output format
+        let reminderOutputs = reminders.map { toReminderOutput($0) }
+
+        // Get list information
+        let defaultCalendar = store.getDefaultCalendar()
+        let listOutputs = calendarsToExport.map { calendar in
+            ReminderListOutput(
+                id: calendar.id,
+                name: calendar.name,
+                isDefault: calendar.id == defaultCalendar?.id
+            )
+        }
+
+        // Calculate stats
+        let completedCount = reminderOutputs.filter { $0.isCompleted }.count
+        let incompleteCount = reminderOutputs.filter { !$0.isCompleted }.count
+        let stats = ExportStats(
+            lists: listOutputs.count,
+            reminders: reminderOutputs.count,
+            completed: completedCount,
+            incomplete: incompleteCount
+        )
+
+        // Create export data
+        let exportData = ExportData(
+            exportVersion: "1.0",
+            exportDate: exportDate,
+            source: "apple-reminders-mcp",
+            stats: stats,
+            lists: listOutputs,
+            reminders: reminderOutputs
+        )
+
+        // Encode to JSON
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let jsonData = try encoder.encode(exportData)
+
+        // Write to file
+        let fileURL = URL(fileURLWithPath: outputPath)
+
+        // Create parent directory if needed
+        let parentDir = fileURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: parentDir, withIntermediateDirectories: true)
+
+        try jsonData.write(to: fileURL)
+        log("Exported \(reminderOutputs.count) reminders to \(outputPath)")
+
+        // Return result
+        return ExportResult(
+            success: true,
+            path: outputPath,
+            exportDate: exportDate,
+            stats: stats,
+            fileSizeBytes: jsonData.count,
+            note: "File is in temp directory. Move it to a permanent location to keep it."
+        )
+    }
 }
 
 // MARK: - MCP Server
@@ -1292,6 +1427,7 @@ class MCPServer {
             • create_reminders - Create one or more reminders
             • update_reminders - Update reminders (including mark complete/incomplete)
             • delete_reminders - Delete reminders
+            • export_reminders - Export reminders to JSON file (for backup)
 
             QUICK START:
             1. Call query_reminders with {} to see incomplete reminders from default list
@@ -1737,6 +1873,73 @@ class MCPServer {
                     ]),
                     "additionalProperties": .bool(false)
                 ])
+            ),
+
+            // export_reminders
+            MCPResponse.Result.Tool(
+                name: "export_reminders",
+                description: """
+                Export reminders to a JSON file for backup or data portability.
+
+                Writes all reminder data to a file without consuming LLM context tokens.
+                Default location is system temp directory; move the file to keep it permanently.
+
+                **Parameters (all optional):**
+
+                path — Custom file path (default: temp directory with timestamp)
+                  • Supports ~ for home directory
+                  • Example: "~/Desktop/my-backup.json"
+
+                lists — Array of lists to export (default: all lists)
+                  • Each item: {"name": "..."} or {"id": "..."}
+                  • Example: [{"name": "Work"}, {"name": "Personal"}]
+
+                includeCompleted — Include completed reminders (default: true)
+
+                **Examples:**
+
+                Export everything to temp:
+                  {}
+
+                Export to Desktop:
+                  {"path": "~/Desktop/reminders-backup.json"}
+
+                Export only incomplete reminders:
+                  {"includeCompleted": false}
+
+                Export specific lists:
+                  {"lists": [{"name": "Work"}, {"name": "Shopping"}]}
+
+                **File format:**
+                JSON with exportVersion, exportDate, stats, lists[], and reminders[].
+                """,
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "path": .object([
+                            "type": .string("string"),
+                            "description": .string("Custom file path. Supports ~ for home directory. Default: temp directory with timestamp.")
+                        ]),
+                        "lists": .object([
+                            "type": .string("array"),
+                            "description": .string("Lists to export. Default: all lists."),
+                            "items": .object([
+                                "type": .string("object"),
+                                "properties": .object([
+                                    "name": .object(["type": .string("string"), "description": .string("List name")]),
+                                    "id": .object(["type": .string("string"), "description": .string("List ID")])
+                                ]),
+                                "additionalProperties": .bool(false)
+                            ])
+                        ]),
+                        "includeCompleted": .object([
+                            "type": .string("boolean"),
+                            "default": .bool(true),
+                            "description": .string("Include completed reminders in export")
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
             )
         ]
     }
@@ -1842,6 +2045,24 @@ class MCPServer {
             let failedOutput = failed.map { ["id": $0.id, "error": $0.error] }
             let response: [String: Any] = ["deleted": deleted, "failed": failedOutput]
             return try toJSON(response)
+
+        case "export_reminders":
+            let path = arguments["path"]?.value as? String
+            let includeCompleted = arguments["includeCompleted"]?.value as? Bool ?? true
+
+            // Parse lists array if provided
+            var listSelectors: [ListSelector]? = nil
+            if let listsArray = arguments["lists"]?.value as? [[String: Any]] {
+                listSelectors = listsArray.map { ListSelector(from: $0) }
+            }
+
+            let result = try await remindersManager.exportReminders(
+                path: path,
+                lists: listSelectors,
+                includeCompleted: includeCompleted
+            )
+
+            return try toJSON(result)
 
         default:
             throw MCPToolError("Unknown tool: \(name)")

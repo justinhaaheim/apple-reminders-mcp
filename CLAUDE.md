@@ -49,14 +49,13 @@ Sources/
 
 | Tool | Description |
 |------|-------------|
-| `list_reminder_lists` | Get all reminder lists |
-| `create_reminder_list` | Create a new list |
-| `list_today_reminders` | Get today's/overdue reminders |
-| `list_reminders` | Get reminders with filters |
-| `create_reminder` | Create a reminder |
-| `complete_reminder` | Mark complete |
-| `delete_reminder` | Delete a reminder |
-| `update_reminder` | Update reminder properties |
+| `query_reminders` | Search and filter reminders with JMESPath support |
+| `get_lists` | Get all reminder lists |
+| `create_list` | Create a new list |
+| `create_reminders` | Create one or more reminders (batch) |
+| `update_reminders` | Update reminders including mark complete/incomplete (batch) |
+| `delete_reminders` | Delete reminders (batch) |
+| `export_reminders` | Export reminders to JSON file for backup |
 
 ## Claude Desktop Configuration
 
