@@ -1,10 +1,45 @@
 # Apple Reminders MCP Server Specification
 
+## Implementation Context (for this repo)
+
+This spec describes a **redesign** of the existing MCP server. Key implementation notes:
+
+### What to Change
+
+1. **Replace all existing tools** with the 6 tools defined in this spec
+2. **Add JMESPath dependency** to `Package.swift`:
+   ```swift
+   .package(url: "https://github.com/adam-fowler/jmespath.swift", from: "1.0.0")
+   ```
+3. **All code is in `Sources/main.swift`** - update that single file
+4. **Preserve test mode infrastructure** - the `TestModeConfig` struct and validation methods must remain
+5. **Update tests** in `test/*.test.ts` to match the new API
+
+### Key Differences from Current Implementation
+
+| Current                       | New                                                   |
+| ----------------------------- | ----------------------------------------------------- |
+| 14 separate tools             | 6 consolidated tools                                  |
+| `name`/`body` fields          | `title`/`notes` fields                                |
+| Priority as integers (0-9)    | Priority as strings ("none", "low", "medium", "high") |
+| `list_name` string parameter  | `list: {name, id, all}` object                        |
+| Hardcoded "Reminders" default | Use `defaultCalendarForNewReminders()`                |
+| ISO8601 with `Z` suffix       | ISO8601 with `+HH:MM` timezone                        |
+
+### Build & Test Commands
+
+- `bun run build` - Build the Swift binary
+- `bun run test` - Run TypeScript tests (with AR_MCP_TEST_MODE=1)
+- `bun run signal` - Check formatting (run before committing)
+
+---
+
 ## Overview
 
 A Model Context Protocol (MCP) server that provides access to Apple Reminders via stdio transport. Built in Swift, using JMESPath for flexible querying.
 
 **Key design principles:**
+
 - Sensible defaults that minimize required parameters for common queries
 - Explicit disambiguation between list names and IDs
 - JMESPath for advanced filtering and projection
@@ -37,7 +72,7 @@ struct Reminder {
     let listId: String                // ID of containing list
     let listName: String              // Name of containing list
     let isCompleted: Bool
-    let priority: Int                 // 0 = none, 1 = high, 5 = medium, 9 = low
+    let priority: String              // "none", "low", "medium", or "high"
     let dueDate: String?              // ISO 8601 with timezone, or null
     let completionDate: String?       // ISO 8601 with timezone, or null
     let creationDate: String          // ISO 8601 with timezone
@@ -45,15 +80,9 @@ struct Reminder {
 }
 ```
 
-**Priority mapping:**
-| Value | Meaning |
-|-------|---------|
-| 0 | None |
-| 1 | High |
-| 5 | Medium |
-| 9 | Low |
+**Priority values:** `"none"`, `"low"`, `"medium"`, `"high"`
 
-Note: Apple uses these specific values internally. Other values (2-4, 6-8) are technically valid but not used by the Reminders UI.
+Note: Internally, Apple uses integers (0=none, 1=high, 5=medium, 9=low). This API abstracts those away—both input and output use the string values above.
 
 ### ReminderList
 
@@ -61,8 +90,7 @@ Note: Apple uses these specific values internally. Other values (2-4, 6-8) are t
 struct ReminderList {
     let id: String                    // Apple's internal identifier
     let name: String
-    let isDefault: Bool               // True if this is the user's default list
-    let count: Int?                   // Number of incomplete reminders (optional, may be expensive to compute)
+    let isDefault: Bool               // True if this is the user's default list (via EventKit's defaultCalendarForNewReminders())
 }
 ```
 
@@ -70,15 +98,16 @@ struct ReminderList {
 
 ## Tools
 
-The server exposes 5 tools:
+The server exposes 6 tools:
 
-| Tool | Purpose |
-|------|---------|
-| `query_reminders` | Query/search reminders with filtering and JMESPath |
-| `get_lists` | Get all available reminder lists |
-| `create_reminders` | Create one or more reminders |
+| Tool               | Purpose                                                      |
+| ------------------ | ------------------------------------------------------------ |
+| `query_reminders`  | Query/search reminders with filtering and JMESPath           |
+| `get_lists`        | Get all available reminder lists                             |
+| `create_list`      | Create a new reminder list                                   |
+| `create_reminders` | Create one or more reminders                                 |
 | `update_reminders` | Update one or more reminders (including complete/uncomplete) |
-| `delete_reminders` | Delete one or more reminders |
+| `delete_reminders` | Delete one or more reminders                                 |
 
 ---
 
@@ -88,12 +117,12 @@ Query reminders with flexible filtering. This is the primary tool for retrieving
 
 #### Default Behavior (when parameters are omitted)
 
-| Aspect | Default |
-|--------|---------|
-| List | Default list only (not all lists) |
-| Status | Incomplete only |
-| Sort | Newest created first |
-| Limit | 50 |
+| Aspect | Default                           |
+| ------ | --------------------------------- |
+| List   | Default list only (not all lists) |
+| Status | Incomplete only                   |
+| Sort   | Newest created first              |
+| Limit  | 50                                |
 
 #### Input Schema
 
@@ -155,7 +184,7 @@ The `list` object must have exactly one of: `name`, `id`, or `all`. If multiple 
 ```swift
 func resolveList(_ selector: ListSelector?) async throws -> [ReminderList] {
     let allLists = try await fetchAllLists()
-    
+
     guard let selector else {
         // No selector → default list
         guard let defaultList = allLists.first(where: { $0.isDefault }) else {
@@ -163,33 +192,33 @@ func resolveList(_ selector: ListSelector?) async throws -> [ReminderList] {
         }
         return [defaultList]
     }
-    
+
     // Validate exactly one key is set
     let setCount = [selector.id != nil, selector.name != nil, selector.all == true].filter { $0 }.count
     if setCount != 1 {
         throw MCPError("List selector must specify exactly one of: 'id', 'name', or 'all'")
     }
-    
+
     if selector.all == true {
         return allLists
     }
-    
+
     if let id = selector.id {
         guard let match = allLists.first(where: { $0.id == id }) else {
             throw MCPError("No list found with ID: '\(id)'")
         }
         return [match]
     }
-    
+
     if let name = selector.name {
-        guard let match = allLists.first(where: { 
-            $0.name.caseInsensitiveCompare(name) == .orderedSame 
+        guard let match = allLists.first(where: {
+            $0.name.caseInsensitiveCompare(name) == .orderedSame
         }) else {
             throw MCPError("No list found with name: '\(name)'")
         }
         return [match]
     }
-    
+
     throw MCPError("Invalid list selector")
 }
 ```
@@ -204,12 +233,14 @@ func resolveList(_ selector: ListSelector?) async throws -> [ReminderList] {
 
 #### Sort Implementations
 
-| sortBy | Behavior |
-|--------|----------|
-| `newest` | By `creationDate` descending (most recent first) |
-| `oldest` | By `creationDate` ascending |
-| `priority` | By `priority` ascending (1=high first, then 5=medium, then 9=low, then 0=none) |
-| `dueDate` | By `dueDate` ascending (soonest first, nulls last) |
+| sortBy     | Behavior                                                     |
+| ---------- | ------------------------------------------------------------ |
+| `newest`   | By `creationDate` descending (most recent first)             |
+| `oldest`   | By `creationDate` ascending                                  |
+| `priority` | By `priority` (high first, then medium, then low, then none) |
+| `dueDate`  | By `dueDate` ascending (soonest first, nulls last)           |
+
+**Note on `dueDate` sorting with `status: "all"`:** When querying both completed and incomplete reminders, sorting by `dueDate` applies uniformly—reminders without a due date go to the end regardless of completion status.
 
 #### Tool Description (for LLM)
 
@@ -249,10 +280,10 @@ All lists, completed:
   {"list": {"all": true}, "status": "completed"}
 
 Has any priority set:
-  {"query": "[?priority != `0`]"}
+  {"query": "[?priority != 'none']"}
 
 High priority only:
-  {"query": "[?priority == `1`]"}
+  {"query": "[?priority == 'high']"}
 
 Title contains text:
   {"query": "[?contains(title, 'meeting')]"}
@@ -276,7 +307,7 @@ Created in 2024:
 - listId (string)
 - listName (string)
 - isCompleted (boolean)
-- priority (integer: 0=none, 1=high, 5=medium, 9=low)
+- priority (string: "none", "low", "medium", "high")
 - dueDate (ISO 8601 string or null)
 - completionDate (ISO 8601 string or null)
 - creationDate (ISO 8601 string)
@@ -337,7 +368,7 @@ Returns an array of ReminderList objects.
 {
   "content": [
     {
-      "type": "text", 
+      "type": "text",
       "text": "[{\"id\": \"...\", \"name\": \"Reminders\", \"isDefault\": true}, {\"id\": \"...\", \"name\": \"Work\", \"isDefault\": false}]"
     }
   ]
@@ -346,7 +377,64 @@ Returns an array of ReminderList objects.
 
 ---
 
-### 3. create_reminders
+### 3. create_list
+
+Create a new reminder list.
+
+#### Input Schema
+
+```json
+{
+  "type": "object",
+  "required": ["name"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Name for the new list"
+    }
+  },
+  "additionalProperties": false
+}
+```
+
+#### Tool Description (for LLM)
+
+```
+Create a new reminder list.
+
+**Parameters:**
+
+name (required) — Name for the new list
+
+**Example:**
+
+Create a "Groceries" list:
+  {"name": "Groceries"}
+```
+
+#### Output
+
+Returns the created list.
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"id\": \"x-apple-...\", \"name\": \"Groceries\", \"isDefault\": false}"
+    }
+  ]
+}
+```
+
+#### Notes
+
+- EventKit does not support deleting lists programmatically
+- List names don't need to be unique (Apple Reminders allows duplicates)
+
+---
+
+### 4. create_reminders
 
 Create one or more reminders.
 
@@ -376,8 +464,8 @@ Create one or more reminders.
             "type": "object",
             "description": "Target list. Uses default list if omitted.",
             "properties": {
-              "name": { "type": "string" },
-              "id": { "type": "string" }
+              "name": {"type": "string"},
+              "id": {"type": "string"}
             },
             "additionalProperties": false
           },
@@ -401,12 +489,12 @@ Create one or more reminders.
 
 #### Priority Mapping (Input → Internal)
 
-| Input | Internal Value |
-|-------|----------------|
-| `"none"` | 0 |
-| `"low"` | 9 |
-| `"medium"` | 5 |
-| `"high"` | 1 |
+| Input      | Internal Value |
+| ---------- | -------------- |
+| `"none"`   | 0              |
+| `"low"`    | 9              |
+| `"medium"` | 5              |
+| `"high"`   | 1              |
 
 #### List Selector
 
@@ -476,7 +564,7 @@ The `index` refers to the position in the input array (0-based).
 
 ---
 
-### 4. update_reminders
+### 5. update_reminders
 
 Update one or more reminders. Also used to complete/uncomplete reminders.
 
@@ -510,8 +598,8 @@ Update one or more reminders. Also used to complete/uncomplete reminders.
             "type": "object",
             "description": "Move to this list",
             "properties": {
-              "name": { "type": "string" },
-              "id": { "type": "string" }
+              "name": {"type": "string"},
+              "id": {"type": "string"}
             },
             "additionalProperties": false
           },
@@ -632,7 +720,7 @@ If some reminders fail to update (e.g., ID not found), the response includes bot
 
 ---
 
-### 5. delete_reminders
+### 6. delete_reminders
 
 Delete one or more reminders.
 
@@ -691,7 +779,7 @@ Returns confirmation with deleted IDs.
 
 If some deletions fail (e.g., ID not found), they appear in `failed` with reasons:
 
-```json
+````json
 {
   "content": [
     {
@@ -712,7 +800,7 @@ Use [jmespath.swift](https://github.com/adam-fowler/jmespath.swift) by Adam Fowl
 ```swift
 // Package.swift
 .package(url: "https://github.com/adam-fowler/jmespath.swift", from: "1.0.0")
-```
+````
 
 ### Usage
 
@@ -763,16 +851,16 @@ If JMESPath compilation or evaluation fails, return a clear error:
 
 ### Common Errors
 
-| Situation | Message |
-|-----------|---------|
-| List not found by name | `No list found with name: 'Xyz'. Available lists: Reminders, Work, Personal.` |
-| List not found by ID | `No list found with ID: 'abc123'.` |
-| Invalid list selector | `List selector must specify exactly one of: 'id', 'name', or 'all'.` |
-| Reminder not found | `No reminder found with ID: 'abc123'.` |
-| Missing required field | `Action 'create' requires 'title' to be specified.` |
-| Invalid JMESPath | `Invalid JMESPath expression: <parser error>. Expression: '<query>'.` |
-| Invalid priority | `Invalid priority: 'urgent'. Must be one of: none, low, medium, high.` |
-| Invalid date format | `Invalid date format: '01-15-2024'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.` |
+| Situation              | Message                                                                                         |
+| ---------------------- | ----------------------------------------------------------------------------------------------- |
+| List not found by name | `No list found with name: 'Xyz'. Available lists: Reminders, Work, Personal.`                   |
+| List not found by ID   | `No list found with ID: 'abc123'.`                                                              |
+| Invalid list selector  | `List selector must specify exactly one of: 'id', 'name', or 'all'.`                            |
+| Reminder not found     | `No reminder found with ID: 'abc123'.`                                                          |
+| Missing required field | `Action 'create' requires 'title' to be specified.`                                             |
+| Invalid JMESPath       | `Invalid JMESPath expression: <parser error>. Expression: '<query>'.`                           |
+| Invalid priority       | `Invalid priority: 'urgent'. Must be one of: none, low, medium, high.`                          |
+| Invalid date format    | `Invalid date format: '01-15-2024'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.` |
 
 ---
 
@@ -809,7 +897,7 @@ extension Date {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime]
         // This gives: 2024-01-15T10:30:00Z
-        
+
         // For +HH:MM timezone format, use DateFormatter instead:
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXX"  // XXX gives +HH:MM
@@ -824,7 +912,28 @@ extension Date {
 - Transport: stdio
 - All tool responses use the standard MCP content format with `type: "text"` containing JSON
 - Set `isError: true` on error responses
-- Tool names use snake_case: `query_reminders`, `get_lists`, `manage_reminder`
+- Tool names use snake_case: `query_reminders`, `get_lists`, `create_list`, etc.
+
+### Test Mode (PRESERVE FROM EXISTING IMPLEMENTATION)
+
+The existing codebase has test mode infrastructure that **must be preserved**:
+
+```swift
+// Environment variable enables test mode
+AR_MCP_TEST_MODE=1
+
+// Test mode restricts ALL write operations to lists prefixed with:
+let testListPrefix = "[AR-MCP TEST]"
+```
+
+When `AR_MCP_TEST_MODE=1`:
+
+- `create_list`: Only allows creating lists with names starting with `[AR-MCP TEST]`
+- `create_reminders`: Only allows creating reminders in test lists
+- `update_reminders`: Only allows updating reminders that are in test lists
+- `delete_reminders`: Only allows deleting reminders that are in test lists
+
+This prevents tests from accidentally modifying real user data.
 
 ---
 
@@ -838,19 +947,26 @@ extension Date {
 - [ ] `{"list": {"all": true}}` searches all lists
 - [ ] `{"status": "completed"}` returns only completed
 - [ ] `{"status": "all"}` returns both
-- [ ] `{"sortBy": "priority"}` sorts correctly (1, 5, 9, 0)
+- [ ] `{"sortBy": "priority"}` sorts correctly (high, medium, low, none)
 - [ ] `{"sortBy": "dueDate"}` sorts correctly (nulls last)
-- [ ] `{"query": "[?priority != 0]"}` filters to items with priority
+- [ ] `{"query": "[?priority != 'none']"}` filters to items with priority
 - [ ] `{"query": "[?contains(title, 'test')]"}` text search works
 - [ ] `{"query": "reverse(sort_by(@, &creationDate))[:5]"}` sorting in JMESPath works
 - [ ] `{"limit": 5}` limits results
 - [ ] Invalid list name returns helpful error with available lists
 - [ ] Invalid JMESPath returns helpful error
+- [ ] Priority field in response is string ("none", "low", "medium", "high")
 
 ### get_lists
 
 - [ ] Returns all lists with names, IDs, and isDefault flag
 - [ ] Exactly one list has `isDefault: true`
+
+### create_list
+
+- [ ] Creates list with given name
+- [ ] Returns created list with id, name, isDefault: false
+- [ ] Test mode: rejects names not starting with `[AR-MCP TEST]`
 
 ### create_reminders
 
@@ -893,7 +1009,7 @@ extension Date {
 
 ## Open Questions / Future Considerations
 
-1. **List management**: Should there be tools to create/rename/delete lists? (EventKit limitation: lists cannot be deleted programmatically)
+1. **List deletion/renaming**: `create_list` is supported, but EventKit does not support deleting or renaming lists programmatically. Consider AppleScript fallback if needed.
 
 2. **Recurrence**: Reminders can have recurrence rules. Not exposed in this spec—add later if needed.
 
