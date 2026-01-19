@@ -437,7 +437,7 @@ struct MCPRequest: Codable {
 }
 
 struct MCPResponse: Codable {
-    let jsonrpc: String = "2.0"
+    var jsonrpc: String = "2.0"
     let id: MCPRequest.RequestID
     let result: Result?
     let error: MCPError?
@@ -934,13 +934,12 @@ class RemindersManager {
     }
 
     private func applyJMESPath(_ reminders: [ReminderOutput], query: String) throws -> Any {
-        // Convert reminders to JSON-compatible dictionaries
+        // Convert reminders to JSON data
         let jsonData = try JSONEncoder().encode(reminders)
-        let jsonObject = try JSONSerialization.jsonObject(with: jsonData)
 
         // Compile and run JMESPath expression
         let expression = try JMESExpression.compile(query)
-        let result = try expression.search(json: jsonObject)
+        let result = try expression.search(json: jsonData)
         return result ?? []
     }
 
