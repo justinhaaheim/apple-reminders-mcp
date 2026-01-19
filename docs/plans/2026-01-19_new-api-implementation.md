@@ -26,7 +26,7 @@ Replace the existing 14-tool MCP server with the new 6-tool API defined in the s
 - [x] Implement `delete_reminders` - batch delete with partial failure
 - [x] Remove all old tools
 - [x] Update tests in `test/*.test.ts`
-- [ ] Final verification: `bun run build && bun run test && bun run signal`
+- [ ] Final verification: `bun run build && bun run test && bun run signal` (requires macOS)
 
 ## Notes
 
