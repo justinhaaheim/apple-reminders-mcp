@@ -1975,6 +1975,12 @@ class MCPServer {
                 High priority only:
                   {"query": "[?priority == 'high']"}
 
+                Created today or later (via JMESPath):
+                  {"query": "[?creationDate >= '2024-01-15']"}
+
+                Modified in the last week (via JMESPath):
+                  {"query": "[?modificationDate >= '2024-01-08']"}
+
                 **Reminder fields available in JMESPath:**
                 - id, title, notes, listId, listName, isCompleted
                 - priority (string: "none", "low", "medium", "high")
