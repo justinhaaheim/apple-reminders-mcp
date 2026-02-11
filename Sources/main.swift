@@ -36,6 +36,7 @@ protocol ReminderStore {
     func getAllCalendars() -> [ReminderCalendar]
     func getDefaultCalendar() -> ReminderCalendar?
     func createCalendar(name: String) throws -> ReminderCalendar
+    func createReminder(in calendar: ReminderCalendar) -> Reminder
     func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder]
     func getReminder(withId id: String) -> Reminder?
     func saveReminder(_ reminder: Reminder) throws
@@ -382,7 +383,7 @@ class MockReminderStore: ReminderStore {
     }
 
     /// Create a new reminder in the specified calendar
-    func createReminder(in calendar: ReminderCalendar) -> MockReminder {
+    func createReminder(in calendar: ReminderCalendar) -> Reminder {
         let reminder = MockReminder(calendarId: calendar.id, store: self)
         return reminder
     }
@@ -1012,7 +1013,11 @@ class RemindersManager {
             listName: reminder.getCalendarName(from: store),
             isCompleted: reminder.isCompleted,
             priority: Priority.fromInternal(reminder.priority).rawValue,
-            dueDate: reminder.dueDateComponents?.date?.toISO8601WithTimezone(),
+            dueDate: {
+                guard var components = reminder.dueDateComponents else { return nil }
+                if components.calendar == nil { components.calendar = Calendar.current }
+                return components.date?.toISO8601WithTimezone()
+            }(),
             completionDate: reminder.completionDate?.toISO8601WithTimezone(),
             creationDate: reminder.creationDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
             modificationDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone()
@@ -1048,15 +1053,8 @@ class RemindersManager {
             )
         }
 
-        // Create reminder using the appropriate store method
-        let reminder: Reminder
-        if let mockStore = store as? MockReminderStore {
-            reminder = mockStore.createReminder(in: calendar)
-        } else if let ekStore = store as? EKReminderStore {
-            reminder = ekStore.createReminder(in: calendar)
-        } else {
-            throw MCPToolError("Unknown store type")
-        }
+        // Create reminder via the protocol
+        let reminder = store.createReminder(in: calendar)
 
         var mutableReminder = reminder
         mutableReminder.title = input.title
@@ -1272,9 +1270,8 @@ class RemindersManager {
             // Export specific lists
             var selectedCalendars: [ReminderCalendar] = []
             for selector in listSelectors {
-                if let calendar = resolveList(selector) {
-                    selectedCalendars.append(calendar)
-                }
+                let calendars = try resolveList(selector)
+                selectedCalendars.append(contentsOf: calendars)
             }
             calendarsToExport = selectedCalendars
         } else {
@@ -1287,7 +1284,7 @@ class RemindersManager {
         let reminders = await store.fetchReminders(in: calendarsToExport, status: status)
 
         // Convert to output format
-        let reminderOutputs = reminders.map { toReminderOutput($0) }
+        let reminderOutputs = reminders.map { convertToOutput($0) }
 
         // Get list information
         let defaultCalendar = store.getDefaultCalendar()
