@@ -1,6 +1,8 @@
 /**
  * Read-only tests for the Apple Reminders MCP server.
  * These tests don't create or modify any reminders.
+ *
+ * Updated for the new 6-tool API.
  */
 
 import {describe, test, expect, beforeAll, afterAll} from 'bun:test';
@@ -20,48 +22,52 @@ describe('Read-only operations', () => {
   test('lists available tools', async () => {
     const tools = await client.listTools();
 
-    expect(tools.length).toBe(14);
+    expect(tools.length).toBe(6);
 
     const toolNames = tools.map((t) => t.name);
-    expect(toolNames).toContain('list_reminder_lists');
-    expect(toolNames).toContain('create_reminder_list');
-    expect(toolNames).toContain('list_today_reminders');
-    expect(toolNames).toContain('list_reminders');
-    expect(toolNames).toContain('create_reminder');
-    expect(toolNames).toContain('complete_reminder');
-    expect(toolNames).toContain('delete_reminder');
-    expect(toolNames).toContain('update_reminder');
-    // Batch operations
+    expect(toolNames).toContain('query_reminders');
+    expect(toolNames).toContain('get_lists');
+    expect(toolNames).toContain('create_list');
     expect(toolNames).toContain('create_reminders');
     expect(toolNames).toContain('update_reminders');
     expect(toolNames).toContain('delete_reminders');
-    expect(toolNames).toContain('complete_reminders');
-    // Search operations
-    expect(toolNames).toContain('search_reminders');
-    expect(toolNames).toContain('search_reminder_lists');
   });
 
-  test('lists reminder lists', async () => {
-    const result = await client.callTool('list_reminder_lists');
+  test('gets reminder lists', async () => {
+    const result = await client.callTool('get_lists');
 
-    expect(result.lists).toBeDefined();
-    expect(Array.isArray(result.lists)).toBe(true);
-    expect(result.count).toBeGreaterThanOrEqual(0);
+    expect(Array.isArray(result)).toBe(true);
+    const lists = result as Array<{
+      id: string;
+      name: string;
+      isDefault: boolean;
+    }>;
+    expect(lists.length).toBeGreaterThanOrEqual(1);
+
+    // Should have at least one list with required fields
+    for (const list of lists) {
+      expect(list.id).toBeDefined();
+      expect(list.name).toBeDefined();
+      expect(typeof list.isDefault).toBe('boolean');
+    }
+
+    // Exactly one list should be default
+    const defaultLists = lists.filter((l) => l.isDefault);
+    expect(defaultLists.length).toBe(1);
   });
 
-  // NOTE: We intentionally do NOT test list_today_reminders or list_reminders
-  // without a list filter here, as that would query all the user's personal
-  // reminders. Those operations are tested in crud.test.ts using the isolated
+  // NOTE: We intentionally do NOT test query_reminders without a list filter
+  // here, as that queries the default list which might contain user's personal
+  // reminders. Those operations are tested in crud.test.ts using an isolated
   // test list.
 
-  test('lists reminders from non-existent list returns empty', async () => {
-    const result = await client.callTool('list_reminders', {
-      list_name: 'NonExistent List That Should Not Exist 12345',
-      completed: false,
+  test('query_reminders with non-existent list returns error', async () => {
+    const result = await client.callTool('query_reminders', {
+      list: {name: 'NonExistent List That Should Not Exist 12345'},
     });
 
-    expect(result.reminders).toBeDefined();
-    expect(Array.isArray(result.reminders)).toBe(true);
-    expect(result.count).toBe(0);
+    // New API returns error response for non-existent list
+    expect(result._isError).toBe(true);
+    expect(result.error).toContain('No list found with name');
   });
 });
