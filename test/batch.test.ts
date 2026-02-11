@@ -119,7 +119,7 @@ describe('Batch operations', () => {
 
       const failure = result.failed[0] as {id: string; error: string};
       expect(failure.id).toBe('fake-id-12345');
-      expect(failure.error).toContain('not found');
+      expect(failure.error).toContain('No reminder found');
     });
   });
 
@@ -158,7 +158,7 @@ describe('Batch operations', () => {
 
       const failure = result.failed[0] as {id: string; error: string};
       expect(failure.id).toBe('fake-id-99999');
-      expect(failure.error).toContain('not found');
+      expect(failure.error).toContain('No reminder found');
     });
   });
 
@@ -202,7 +202,7 @@ describe('Batch operations', () => {
       expect(result.failed.length).toBe(1);
 
       const failure = result.failed[0] as {id: string; error: string};
-      expect(failure.error).toContain('not found');
+      expect(failure.error).toContain('No reminder found');
     });
   });
 });
