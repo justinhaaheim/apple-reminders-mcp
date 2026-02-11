@@ -68,8 +68,39 @@ protocol Reminder {
     var completionDate: Date? { get set }
     var creationDate: Date? { get }
     var lastModifiedDate: Date? { get }
+    var url: URL? { get set }
+    var isAllDay: Bool { get set }
+    var alarms: [ReminderAlarm] { get set }
+    var recurrenceRules: [ReminderRecurrenceRule] { get set }
 
     func getCalendarName(from store: ReminderStore) -> String
+}
+
+/// Alarm representation (absolute date or relative offset)
+struct ReminderAlarm {
+    /// Specific date/time for the alarm
+    let absoluteDate: Date?
+    /// Offset in seconds before the due date (negative = before)
+    let relativeOffset: TimeInterval?
+}
+
+/// Recurrence rule representation
+struct ReminderRecurrenceRule {
+    let frequency: RecurrenceFrequency
+    let interval: Int
+    let daysOfWeek: [Int]?       // 1=Sunday ... 7=Saturday
+    let daysOfMonth: [Int]?      // 1-31
+    let monthsOfYear: [Int]?     // 1-12
+    let weekPosition: Int?       // -1=last, 1=first, 2=second, etc.
+    let endDate: Date?
+    let endCount: Int?
+}
+
+enum RecurrenceFrequency: String, Codable {
+    case daily
+    case weekly
+    case monthly
+    case yearly
 }
 
 // MARK: - EventKit Implementations
@@ -136,6 +167,123 @@ class EKReminderWrapper: Reminder {
 
     var creationDate: Date? { reminder.creationDate }
     var lastModifiedDate: Date? { reminder.lastModifiedDate }
+
+    var url: URL? {
+        get { reminder.url }
+        set { reminder.url = newValue }
+    }
+
+    var isAllDay: Bool {
+        get { reminder.isAllDay }
+        set { reminder.isAllDay = newValue }
+    }
+
+    var alarms: [ReminderAlarm] {
+        get {
+            return (reminder.alarms ?? []).map { ekAlarm in
+                ReminderAlarm(
+                    absoluteDate: ekAlarm.absoluteDate,
+                    relativeOffset: ekAlarm.absoluteDate == nil ? ekAlarm.relativeOffset : nil
+                )
+            }
+        }
+        set {
+            reminder.alarms = newValue.map { alarm in
+                if let absoluteDate = alarm.absoluteDate {
+                    return EKAlarm(absoluteDate: absoluteDate)
+                } else {
+                    return EKAlarm(relativeOffset: alarm.relativeOffset ?? 0)
+                }
+            }
+        }
+    }
+
+    var recurrenceRules: [ReminderRecurrenceRule] {
+        get {
+            return (reminder.recurrenceRules ?? []).map { rule in
+                let frequency: RecurrenceFrequency
+                switch rule.frequency {
+                case .daily: frequency = .daily
+                case .weekly: frequency = .weekly
+                case .monthly: frequency = .monthly
+                case .yearly: frequency = .yearly
+                @unknown default: frequency = .daily
+                }
+
+                let daysOfWeek = rule.daysOfTheWeek?.map { $0.dayOfTheWeek.rawValue }
+                let daysOfMonth = rule.daysOfTheMonth?.map { $0.intValue }
+                let monthsOfYear = rule.monthsOfTheYear?.map { $0.intValue }
+                let weekPosition = rule.daysOfTheWeek?.first?.weekNumber
+                let endDate = rule.recurrenceEnd?.endDate
+                let endCount = rule.recurrenceEnd?.occurrenceCount
+
+                return ReminderRecurrenceRule(
+                    frequency: frequency,
+                    interval: rule.interval,
+                    daysOfWeek: daysOfWeek,
+                    daysOfMonth: daysOfMonth,
+                    monthsOfYear: monthsOfYear,
+                    weekPosition: weekPosition != 0 ? weekPosition : nil,
+                    endDate: endDate,
+                    endCount: endCount != 0 ? endCount : nil
+                )
+            }
+        }
+        set {
+            // Remove existing rules first
+            if let existingRules = reminder.recurrenceRules {
+                for rule in existingRules {
+                    reminder.removeRecurrenceRule(rule)
+                }
+            }
+
+            for rule in newValue {
+                let ekFrequency: EKRecurrenceFrequency
+                switch rule.frequency {
+                case .daily: ekFrequency = .daily
+                case .weekly: ekFrequency = .weekly
+                case .monthly: ekFrequency = .monthly
+                case .yearly: ekFrequency = .yearly
+                }
+
+                var daysOfWeek: [EKRecurrenceDayOfWeek]? = nil
+                if let days = rule.daysOfWeek {
+                    let position = rule.weekPosition ?? 0
+                    daysOfWeek = days.compactMap { dayNum in
+                        guard let weekday = EKWeekday(rawValue: dayNum) else { return nil }
+                        if position != 0 {
+                            return EKRecurrenceDayOfWeek(weekday, weekNumber: position)
+                        }
+                        return EKRecurrenceDayOfWeek(weekday)
+                    }
+                }
+
+                let daysOfMonth = rule.daysOfMonth?.map { NSNumber(value: $0) }
+                let monthsOfYear = rule.monthsOfYear?.map { NSNumber(value: $0) }
+
+                var recurrenceEnd: EKRecurrenceEnd? = nil
+                if let endDate = rule.endDate {
+                    recurrenceEnd = EKRecurrenceEnd(end: endDate)
+                } else if let endCount = rule.endCount {
+                    recurrenceEnd = EKRecurrenceEnd(occurrenceCount: endCount)
+                }
+
+                let ekRule = EKRecurrenceRule(
+                    recurrenceWith: ekFrequency,
+                    interval: rule.interval,
+                    daysOfTheWeek: daysOfWeek,
+                    daysOfTheMonth: daysOfMonth,
+                    monthsOfTheYear: monthsOfYear,
+                    weeksOfTheYear: nil,
+                    daysOfTheYear: nil,
+                    setPositions: nil,
+                    end: recurrenceEnd
+                )
+
+                reminder.addRecurrenceRule(ekRule)
+            }
+        }
+    }
 
     func getCalendarName(from store: ReminderStore) -> String {
         return reminder.calendar?.title ?? ""
@@ -272,6 +420,10 @@ class MockReminder: Reminder {
     var completionDate: Date?
     let creationDate: Date?
     var lastModifiedDate: Date?
+    var url: URL?
+    var isAllDay: Bool = false
+    var alarms: [ReminderAlarm] = []
+    var recurrenceRules: [ReminderRecurrenceRule] = []
 
     private weak var store: MockReminderStore?
 
@@ -583,6 +735,23 @@ struct AnyCodable: Codable {
 
 // MARK: - API Data Models
 
+struct AlarmOutput: Codable {
+    let type: String       // "absolute" or "relative"
+    let date: String?      // ISO 8601 for absolute alarms
+    let offset: Int?       // seconds before due date for relative alarms
+}
+
+struct RecurrenceRuleOutput: Codable {
+    let frequency: String  // "daily", "weekly", "monthly", "yearly"
+    let interval: Int
+    let daysOfWeek: [Int]?
+    let daysOfMonth: [Int]?
+    let monthsOfYear: [Int]?
+    let weekPosition: Int?
+    let endDate: String?
+    let endCount: Int?
+}
+
 struct ReminderOutput: Codable {
     let id: String
     let title: String
@@ -592,9 +761,13 @@ struct ReminderOutput: Codable {
     let isCompleted: Bool
     let priority: String  // "none", "low", "medium", "high"
     let dueDate: String?
+    let dueDateIncludesTime: Bool?
     let completionDate: String?
     let creationDate: String
     let modificationDate: String
+    let url: String?
+    let alarms: [AlarmOutput]?
+    let recurrenceRules: [RecurrenceRuleOutput]?
 }
 
 struct ReminderListOutput: Codable {
@@ -654,12 +827,33 @@ struct ListSelector {
     }
 }
 
+struct AlarmInput {
+    let type: String          // "absolute" or "relative"
+    let date: String?         // ISO 8601 for absolute alarms
+    let offset: Int?          // seconds before due date for relative alarms
+}
+
+struct RecurrenceRuleInput {
+    let frequency: String     // "daily", "weekly", "monthly", "yearly"
+    let interval: Int?        // default 1
+    let daysOfWeek: [Int]?
+    let daysOfMonth: [Int]?
+    let monthsOfYear: [Int]?
+    let weekPosition: Int?
+    let endDate: String?
+    let endCount: Int?
+}
+
 struct CreateReminderInput {
     let title: String
     let notes: String?
     let list: ListSelector?
     let dueDate: String?
     let priority: String?
+    let url: String?
+    let dueDateIncludesTime: Bool?
+    let alarms: [AlarmInput]?
+    let recurrenceRule: RecurrenceRuleInput?
 }
 
 struct UpdateReminderInput {
@@ -671,6 +865,10 @@ struct UpdateReminderInput {
     let priority: String?
     let completed: Bool?
     let completedDate: Any?  // Can be String or NSNull to clear
+    let url: Any?  // Can be String or NSNull to clear
+    let dueDateIncludesTime: Bool?
+    let alarms: Any?  // Can be array or NSNull to clear
+    let recurrenceRule: Any?  // Can be dict or NSNull to clear
 }
 
 // MARK: - Priority Conversion
@@ -899,7 +1097,10 @@ class RemindersManager {
         status: String?,
         sortBy: String?,
         query: String?,
-        limit: Int?
+        limit: Int?,
+        searchText: String?,
+        dateFrom: String?,
+        dateTo: String?
     ) async throws -> Any {
         let startTime = Date()
         log("Starting queryReminders")
@@ -927,6 +1128,53 @@ class RemindersManager {
 
         // Convert to output format
         var reminderOutputs = allReminders.map { convertToOutput($0) }
+
+        // 2b. Apply searchText filter (case-insensitive across title and notes)
+        if let searchText = searchText, !searchText.isEmpty {
+            let lowercasedSearch = searchText.lowercased()
+            reminderOutputs = reminderOutputs.filter { reminder in
+                if reminder.title.lowercased().contains(lowercasedSearch) {
+                    return true
+                }
+                if let notes = reminder.notes, notes.lowercased().contains(lowercasedSearch) {
+                    return true
+                }
+                return false
+            }
+            log("searchText filter '\(searchText)' reduced to \(reminderOutputs.count) reminders")
+        }
+
+        // 2c. Apply date range filter
+        if dateFrom != nil || dateTo != nil {
+            let fromDate: Date? = dateFrom != nil ? Date.fromISO8601(dateFrom!) : nil
+            let toDate: Date? = dateTo != nil ? Date.fromISO8601(dateTo!) : nil
+
+            if dateFrom != nil && fromDate == nil {
+                throw MCPToolError("Invalid dateFrom format: '\(dateFrom!)'. Expected ISO 8601.")
+            }
+            if dateTo != nil && toDate == nil {
+                throw MCPToolError("Invalid dateTo format: '\(dateTo!)'. Expected ISO 8601.")
+            }
+
+            reminderOutputs = reminderOutputs.filter { reminder in
+                // For completed reminders, filter by completionDate
+                // For incomplete reminders, filter by dueDate
+                let dateString = reminder.isCompleted ? reminder.completionDate : reminder.dueDate
+                guard let dateString = dateString,
+                      let reminderDate = Date.fromISO8601(dateString) else {
+                    return false  // No date = excluded from date range filter
+                }
+
+                if let from = fromDate, reminderDate < from {
+                    return false
+                }
+                if let to = toDate, reminderDate > to {
+                    return false
+                }
+                return true
+            }
+            log("Date range filter reduced to \(reminderOutputs.count) reminders")
+        }
 
         // 3. Apply JMESPath if provided
         if let jmesQuery = query, !jmesQuery.isEmpty {
@@ -1005,6 +1253,35 @@ class RemindersManager {
     }
 
     private func convertToOutput(_ reminder: Reminder) -> ReminderOutput {
+        let alarmOutputs: [AlarmOutput]? = reminder.alarms.isEmpty ? nil : reminder.alarms.map { alarm in
+            if let absoluteDate = alarm.absoluteDate {
+                return AlarmOutput(
+                    type: "absolute",
+                    date: absoluteDate.toISO8601WithTimezone(),
+                    offset: nil
+                )
+            } else {
+                return AlarmOutput(
+                    type: "relative",
+                    date: nil,
+                    offset: Int(alarm.relativeOffset ?? 0)
+                )
+            }
+        }
+
+        let recurrenceOutputs: [RecurrenceRuleOutput]? = reminder.recurrenceRules.isEmpty ? nil : reminder.recurrenceRules.map { rule in
+            RecurrenceRuleOutput(
+                frequency: rule.frequency.rawValue,
+                interval: rule.interval,
+                daysOfWeek: rule.daysOfWeek,
+                daysOfMonth: rule.daysOfMonth,
+                monthsOfYear: rule.monthsOfYear,
+                weekPosition: rule.weekPosition,
+                endDate: rule.endDate?.toISO8601WithTimezone(),
+                endCount: rule.endCount
+            )
+        }
+
         return ReminderOutput(
             id: reminder.id,
             title: reminder.title,
@@ -1018,9 +1295,13 @@ class RemindersManager {
                 if components.calendar == nil { components.calendar = Calendar.current }
                 return components.date?.toISO8601WithTimezone()
             }(),
+            dueDateIncludesTime: reminder.dueDateComponents != nil ? !reminder.isAllDay : nil,
             completionDate: reminder.completionDate?.toISO8601WithTimezone(),
             creationDate: reminder.creationDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
-            modificationDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone()
+            modificationDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
+            url: reminder.url?.absoluteString,
+            alarms: alarmOutputs,
+            recurrenceRules: recurrenceOutputs
         )
     }
 
@@ -1079,6 +1360,27 @@ class RemindersManager {
                 throw MCPToolError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
             }
             mutableReminder.priority = priority.internalValue
+        }
+
+        if let urlString = input.url {
+            guard let url = URL(string: urlString) else {
+                throw MCPToolError("Invalid URL: '\(urlString)'")
+            }
+            mutableReminder.url = url
+        }
+
+        if let includesTime = input.dueDateIncludesTime {
+            mutableReminder.isAllDay = !includesTime
+        }
+
+        if let alarmInputs = input.alarms {
+            mutableReminder.alarms = try alarmInputs.map { alarmInput in
+                try parseAlarmInput(alarmInput)
+            }
+        }
+
+        if let recurrenceInput = input.recurrenceRule {
+            mutableReminder.recurrenceRules = [try parseRecurrenceInput(recurrenceInput)]
         }
 
         try store.saveReminder(mutableReminder)
@@ -1192,10 +1494,114 @@ class RemindersManager {
             }
         }
 
+        // Update URL (can be cleared with null)
+        if let urlValue = input.url {
+            if urlValue is NSNull {
+                reminder.url = nil
+            } else if let urlString = urlValue as? String {
+                guard let url = URL(string: urlString) else {
+                    throw MCPToolError("Invalid URL: '\(urlString)'")
+                }
+                reminder.url = url
+            }
+        }
+
+        // Update dueDateIncludesTime
+        if let includesTime = input.dueDateIncludesTime {
+            reminder.isAllDay = !includesTime
+        }
+
+        // Update alarms (can be cleared with null)
+        if let alarmsValue = input.alarms {
+            if alarmsValue is NSNull {
+                reminder.alarms = []
+            } else if let alarmsArray = alarmsValue as? [[String: Any]] {
+                reminder.alarms = try alarmsArray.map { dict in
+                    let alarmInput = AlarmInput(
+                        type: dict["type"] as? String ?? "relative",
+                        date: dict["date"] as? String,
+                        offset: dict["offset"] as? Int
+                    )
+                    return try parseAlarmInput(alarmInput)
+                }
+            }
+        }
+
+        // Update recurrence rule (can be cleared with null)
+        if let ruleValue = input.recurrenceRule {
+            if ruleValue is NSNull {
+                reminder.recurrenceRules = []
+            } else if let ruleDict = ruleValue as? [String: Any] {
+                let ruleInput = RecurrenceRuleInput(
+                    frequency: ruleDict["frequency"] as? String ?? "daily",
+                    interval: ruleDict["interval"] as? Int,
+                    daysOfWeek: ruleDict["daysOfWeek"] as? [Int],
+                    daysOfMonth: ruleDict["daysOfMonth"] as? [Int],
+                    monthsOfYear: ruleDict["monthsOfYear"] as? [Int],
+                    weekPosition: ruleDict["weekPosition"] as? Int,
+                    endDate: ruleDict["endDate"] as? String,
+                    endCount: ruleDict["endCount"] as? Int
+                )
+                reminder.recurrenceRules = [try parseRecurrenceInput(ruleInput)]
+            }
+        }
+
         try store.saveReminder(reminder)
         log("Updated reminder '\(reminder.title)'")
 
         return convertToOutput(reminder)
+    }
+
+    // MARK: - Input Parsing Helpers
+
+    private func parseAlarmInput(_ input: AlarmInput) throws -> ReminderAlarm {
+        switch input.type {
+        case "absolute":
+            guard let dateString = input.date else {
+                throw MCPToolError("Absolute alarm requires 'date' field")
+            }
+            guard let date = Date.fromISO8601(dateString) else {
+                throw MCPToolError("Invalid alarm date format: '\(dateString)'. Expected ISO 8601.")
+            }
+            return ReminderAlarm(absoluteDate: date, relativeOffset: nil)
+        case "relative":
+            guard let offset = input.offset else {
+                throw MCPToolError("Relative alarm requires 'offset' field (seconds before due date)")
+            }
+            return ReminderAlarm(absoluteDate: nil, relativeOffset: TimeInterval(-abs(offset)))
+        default:
+            throw MCPToolError("Invalid alarm type: '\(input.type)'. Must be 'absolute' or 'relative'.")
+        }
+    }
+
+    private func parseRecurrenceInput(_ input: RecurrenceRuleInput) throws -> ReminderRecurrenceRule {
+        guard let frequency = RecurrenceFrequency(rawValue: input.frequency.lowercased()) else {
+            throw MCPToolError("Invalid recurrence frequency: '\(input.frequency)'. Must be one of: daily, weekly, monthly, yearly.")
+        }
+
+        let interval = input.interval ?? 1
+        if interval < 1 {
+            throw MCPToolError("Recurrence interval must be at least 1")
+        }
+
+        var endDate: Date? = nil
+        if let endDateString = input.endDate {
+            guard let date = Date.fromISO8601(endDateString) else {
+                throw MCPToolError("Invalid recurrence end date: '\(endDateString)'. Expected ISO 8601.")
+            }
+            endDate = date
+        }
+
+        return ReminderRecurrenceRule(
+            frequency: frequency,
+            interval: interval,
+            daysOfWeek: input.daysOfWeek,
+            daysOfMonth: input.daysOfMonth,
+            monthsOfYear: input.monthsOfYear,
+            weekPosition: input.weekPosition,
+            endDate: endDate,
+            endCount: input.endCount
+        )
     }
 
     // MARK: - Delete Operations
@@ -1414,13 +1820,13 @@ class MCPServer {
         switch request.method {
         case "initialize":
             let instructions = """
-            Apple Reminders MCP Server - Access Apple Reminders with 6 powerful tools.
+            Apple Reminders MCP Server - Access Apple Reminders with 7 powerful tools.
 
             TOOLS:
-            • query_reminders - Search and filter reminders with JMESPath support
+            • query_reminders - Search and filter reminders (text search, date range, JMESPath)
             • get_lists - Get all reminder lists
             • create_list - Create a new list
-            • create_reminders - Create one or more reminders
+            • create_reminders - Create reminders with alarms, recurrence, URLs
             • update_reminders - Update reminders (including mark complete/incomplete)
             • delete_reminders - Delete reminders
             • export_reminders - Export reminders to JSON file (for backup)
@@ -1429,11 +1835,13 @@ class MCPServer {
             1. Call query_reminders with {} to see incomplete reminders from default list
             2. Use get_lists to see all available lists
             3. Specify list by name: {"list": {"name": "Work"}}
-            4. Specify list by ID: {"list": {"id": "x-apple-..."}}
+            4. Search by text: {"searchText": "meeting"}
             5. Search all lists: {"list": {"all": true}}
 
             PRIORITY: Use "none", "low", "medium", or "high" (not numbers)
             DATES: ISO 8601 with timezone, e.g., "2024-01-15T10:00:00-05:00"
+            ALARMS: [{"type": "relative", "offset": 3600}] (1 hour before)
+            RECURRENCE: {"frequency": "weekly", "interval": 1}
             """
 
             return MCPResponse(
@@ -1537,6 +1945,10 @@ class MCPServer {
 
                 status — "incomplete" (default), "completed", or "all"
 
+                searchText — Case-insensitive text search across title and notes
+
+                dateFrom / dateTo — Date range filter (ISO 8601). For incomplete reminders filters by dueDate, for completed by completionDate.
+
                 sortBy — "newest" (default), "oldest", "priority", "dueDate"
 
                 query — JMESPath expression for advanced filtering (overrides sortBy)
@@ -1554,19 +1966,20 @@ class MCPServer {
                 All lists, completed:
                   {"list": {"all": true}, "status": "completed"}
 
-                Has any priority set:
-                  {"query": "[?priority != 'none']"}
+                Search by text:
+                  {"searchText": "meeting"}
+
+                Due this week:
+                  {"dateFrom": "2024-01-15T00:00:00-05:00", "dateTo": "2024-01-21T23:59:59-05:00"}
 
                 High priority only:
                   {"query": "[?priority == 'high']"}
 
-                Title contains text:
-                  {"query": "[?contains(title, 'meeting')]"}
-
                 **Reminder fields available in JMESPath:**
                 - id, title, notes, listId, listName, isCompleted
                 - priority (string: "none", "low", "medium", "high")
-                - dueDate, completionDate, creationDate, modificationDate (ISO 8601 or null)
+                - dueDate, dueDateIncludesTime, completionDate, creationDate, modificationDate
+                - url, alarms, recurrenceRules
                 """,
                 inputSchema: .object([
                     "type": .string("object"),
@@ -1587,6 +2000,18 @@ class MCPServer {
                             "default": .string("incomplete"),
                             "description": .string("Filter by completion status")
                         ]),
+                        "searchText": .object([
+                            "type": .string("string"),
+                            "description": .string("Case-insensitive text search across reminder titles and notes")
+                        ]),
+                        "dateFrom": .object([
+                            "type": .string("string"),
+                            "description": .string("Start of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.")
+                        ]),
+                        "dateTo": .object([
+                            "type": .string("string"),
+                            "description": .string("End of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.")
+                        ]),
                         "sortBy": .object([
                             "type": .string("string"),
                             "enum": .array([.string("newest"), .string("oldest"), .string("priority"), .string("dueDate")]),
@@ -1595,7 +2020,7 @@ class MCPServer {
                         ]),
                         "query": .object([
                             "type": .string("string"),
-                            "description": .string("JMESPath expression for advanced filtering/projection. Applied after list and status filters.")
+                            "description": .string("JMESPath expression for advanced filtering/projection. Applied after list, status, searchText, and date filters.")
                         ]),
                         "limit": .object([
                             "type": .string("integer"),
@@ -1670,7 +2095,11 @@ class MCPServer {
                   • notes — Body text
                   • list — Target list as {"name": "..."} or {"id": "..."}. Default list if omitted.
                   • dueDate — ISO 8601 datetime (e.g., "2024-01-15T10:00:00-05:00")
+                  • dueDateIncludesTime — Whether the due date has a specific time (default true). Set false for all-day reminders.
                   • priority — "none", "low", "medium", or "high"
+                  • url — URL to associate with the reminder
+                  • alarms — Array of alarm objects: {"type": "relative", "offset": 3600} or {"type": "absolute", "date": "..."}
+                  • recurrenceRule — Recurrence rule: {"frequency": "daily|weekly|monthly|yearly", "interval": 1, ...}
 
                 **Examples:**
 
@@ -1679,6 +2108,12 @@ class MCPServer {
 
                 With details:
                   {"reminders": [{"title": "Call dentist", "list": {"name": "Personal"}, "dueDate": "2024-01-20T09:00:00-05:00", "priority": "high"}]}
+
+                With alarm (1 hour before):
+                  {"reminders": [{"title": "Meeting", "dueDate": "2024-01-20T14:00:00-05:00", "alarms": [{"type": "relative", "offset": 3600}]}]}
+
+                Weekly recurrence:
+                  {"reminders": [{"title": "Team standup", "dueDate": "2024-01-20T09:00:00-05:00", "recurrenceRule": {"frequency": "weekly", "interval": 1, "daysOfWeek": [2, 3, 4, 5, 6]}}]}
 
                 Batch create:
                   {"reminders": [
@@ -1719,10 +2154,89 @@ class MCPServer {
                                         "type": .string("string"),
                                         "description": .string("Due date in ISO 8601 format")
                                     ]),
+                                    "dueDateIncludesTime": .object([
+                                        "type": .string("boolean"),
+                                        "description": .string("Whether the due date includes a specific time. Set false for all-day reminders. Default: true.")
+                                    ]),
                                     "priority": .object([
                                         "type": .string("string"),
                                         "enum": .array([.string("none"), .string("low"), .string("medium"), .string("high")]),
                                         "description": .string("Priority level")
+                                    ]),
+                                    "url": .object([
+                                        "type": .string("string"),
+                                        "description": .string("URL to associate with the reminder")
+                                    ]),
+                                    "alarms": .object([
+                                        "type": .string("array"),
+                                        "description": .string("Alarm notifications for the reminder"),
+                                        "items": .object([
+                                            "type": .string("object"),
+                                            "required": .array([.string("type")]),
+                                            "properties": .object([
+                                                "type": .object([
+                                                    "type": .string("string"),
+                                                    "enum": .array([.string("relative"), .string("absolute")]),
+                                                    "description": .string("Alarm type: 'relative' (offset from due date) or 'absolute' (specific date/time)")
+                                                ]),
+                                                "offset": .object([
+                                                    "type": .string("integer"),
+                                                    "description": .string("Seconds before due date (for relative alarms). E.g., 3600 = 1 hour before.")
+                                                ]),
+                                                "date": .object([
+                                                    "type": .string("string"),
+                                                    "description": .string("ISO 8601 date/time (for absolute alarms)")
+                                                ])
+                                            ]),
+                                            "additionalProperties": .bool(false)
+                                        ])
+                                    ]),
+                                    "recurrenceRule": .object([
+                                        "type": .string("object"),
+                                        "description": .string("Recurrence rule for repeating reminders"),
+                                        "required": .array([.string("frequency")]),
+                                        "properties": .object([
+                                            "frequency": .object([
+                                                "type": .string("string"),
+                                                "enum": .array([.string("daily"), .string("weekly"), .string("monthly"), .string("yearly")]),
+                                                "description": .string("How often the reminder repeats")
+                                            ]),
+                                            "interval": .object([
+                                                "type": .string("integer"),
+                                                "minimum": .int(1),
+                                                "default": .int(1),
+                                                "description": .string("Repeat every N periods (e.g., 2 = every other week)")
+                                            ]),
+                                            "daysOfWeek": .object([
+                                                "type": .string("array"),
+                                                "items": .object(["type": .string("integer"), "minimum": .int(1), "maximum": .int(7)]),
+                                                "description": .string("Days of week (1=Sunday, 2=Monday, ..., 7=Saturday). For weekly/monthly frequency.")
+                                            ]),
+                                            "daysOfMonth": .object([
+                                                "type": .string("array"),
+                                                "items": .object(["type": .string("integer"), "minimum": .int(1), "maximum": .int(31)]),
+                                                "description": .string("Days of month (1-31). For monthly frequency.")
+                                            ]),
+                                            "monthsOfYear": .object([
+                                                "type": .string("array"),
+                                                "items": .object(["type": .string("integer"), "minimum": .int(1), "maximum": .int(12)]),
+                                                "description": .string("Months of year (1-12). For yearly frequency.")
+                                            ]),
+                                            "weekPosition": .object([
+                                                "type": .string("integer"),
+                                                "description": .string("Week position within month: 1=first, 2=second, ..., -1=last. Used with daysOfWeek for 'first Monday' patterns.")
+                                            ]),
+                                            "endDate": .object([
+                                                "type": .string("string"),
+                                                "description": .string("ISO 8601 date when recurrence stops")
+                                            ]),
+                                            "endCount": .object([
+                                                "type": .string("integer"),
+                                                "minimum": .int(1),
+                                                "description": .string("Number of occurrences before stopping")
+                                            ])
+                                        ]),
+                                        "additionalProperties": .bool(false)
                                     ])
                                 ]),
                                 "additionalProperties": .bool(false)
@@ -1747,29 +2261,30 @@ class MCPServer {
                   • notes — New notes (null to clear)
                   • list — Move to list as {"name": "..."} or {"id": "..."}
                   • dueDate — New due date as ISO 8601 (null to clear)
+                  • dueDateIncludesTime — Whether due date has specific time (false = all-day)
                   • priority — "none", "low", "medium", or "high"
                   • completed — true to complete, false to uncomplete
                   • completedDate — ISO 8601 completion date (null to uncomplete)
+                  • url — URL to associate (null to clear)
+                  • alarms — Array of alarm objects (null to clear all alarms)
+                  • recurrenceRule — Recurrence rule object (null to clear)
 
                 **Examples:**
 
                 Update title:
                   {"reminders": [{"id": "...", "title": "Buy oat milk"}]}
 
-                Move to different list:
-                  {"reminders": [{"id": "...", "list": {"name": "Groceries"}}]}
+                Add alarm:
+                  {"reminders": [{"id": "...", "alarms": [{"type": "relative", "offset": 1800}]}]}
+
+                Set weekly recurrence:
+                  {"reminders": [{"id": "...", "recurrenceRule": {"frequency": "weekly"}}]}
+
+                Clear recurrence:
+                  {"reminders": [{"id": "...", "recurrenceRule": null}]}
 
                 Complete a reminder:
                   {"reminders": [{"id": "...", "completed": true}]}
-
-                Uncomplete a reminder:
-                  {"reminders": [{"id": "...", "completed": false}]}
-
-                Complete with specific date:
-                  {"reminders": [{"id": "...", "completedDate": "2024-01-15T10:00:00-05:00"}]}
-
-                Clear due date:
-                  {"reminders": [{"id": "...", "dueDate": null}]}
 
                 Batch update (complete multiple):
                   {"reminders": [
@@ -1814,6 +2329,10 @@ class MCPServer {
                                         "type": .string("string"),
                                         "description": .string("New due date in ISO 8601 format. Set to null to clear.")
                                     ]),
+                                    "dueDateIncludesTime": .object([
+                                        "type": .string("boolean"),
+                                        "description": .string("Whether the due date includes a specific time. Set false for all-day reminders.")
+                                    ]),
                                     "priority": .object([
                                         "type": .string("string"),
                                         "enum": .array([.string("none"), .string("low"), .string("medium"), .string("high")]),
@@ -1826,6 +2345,53 @@ class MCPServer {
                                     "completedDate": .object([
                                         "type": .string("string"),
                                         "description": .string("Completion date in ISO 8601 format. Set to null to uncomplete. Overrides 'completed' if both provided.")
+                                    ]),
+                                    "url": .object([
+                                        "type": .string("string"),
+                                        "description": .string("URL to associate with the reminder. Set to null to clear.")
+                                    ]),
+                                    "alarms": .object([
+                                        "type": .string("array"),
+                                        "description": .string("Alarm notifications. Set to null to clear all alarms."),
+                                        "items": .object([
+                                            "type": .string("object"),
+                                            "required": .array([.string("type")]),
+                                            "properties": .object([
+                                                "type": .object([
+                                                    "type": .string("string"),
+                                                    "enum": .array([.string("relative"), .string("absolute")]),
+                                                    "description": .string("Alarm type")
+                                                ]),
+                                                "offset": .object([
+                                                    "type": .string("integer"),
+                                                    "description": .string("Seconds before due date (for relative alarms)")
+                                                ]),
+                                                "date": .object([
+                                                    "type": .string("string"),
+                                                    "description": .string("ISO 8601 date/time (for absolute alarms)")
+                                                ])
+                                            ]),
+                                            "additionalProperties": .bool(false)
+                                        ])
+                                    ]),
+                                    "recurrenceRule": .object([
+                                        "type": .string("object"),
+                                        "description": .string("Recurrence rule. Set to null to clear."),
+                                        "required": .array([.string("frequency")]),
+                                        "properties": .object([
+                                            "frequency": .object([
+                                                "type": .string("string"),
+                                                "enum": .array([.string("daily"), .string("weekly"), .string("monthly"), .string("yearly")])
+                                            ]),
+                                            "interval": .object(["type": .string("integer"), "minimum": .int(1), "default": .int(1)]),
+                                            "daysOfWeek": .object(["type": .string("array"), "items": .object(["type": .string("integer")])]),
+                                            "daysOfMonth": .object(["type": .string("array"), "items": .object(["type": .string("integer")])]),
+                                            "monthsOfYear": .object(["type": .string("array"), "items": .object(["type": .string("integer")])]),
+                                            "weekPosition": .object(["type": .string("integer")]),
+                                            "endDate": .object(["type": .string("string")]),
+                                            "endCount": .object(["type": .string("integer"), "minimum": .int(1)])
+                                        ]),
+                                        "additionalProperties": .bool(false)
                                     ])
                                 ]),
                                 "additionalProperties": .bool(false)
@@ -1960,13 +2526,19 @@ class MCPServer {
             let sortBy = arguments["sortBy"]?.value as? String
             let query = arguments["query"]?.value as? String
             let limit = arguments["limit"]?.value as? Int
+            let searchText = arguments["searchText"]?.value as? String
+            let dateFrom = arguments["dateFrom"]?.value as? String
+            let dateTo = arguments["dateTo"]?.value as? String
 
             let result = try await remindersManager.queryReminders(
                 list: listDict == nil ? nil : listSelector,
                 status: status,
                 sortBy: sortBy,
                 query: query,
-                limit: limit
+                limit: limit,
+                searchText: searchText,
+                dateFrom: dateFrom,
+                dateTo: dateTo
             )
 
             return try toJSON(result)
@@ -1981,12 +2553,43 @@ class MCPServer {
                 guard let title = dict["title"] as? String else {
                     throw MCPToolError("Missing required field 'title' in reminder at index \(index)")
                 }
+                // Parse alarm inputs
+                var alarmInputs: [AlarmInput]? = nil
+                if let alarmsArray = dict["alarms"] as? [[String: Any]] {
+                    alarmInputs = alarmsArray.map { alarmDict in
+                        AlarmInput(
+                            type: alarmDict["type"] as? String ?? "relative",
+                            date: alarmDict["date"] as? String,
+                            offset: alarmDict["offset"] as? Int
+                        )
+                    }
+                }
+
+                // Parse recurrence rule input
+                var recurrenceInput: RecurrenceRuleInput? = nil
+                if let ruleDict = dict["recurrenceRule"] as? [String: Any] {
+                    recurrenceInput = RecurrenceRuleInput(
+                        frequency: ruleDict["frequency"] as? String ?? "daily",
+                        interval: ruleDict["interval"] as? Int,
+                        daysOfWeek: ruleDict["daysOfWeek"] as? [Int],
+                        daysOfMonth: ruleDict["daysOfMonth"] as? [Int],
+                        monthsOfYear: ruleDict["monthsOfYear"] as? [Int],
+                        weekPosition: ruleDict["weekPosition"] as? Int,
+                        endDate: ruleDict["endDate"] as? String,
+                        endCount: ruleDict["endCount"] as? Int
+                    )
+                }
+
                 inputs.append(CreateReminderInput(
                     title: title,
                     notes: dict["notes"] as? String,
                     list: ListSelector(from: dict["list"] as? [String: Any]),
                     dueDate: dict["dueDate"] as? String,
-                    priority: dict["priority"] as? String
+                    priority: dict["priority"] as? String,
+                    url: dict["url"] as? String,
+                    dueDateIncludesTime: dict["dueDateIncludesTime"] as? Bool,
+                    alarms: alarmInputs,
+                    recurrenceRule: recurrenceInput
                 ))
             }
 
@@ -2018,7 +2621,11 @@ class MCPServer {
                     dueDate: dict["dueDate"],
                     priority: dict["priority"] as? String,
                     completed: dict["completed"] as? Bool,
-                    completedDate: dict["completedDate"]
+                    completedDate: dict["completedDate"],
+                    url: dict["url"],
+                    dueDateIncludesTime: dict["dueDateIncludesTime"] as? Bool,
+                    alarms: dict["alarms"],
+                    recurrenceRule: dict["recurrenceRule"]
                 ))
             }
 
@@ -2083,8 +2690,37 @@ class MCPServer {
             if let dueDate = reminder.dueDate {
                 dict["dueDate"] = dueDate
             }
+            if let dueDateIncludesTime = reminder.dueDateIncludesTime {
+                dict["dueDateIncludesTime"] = dueDateIncludesTime
+            }
             if let completionDate = reminder.completionDate {
                 dict["completionDate"] = completionDate
+            }
+            if let url = reminder.url {
+                dict["url"] = url
+            }
+            if let alarms = reminder.alarms {
+                dict["alarms"] = alarms.map { alarm -> [String: Any] in
+                    var alarmDict: [String: Any] = ["type": alarm.type]
+                    if let date = alarm.date { alarmDict["date"] = date }
+                    if let offset = alarm.offset { alarmDict["offset"] = offset }
+                    return alarmDict
+                }
+            }
+            if let rules = reminder.recurrenceRules {
+                dict["recurrenceRules"] = rules.map { rule -> [String: Any] in
+                    var ruleDict: [String: Any] = [
+                        "frequency": rule.frequency,
+                        "interval": rule.interval
+                    ]
+                    if let daysOfWeek = rule.daysOfWeek { ruleDict["daysOfWeek"] = daysOfWeek }
+                    if let daysOfMonth = rule.daysOfMonth { ruleDict["daysOfMonth"] = daysOfMonth }
+                    if let monthsOfYear = rule.monthsOfYear { ruleDict["monthsOfYear"] = monthsOfYear }
+                    if let weekPosition = rule.weekPosition { ruleDict["weekPosition"] = weekPosition }
+                    if let endDate = rule.endDate { ruleDict["endDate"] = endDate }
+                    if let endCount = rule.endCount { ruleDict["endCount"] = endCount }
+                    return ruleDict
+                }
             }
             return dict
         }
