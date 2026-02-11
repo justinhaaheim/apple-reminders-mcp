@@ -80,7 +80,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 - [ ] Add batch operations
 - [ ] Match Claude iOS API more closely
 
-## Issue Tracking with Beads
+## Issue Tracking with Beads @AGENTS.md
 
 This project uses [beads](https://github.com/steveyegge/beads) (`bd`) for granular issue/task tracking alongside markdown scratchpads (which remain the primary tool for design notes, architecture decisions, and session planning).
 
