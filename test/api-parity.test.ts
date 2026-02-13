@@ -530,6 +530,7 @@ describe('API Parity features', () => {
       expect(queryTool).toBeDefined();
       expect(queryTool!.description).toContain('searchText');
       expect(queryTool!.description).toContain('dateFrom');
+      expect(queryTool!.description).toContain('outputDetail');
 
       const createTool = tools.find((t) => t.name === 'create_reminders');
       expect(createTool).toBeDefined();

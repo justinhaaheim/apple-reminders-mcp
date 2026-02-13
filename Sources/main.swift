@@ -763,8 +763,8 @@ struct ReminderOutput: Codable {
     let dueDate: String?
     let dueDateIncludesTime: Bool?
     let completionDate: String?
-    let creationDate: String
-    let modificationDate: String
+    let createdDate: String
+    let lastModifiedDate: String
     let url: String?
     let alarms: [AlarmOutput]?
     let recurrenceRules: [RecurrenceRuleOutput]?
@@ -1100,7 +1100,8 @@ class RemindersManager {
         limit: Int?,
         searchText: String?,
         dateFrom: String?,
-        dateTo: String?
+        dateTo: String?,
+        outputDetail: String?
     ) async throws -> Any {
         let startTime = Date()
         log("Starting queryReminders")
@@ -1176,7 +1177,7 @@ class RemindersManager {
             log("Date range filter reduced to \(reminderOutputs.count) reminders")
         }
 
-        // 3. Apply JMESPath if provided
+        // 3. Apply JMESPath if provided — always uses full fields, outputDetail is ignored
         if let jmesQuery = query, !jmesQuery.isEmpty {
             do {
                 let result = try applyJMESPath(reminderOutputs, query: jmesQuery)
@@ -1206,7 +1207,10 @@ class RemindersManager {
         let totalTime = Date().timeIntervalSince(startTime)
         log("Total query took \(Int(totalTime * 1000))ms, returning \(reminderOutputs.count) reminders")
 
-        return reminderOutputs
+        // 6. Apply outputDetail field filtering
+        let detail = outputDetail ?? "compact"
+        let isSingleList = list == nil || list?.all != true
+        return formatReminders(reminderOutputs, outputDetail: detail, isSingleList: isSingleList, statusFilter: statusFilter)
     }
 
     private func applyJMESPath(_ reminders: [ReminderOutput], query: String) throws -> Any {
@@ -1219,10 +1223,126 @@ class RemindersManager {
         return result ?? []
     }
 
+    // Field sets for each output detail level
+    private static let minimalFields: Set<String> = ["id", "title", "listName", "isCompleted"]
+    private static let compactFields: Set<String> = [
+        "id", "title", "notes", "listName", "isCompleted",
+        "dueDate", "priority", "createdDate", "lastModifiedDate"
+    ]
+    // "full" uses all fields — no filtering needed
+
+    /// Converts ReminderOutput array to [[String: Any]] with field filtering based on outputDetail level.
+    /// - For "full": all fields included, null values shown explicitly
+    /// - For "compact"/"minimal": only the specified field subset, null values omitted,
+    ///   and listName/isCompleted conditionally omitted based on query context
+    private func formatReminders(
+        _ reminders: [ReminderOutput],
+        outputDetail: String,
+        isSingleList: Bool,
+        statusFilter: String
+    ) -> [[String: Any]] {
+        let allowedFields: Set<String>?
+        let stripNulls: Bool
+
+        switch outputDetail {
+        case "minimal":
+            allowedFields = Self.minimalFields
+            stripNulls = true
+        case "full":
+            allowedFields = nil  // all fields
+            stripNulls = false
+        default:  // "compact" (default)
+            allowedFields = Self.compactFields
+            stripNulls = true
+        }
+
+        // Determine which context-dependent fields to omit
+        let omitListName = isSingleList && outputDetail != "full"
+        let omitIsCompleted = (statusFilter == "incomplete" || statusFilter == "completed") && outputDetail != "full"
+
+        return reminders.map { reminder in
+            var dict = buildFullDict(reminder)
+
+            // Filter to allowed fields if not "full"
+            if let allowed = allowedFields {
+                dict = dict.filter { allowed.contains($0.key) }
+            }
+
+            // Conditionally omit context-implied fields
+            if omitListName {
+                dict.removeValue(forKey: "listName")
+            }
+            if omitIsCompleted {
+                dict.removeValue(forKey: "isCompleted")
+            }
+
+            // Strip null values for compact/minimal
+            if stripNulls {
+                dict = dict.filter { !($0.value is NSNull) }
+            }
+
+            return dict
+        }
+    }
+
+    /// Builds a complete dictionary with ALL fields for a single reminder.
+    /// Null optional values are represented as NSNull() so they can be
+    /// selectively stripped or preserved depending on outputDetail level.
+    private func buildFullDict(_ reminder: ReminderOutput) -> [String: Any] {
+        var dict: [String: Any] = [
+            "id": reminder.id,
+            "title": reminder.title,
+            "notes": reminder.notes as Any? ?? NSNull(),
+            "listId": reminder.listId,
+            "listName": reminder.listName,
+            "isCompleted": reminder.isCompleted,
+            "priority": reminder.priority,
+            "dueDate": reminder.dueDate as Any? ?? NSNull(),
+            "dueDateIncludesTime": reminder.dueDateIncludesTime as Any? ?? NSNull(),
+            "completionDate": reminder.completionDate as Any? ?? NSNull(),
+            "createdDate": reminder.createdDate,
+            "lastModifiedDate": reminder.lastModifiedDate,
+            "url": reminder.url as Any? ?? NSNull(),
+        ]
+
+        // Alarms: array if present, NSNull if not
+        if let alarms = reminder.alarms {
+            dict["alarms"] = alarms.map { alarm -> [String: Any] in
+                var alarmDict: [String: Any] = ["type": alarm.type]
+                if let date = alarm.date { alarmDict["date"] = date }
+                if let offset = alarm.offset { alarmDict["offset"] = offset }
+                return alarmDict
+            }
+        } else {
+            dict["alarms"] = NSNull()
+        }
+
+        // Recurrence rules: array if present, NSNull if not
+        if let rules = reminder.recurrenceRules {
+            dict["recurrenceRules"] = rules.map { rule -> [String: Any] in
+                var ruleDict: [String: Any] = [
+                    "frequency": rule.frequency,
+                    "interval": rule.interval
+                ]
+                if let daysOfWeek = rule.daysOfWeek { ruleDict["daysOfWeek"] = daysOfWeek }
+                if let daysOfMonth = rule.daysOfMonth { ruleDict["daysOfMonth"] = daysOfMonth }
+                if let monthsOfYear = rule.monthsOfYear { ruleDict["monthsOfYear"] = monthsOfYear }
+                if let weekPosition = rule.weekPosition { ruleDict["weekPosition"] = weekPosition }
+                if let endDate = rule.endDate { ruleDict["endDate"] = endDate }
+                if let endCount = rule.endCount { ruleDict["endCount"] = endCount }
+                return ruleDict
+            }
+        } else {
+            dict["recurrenceRules"] = NSNull()
+        }
+
+        return dict
+    }
+
     private func applySorting(_ reminders: [ReminderOutput], sortBy: String) -> [ReminderOutput] {
         switch sortBy {
         case "oldest":
-            return reminders.sorted { $0.creationDate < $1.creationDate }
+            return reminders.sorted { $0.createdDate < $1.createdDate }
         case "priority":
             return reminders.sorted { r1, r2 in
                 let p1 = prioritySortOrder(r1.priority)
@@ -1239,7 +1359,7 @@ class RemindersManager {
         case "newest":
             fallthrough
         default:
-            return reminders.sorted { $0.creationDate > $1.creationDate }
+            return reminders.sorted { $0.createdDate > $1.createdDate }
         }
     }
 
@@ -1297,8 +1417,8 @@ class RemindersManager {
             }(),
             dueDateIncludesTime: reminder.dueDateComponents != nil ? !reminder.isAllDay : nil,
             completionDate: reminder.completionDate?.toISO8601WithTimezone(),
-            creationDate: reminder.creationDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
-            modificationDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
+            createdDate: reminder.creationDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
+            lastModifiedDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
             url: reminder.url?.absoluteString,
             alarms: alarmOutputs,
             recurrenceRules: recurrenceOutputs
@@ -1935,6 +2055,7 @@ class MCPServer {
                 - Returns INCOMPLETE reminders only
                 - Sorted by NEWEST CREATED first
                 - Limited to 50 results
+                - Uses "compact" output (most useful fields, nulls omitted)
 
                 **Parameters (all optional):**
 
@@ -1951,7 +2072,12 @@ class MCPServer {
 
                 sortBy — "newest" (default), "oldest", "priority", "dueDate"
 
-                query — JMESPath expression for advanced filtering (overrides sortBy)
+                query — JMESPath expression for advanced filtering (overrides sortBy and outputDetail — always uses full fields as input)
+
+                outputDetail — Controls which fields are returned:
+                  • "minimal" — id, title only (plus listName if searching all lists, isCompleted if status is "all")
+                  • "compact" (default) — id, title, notes, dueDate, priority, createdDate, lastModifiedDate (plus listName/isCompleted when contextually useful). Null fields omitted.
+                  • "full" — All fields always included, null values shown explicitly
 
                 limit — Max results (default 50, max 200)
 
@@ -1972,19 +2098,25 @@ class MCPServer {
                 Due this week:
                   {"dateFrom": "2024-01-15T00:00:00-05:00", "dateTo": "2024-01-21T23:59:59-05:00"}
 
+                Full detail for debugging:
+                  {"outputDetail": "full"}
+
+                Minimal for quick overview:
+                  {"outputDetail": "minimal"}
+
                 High priority only:
                   {"query": "[?priority == 'high']"}
 
                 Created today or later (via JMESPath):
-                  {"query": "[?creationDate >= '2024-01-15']"}
+                  {"query": "[?createdDate >= '2024-01-15']"}
 
                 Modified in the last week (via JMESPath):
-                  {"query": "[?modificationDate >= '2024-01-08']"}
+                  {"query": "[?lastModifiedDate >= '2024-01-08']"}
 
-                **Reminder fields available in JMESPath:**
+                **Reminder fields available in JMESPath (always full):**
                 - id, title, notes, listId, listName, isCompleted
                 - priority (string: "none", "low", "medium", "high")
-                - dueDate, dueDateIncludesTime, completionDate, creationDate, modificationDate
+                - dueDate, dueDateIncludesTime, completionDate, createdDate, lastModifiedDate
                 - url, alarms, recurrenceRules
                 """,
                 inputSchema: .object([
@@ -2026,7 +2158,13 @@ class MCPServer {
                         ]),
                         "query": .object([
                             "type": .string("string"),
-                            "description": .string("JMESPath expression for advanced filtering/projection. Applied after list, status, searchText, and date filters.")
+                            "description": .string("JMESPath expression for advanced filtering/projection. Applied after list, status, searchText, and date filters. When provided, outputDetail is ignored (always uses full fields as input).")
+                        ]),
+                        "outputDetail": .object([
+                            "type": .string("string"),
+                            "enum": .array([.string("minimal"), .string("compact"), .string("full")]),
+                            "default": .string("compact"),
+                            "description": .string("Controls which fields are returned. 'minimal': id, title. 'compact' (default): most useful fields, nulls omitted. 'full': all fields, nulls shown. Ignored when 'query' (JMESPath) is provided. listName and isCompleted are contextually omitted in minimal/compact when implied by query params.")
                         ]),
                         "limit": .object([
                             "type": .string("integer"),
@@ -2535,6 +2673,7 @@ class MCPServer {
             let searchText = arguments["searchText"]?.value as? String
             let dateFrom = arguments["dateFrom"]?.value as? String
             let dateTo = arguments["dateTo"]?.value as? String
+            let outputDetail = arguments["outputDetail"]?.value as? String
 
             let result = try await remindersManager.queryReminders(
                 list: listDict == nil ? nil : listSelector,
@@ -2544,7 +2683,8 @@ class MCPServer {
                 limit: limit,
                 searchText: searchText,
                 dateFrom: dateFrom,
-                dateTo: dateTo
+                dateTo: dateTo,
+                outputDetail: outputDetail
             )
 
             return try toJSON(result)
@@ -2687,8 +2827,8 @@ class MCPServer {
                 "listName": reminder.listName,
                 "isCompleted": reminder.isCompleted,
                 "priority": reminder.priority,
-                "creationDate": reminder.creationDate,
-                "modificationDate": reminder.modificationDate
+                "createdDate": reminder.createdDate,
+                "lastModifiedDate": reminder.lastModifiedDate
             ]
             if let notes = reminder.notes {
                 dict["notes"] = notes

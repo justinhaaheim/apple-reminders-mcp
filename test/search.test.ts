@@ -80,6 +80,7 @@ describe('Query operations', () => {
     test('filters by list name', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
+        outputDetail: 'full',
       });
 
       expect(Array.isArray(result)).toBe(true);
@@ -171,16 +172,99 @@ describe('Query operations', () => {
       expect((result as Array<unknown>).length).toBe(0);
     });
 
-    test('includes listId and listName in results', async () => {
+    test('includes listId and listName in results with full detail', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
         limit: 1,
+        outputDetail: 'full',
       });
 
       expect(Array.isArray(result)).toBe(true);
       const reminders = result as Array<{listId: string; listName: string}>;
       expect(reminders[0].listId).toBeDefined();
       expect(reminders[0].listName).toBe(testListName);
+    });
+
+    test('compact detail omits listName for single-list queries', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 1,
+        outputDetail: 'compact',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      // listName should be omitted since we queried a single list
+      expect(reminders[0].listName).toBeUndefined();
+      // But title, id, priority should still be present
+      expect(reminders[0].id).toBeDefined();
+      expect(reminders[0].title).toBeDefined();
+    });
+
+    test('compact detail omits isCompleted for status-specific queries', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 1,
+        status: 'incomplete',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      // isCompleted should be omitted since we queried incomplete
+      expect(reminders[0].isCompleted).toBeUndefined();
+    });
+
+    test('compact detail omits null fields', async () => {
+      // Create a reminder without a due date
+      await client.callTool('create_reminders', {
+        reminders: [
+          {title: 'No Due Date Compact Test', list: {name: testListName}},
+        ],
+      });
+
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        searchText: 'No Due Date Compact Test',
+        outputDetail: 'compact',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      expect(reminders.length).toBeGreaterThanOrEqual(1);
+      // dueDate should be omitted (not present) since it's null and compact strips nulls
+      expect(reminders[0].dueDate).toBeUndefined();
+    });
+
+    test('full detail includes null fields explicitly', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        searchText: 'No Due Date Compact Test',
+        outputDetail: 'full',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      expect(reminders.length).toBeGreaterThanOrEqual(1);
+      // dueDate should be present and null in full mode
+      expect('dueDate' in reminders[0]).toBe(true);
+      expect(reminders[0].dueDate).toBeNull();
+    });
+
+    test('minimal detail returns only id and title', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 1,
+        outputDetail: 'minimal',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      expect(reminders[0].id).toBeDefined();
+      expect(reminders[0].title).toBeDefined();
+      // These should NOT be present in minimal
+      expect(reminders[0].notes).toBeUndefined();
+      expect(reminders[0].priority).toBeUndefined();
+      expect(reminders[0].createdDate).toBeUndefined();
     });
 
     test('sorts by priority', async () => {
