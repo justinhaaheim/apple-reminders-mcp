@@ -177,8 +177,25 @@ class EKReminderWrapper: Reminder {
     }
 
     var isAllDay: Bool {
-        get { reminder.isAllDay }
-        set { reminder.isAllDay = newValue }
+        get {
+            // EKReminder doesn't have isAllDay (that's EKEvent-only).
+            // Infer from dueDateComponents: if hour is set, it includes time (not all-day).
+            guard let components = reminder.dueDateComponents else { return false }
+            return components.hour == nil
+        }
+        set {
+            // Modify dueDateComponents to strip or retain time components.
+            guard var components = reminder.dueDateComponents else { return }
+            if newValue {
+                // All-day: remove time components
+                components.hour = nil
+                components.minute = nil
+                components.second = nil
+            }
+            // If setting isAllDay=false, time components should already be present
+            // from the date parsing; no action needed.
+            reminder.dueDateComponents = components
+        }
     }
 
     var alarms: [ReminderAlarm] {
