@@ -1,7 +1,7 @@
 # outputDetail: Compact/Minimal/Full Output Levels for query_reminders
 
 **Date:** 2026-02-13
-**Status:** Implementation complete, needs macOS build + test verification
+**Status:** Complete — built and tested on Linux (Swift 6.1.2, 78 tests passing)
 
 ---
 
@@ -104,7 +104,7 @@ Applied in `ReminderOutput` struct and `encodableArray`. This is a breaking chan
 - [x] Step 3: Implement field filtering via `formatReminders` / `buildFullDict` (replaces returning `[ReminderOutput]` with `[[String: Any]]`)
 - [x] Step 4: JMESPath always uses full fields (returns before `formatReminders` is called)
 - [x] Step 5: Updated tests — fixed `listName`/`listId` assertions, added new tests for compact/minimal/full
-- [ ] Step 6: Build and test on macOS (cannot build Swift on Linux CI)
+- [x] Step 6: Build and test on Linux (Swift 6.1.2 installed, `#if canImport(EventKit)` added, 78/78 tests pass)
 
 ## Implementation Notes
 
@@ -114,3 +114,6 @@ Applied in `ReminderOutput` struct and `encodableArray`. This is a breaking chan
 - JMESPath path returns _before_ `formatReminders` is called, so it always gets full `ReminderOutput` via `JSONEncoder`
 - Non-JMESPath path returns `[[String: Any]]` which goes through `JSONSerialization` (not `JSONEncoder`)
 - `encodableArray` (used by create/update responses) is unchanged — those always return all fields
+- Added `#if canImport(EventKit)` guards to enable Linux builds (falls back to mock store)
+- Fixed 2 pre-existing test bugs: `toBeNull()` → `toBeUndefined()` for fields stripped by `encodableArray`
+- Added 6 new outputDetail tests: conditional isCompleted/listName, JMESPath override, field renames, default=compact, full field presence

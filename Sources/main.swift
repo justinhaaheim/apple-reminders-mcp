@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(EventKit)
 import EventKit
+#endif
 import JMESPath
 
 // MARK: - Test Mode Configuration
@@ -103,6 +105,7 @@ enum RecurrenceFrequency: String, Codable {
     case yearly
 }
 
+#if canImport(EventKit)
 // MARK: - EventKit Implementations
 
 /// Wrapper around EKCalendar to conform to ReminderCalendar
@@ -395,6 +398,7 @@ class EKReminderStore: ReminderStore {
         return EKReminderWrapper(reminder, eventStore: eventStore)
     }
 }
+#endif
 
 // MARK: - Mock Implementations
 
@@ -1880,7 +1884,12 @@ class MCPServer {
         if MockModeConfig.isEnabled {
             store = MockReminderStore()
         } else {
+            #if canImport(EventKit)
             store = EKReminderStore()
+            #else
+            // EventKit not available (Linux) — force mock mode
+            store = MockReminderStore()
+            #endif
         }
         self.remindersManager = RemindersManager(store: store)
     }

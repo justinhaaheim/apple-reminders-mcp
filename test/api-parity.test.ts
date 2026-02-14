@@ -72,8 +72,9 @@ describe('API Parity features', () => {
         reminders: [{id, url: null}],
       });
 
-      const updated = updateResult as Array<{id: string; url: string | null}>;
-      expect(updated[0].url).toBeNull();
+      const updated = updateResult as Array<{id: string; url?: string}>;
+      // url is omitted (undefined) rather than null since encodableArray strips nil fields
+      expect(updated[0].url).toBeUndefined();
     });
   });
 
@@ -125,11 +126,12 @@ describe('API Parity features', () => {
       });
 
       const reminders = result as Array<{
-        dueDateIncludesTime: boolean | null;
-        dueDate: string | null;
+        dueDateIncludesTime?: boolean;
+        dueDate?: string;
       }>;
-      expect(reminders[0].dueDate).toBeNull();
-      expect(reminders[0].dueDateIncludesTime).toBeNull();
+      // Fields are omitted (undefined) rather than null since encodableArray strips nil fields
+      expect(reminders[0].dueDate).toBeUndefined();
+      expect(reminders[0].dueDateIncludesTime).toBeUndefined();
     });
   });
 
