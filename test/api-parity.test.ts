@@ -154,7 +154,7 @@ describe('API Parity features', () => {
       expect(reminders[0].alarms).toBeDefined();
       expect(reminders[0].alarms.length).toBe(1);
       expect(reminders[0].alarms[0].type).toBe('relative');
-      expect(reminders[0].alarms[0].offset).toBe(-3600);
+      expect(reminders[0].alarms[0].offset).toBe(3600);
     });
 
     test('creates reminder with absolute alarm', async () => {

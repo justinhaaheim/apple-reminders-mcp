@@ -1405,7 +1405,7 @@ class RemindersManager {
                 return AlarmOutput(
                     type: "relative",
                     date: nil,
-                    offset: Int(alarm.relativeOffset ?? 0)
+                    offset: Int(abs(alarm.relativeOffset ?? 0))
                 )
             }
         }
