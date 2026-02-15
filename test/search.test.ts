@@ -80,6 +80,7 @@ describe('Query operations', () => {
     test('filters by list name', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
+        outputDetail: 'full',
       });
 
       expect(Array.isArray(result)).toBe(true);
@@ -171,16 +172,246 @@ describe('Query operations', () => {
       expect((result as Array<unknown>).length).toBe(0);
     });
 
-    test('includes listId and listName in results', async () => {
+    test('includes listId and listName in results with full detail', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
         limit: 1,
+        outputDetail: 'full',
       });
 
       expect(Array.isArray(result)).toBe(true);
       const reminders = result as Array<{listId: string; listName: string}>;
       expect(reminders[0].listId).toBeDefined();
       expect(reminders[0].listName).toBe(testListName);
+    });
+
+    test('compact detail omits listName for single-list queries', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 1,
+        outputDetail: 'compact',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      // listName should be omitted since we queried a single list
+      expect(reminders[0].listName).toBeUndefined();
+      // But title, id, priority should still be present
+      expect(reminders[0].id).toBeDefined();
+      expect(reminders[0].title).toBeDefined();
+    });
+
+    test('compact detail omits isCompleted for status-specific queries', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 1,
+        status: 'incomplete',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      // isCompleted should be omitted since we queried incomplete
+      expect(reminders[0].isCompleted).toBeUndefined();
+    });
+
+    test('compact detail omits null fields', async () => {
+      // Create a reminder without a due date
+      await client.callTool('create_reminders', {
+        reminders: [
+          {title: 'No Due Date Compact Test', list: {name: testListName}},
+        ],
+      });
+
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        searchText: 'No Due Date Compact Test',
+        outputDetail: 'compact',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      expect(reminders.length).toBeGreaterThanOrEqual(1);
+      // dueDate should be omitted (not present) since it's null and compact strips nulls
+      expect(reminders[0].dueDate).toBeUndefined();
+    });
+
+    test('full detail includes null fields explicitly', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        searchText: 'No Due Date Compact Test',
+        outputDetail: 'full',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      expect(reminders.length).toBeGreaterThanOrEqual(1);
+      // dueDate should be present and null in full mode
+      expect('dueDate' in reminders[0]).toBe(true);
+      expect(reminders[0].dueDate).toBeNull();
+    });
+
+    test('minimal detail returns only id and title', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 1,
+        outputDetail: 'minimal',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      expect(reminders[0].id).toBeDefined();
+      expect(reminders[0].title).toBeDefined();
+      // These should NOT be present in minimal
+      expect(reminders[0].notes).toBeUndefined();
+      expect(reminders[0].priority).toBeUndefined();
+      expect(reminders[0].createdDate).toBeUndefined();
+    });
+
+    test('compact includes isCompleted when status is "all"', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 1,
+        status: 'all',
+        outputDetail: 'compact',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      // isCompleted should be present since status is "all" (value isn't implied)
+      expect(reminders[0].isCompleted).toBeDefined();
+      expect(typeof reminders[0].isCompleted).toBe('boolean');
+    });
+
+    test('compact includes listName when searching all lists', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {all: true},
+        limit: 1,
+        outputDetail: 'compact',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      // listName should be present since we searched all lists
+      expect(reminders[0].listName).toBeDefined();
+      expect(typeof reminders[0].listName).toBe('string');
+    });
+
+    test('JMESPath ignores outputDetail and receives full fields', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        // Even with "minimal", JMESPath should get full fields
+        outputDetail: 'minimal',
+        query:
+          '[*].{id: id, list: listName, created: createdDate, modified: lastModifiedDate}',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      expect(reminders.length).toBeGreaterThan(0);
+      // JMESPath should have access to all fields regardless of outputDetail
+      expect(reminders[0].id).toBeDefined();
+      expect(reminders[0].list).toBeDefined();
+      expect(reminders[0].created).toBeDefined();
+      expect(reminders[0].modified).toBeDefined();
+    });
+
+    test('field names use createdDate and lastModifiedDate', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 1,
+        outputDetail: 'full',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      // New field names should be present
+      expect(reminders[0].createdDate).toBeDefined();
+      expect(reminders[0].lastModifiedDate).toBeDefined();
+      // Old field names should NOT be present
+      expect(reminders[0].creationDate).toBeUndefined();
+      expect(reminders[0].modificationDate).toBeUndefined();
+    });
+
+    test('default outputDetail (omitted) behaves like compact', async () => {
+      // Query without specifying outputDetail
+      const defaultResult = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 1,
+      });
+
+      // Query with explicit compact
+      const compactResult = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 1,
+        outputDetail: 'compact',
+      });
+
+      expect(Array.isArray(defaultResult)).toBe(true);
+      expect(Array.isArray(compactResult)).toBe(true);
+
+      const defaultReminder = (
+        defaultResult as Array<Record<string, unknown>>
+      )[0];
+      const compactReminder = (
+        compactResult as Array<Record<string, unknown>>
+      )[0];
+
+      // Both should have the same set of keys
+      const defaultKeys = Object.keys(defaultReminder).sort();
+      const compactKeys = Object.keys(compactReminder).sort();
+      expect(defaultKeys).toEqual(compactKeys);
+    });
+
+    test('full detail includes all expected fields', async () => {
+      // Create a reminder with many fields set
+      await client.callTool('create_reminders', {
+        reminders: [
+          {
+            title: 'Full detail test',
+            list: {name: testListName},
+            notes: 'test notes',
+            dueDate: '2026-06-15T14:00:00-05:00',
+            priority: 'high',
+            url: 'https://example.com',
+          },
+        ],
+      });
+
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        searchText: 'Full detail test',
+        outputDetail: 'full',
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<Record<string, unknown>>;
+      expect(reminders.length).toBeGreaterThanOrEqual(1);
+
+      const reminder = reminders[0];
+      // All fields should be present (some may be null)
+      const expectedFields = [
+        'id',
+        'title',
+        'notes',
+        'listId',
+        'listName',
+        'isCompleted',
+        'priority',
+        'dueDate',
+        'dueDateIncludesTime',
+        'completionDate',
+        'createdDate',
+        'lastModifiedDate',
+        'url',
+        'alarms',
+        'recurrenceRules',
+      ];
+      for (const field of expectedFields) {
+        expect(
+          field in reminder,
+          `Expected field "${field}" to be present`,
+        ).toBe(true);
+      }
     });
 
     test('sorts by priority', async () => {

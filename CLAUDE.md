@@ -73,12 +73,12 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ## Future Enhancements
 
-- [ ] Add alarm support (absolute + relative)
-- [ ] Add recurrence/RRULE support
-- [ ] Add text search in reminder titles/notes
-- [ ] Add date range filtering
-- [ ] Add batch operations
-- [ ] Match Claude iOS API more closely
+- [x] Add alarm support (absolute + relative)
+- [x] Add recurrence/RRULE support
+- [x] Add text search in reminder titles/notes
+- [x] Add date range filtering
+- [x] Add batch operations
+- [x] Match Claude iOS API more closely
 
 ## Issue Tracking with Beads
 
