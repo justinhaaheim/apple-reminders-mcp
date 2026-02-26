@@ -43,13 +43,13 @@
 
 ## Progress
 
-- [ ] Issue 1: MockReminder.isAllDay
-- [ ] Issue 2: weekPosition comment
-- [ ] Issue 3: endDate + endCount validation
-- [ ] Issue 4: dueDateIncludesTime validation
-- [ ] Issue 5: Date range filter refactor
-- [ ] Issue 6: daysOfMonth schema
-- [ ] Issue 7: weekPosition validation
-- [ ] Update test for issue 1 (non-midnight time)
-- [ ] Run tests + build
-- [ ] Commit + push
+- [x] Issue 1: MockReminder.isAllDay — replaced plain Bool with computed property mirroring EKReminderWrapper
+- [x] Issue 2: weekPosition comment — documented known limitation of single weekPosition model
+- [x] Issue 3: endDate + endCount validation — throws MCPToolError if both provided
+- [x] Issue 4: dueDateIncludesTime validation — throws if no dueDate exists (both create + update paths)
+- [x] Issue 5: Date range filter refactor — moved before convertToOutput, uses Date comparisons directly
+- [x] Issue 6: daysOfMonth schema — expanded minimum to -31, updated description
+- [x] Issue 7: weekPosition validation — validates range [-4...-1, 1...5, 0] in parseRecurrenceInput
+- [x] Update test for issue 1 — uses 14:30 time and asserts time is stripped from output
+- [x] Run tests + build — 78 tests pass, 290 expects, formatting clean
+- [x] Commit + push

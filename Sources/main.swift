@@ -91,7 +91,7 @@ struct ReminderRecurrenceRule {
     let frequency: RecurrenceFrequency
     let interval: Int
     let daysOfWeek: [Int]?       // 1=Sunday ... 7=Saturday
-    let daysOfMonth: [Int]?      // 1-31
+    let daysOfMonth: [Int]?      // 1-31, or negative (-1=last day, -2=second-to-last, etc.)
     let monthsOfYear: [Int]?     // 1-12
     let weekPosition: Int?       // -1=last, 1=first, 2=second, etc.
     let endDate: Date?
@@ -233,6 +233,10 @@ class EKReminderWrapper: Reminder {
                 let daysOfWeek = rule.daysOfTheWeek?.map { $0.dayOfTheWeek.rawValue }
                 let daysOfMonth = rule.daysOfTheMonth?.map { $0.intValue }
                 let monthsOfYear = rule.monthsOfTheYear?.map { $0.intValue }
+                // Known limitation: our model uses a single weekPosition for all days.
+                // EventKit stores a weekNumber per EKRecurrenceDayOfWeek, so rules with
+                // different week numbers per day (e.g. "2nd Monday AND 3rd Wednesday")
+                // will lose that per-day data on round-trip.
                 let weekPosition = rule.daysOfTheWeek?.first?.weekNumber
                 let endDate = rule.recurrenceEnd?.endDate
                 let endCount = rule.recurrenceEnd?.occurrenceCount
@@ -442,9 +446,26 @@ class MockReminder: Reminder {
     let creationDate: Date?
     var lastModifiedDate: Date?
     var url: URL?
-    var isAllDay: Bool = false
     var alarms: [ReminderAlarm] = []
     var recurrenceRules: [ReminderRecurrenceRule] = []
+
+    // Mirror EKReminderWrapper.isAllDay: infer from dueDateComponents and
+    // strip/retain time components on set, so mock behavior matches real EventKit.
+    var isAllDay: Bool {
+        get {
+            guard let components = dueDateComponents else { return false }
+            return components.hour == nil
+        }
+        set {
+            guard var components = dueDateComponents else { return }
+            if newValue {
+                components.hour = nil
+                components.minute = nil
+                components.second = nil
+            }
+            dueDateComponents = components
+        }
+    }
 
     private weak var store: MockReminderStore?
 
@@ -1143,18 +1164,15 @@ class RemindersManager {
             reminderStatus = .all
         }
 
-        let allReminders = await store.fetchReminders(in: calendars, status: reminderStatus)
+        var filteredReminders = await store.fetchReminders(in: calendars, status: reminderStatus)
 
         let fetchTime = Date().timeIntervalSince(startTime)
-        log("Fetched \(allReminders.count) reminders in \(Int(fetchTime * 1000))ms")
-
-        // Convert to output format
-        var reminderOutputs = allReminders.map { convertToOutput($0) }
+        log("Fetched \(filteredReminders.count) reminders in \(Int(fetchTime * 1000))ms")
 
         // 2b. Apply searchText filter (case-insensitive across title and notes)
         if let searchText = searchText, !searchText.isEmpty {
             let lowercasedSearch = searchText.lowercased()
-            reminderOutputs = reminderOutputs.filter { reminder in
+            filteredReminders = filteredReminders.filter { reminder in
                 if reminder.title.lowercased().contains(lowercasedSearch) {
                     return true
                 }
@@ -1163,10 +1181,10 @@ class RemindersManager {
                 }
                 return false
             }
-            log("searchText filter '\(searchText)' reduced to \(reminderOutputs.count) reminders")
+            log("searchText filter '\(searchText)' reduced to \(filteredReminders.count) reminders")
         }
 
-        // 2c. Apply date range filter
+        // 2c. Apply date range filter on raw Reminder objects (avoids Date→String→Date round-trip)
         if dateFrom != nil || dateTo != nil {
             let fromDate: Date? = dateFrom != nil ? Date.fromISO8601(dateFrom!) : nil
             let toDate: Date? = dateTo != nil ? Date.fromISO8601(dateTo!) : nil
@@ -1178,25 +1196,37 @@ class RemindersManager {
                 throw MCPToolError("Invalid dateTo format: '\(dateTo!)'. Expected ISO 8601.")
             }
 
-            reminderOutputs = reminderOutputs.filter { reminder in
+            filteredReminders = filteredReminders.filter { reminder in
                 // For completed reminders, filter by completionDate
-                // For incomplete reminders, filter by dueDate
-                let dateString = reminder.isCompleted ? reminder.completionDate : reminder.dueDate
-                guard let dateString = dateString,
-                      let reminderDate = Date.fromISO8601(dateString) else {
+                // For incomplete reminders, filter by dueDate from dueDateComponents
+                let reminderDate: Date?
+                if reminder.isCompleted {
+                    reminderDate = reminder.completionDate
+                } else {
+                    var components = reminder.dueDateComponents
+                    if components != nil && components!.calendar == nil {
+                        components!.calendar = Calendar.current
+                    }
+                    reminderDate = components?.date
+                }
+
+                guard let date = reminderDate else {
                     return false  // No date = excluded from date range filter
                 }
 
-                if let from = fromDate, reminderDate < from {
+                if let from = fromDate, date < from {
                     return false
                 }
-                if let to = toDate, reminderDate > to {
+                if let to = toDate, date > to {
                     return false
                 }
                 return true
             }
-            log("Date range filter reduced to \(reminderOutputs.count) reminders")
+            log("Date range filter reduced to \(filteredReminders.count) reminders")
         }
+
+        // Convert to output format
+        var reminderOutputs = filteredReminders.map { convertToOutput($0) }
 
         // 3. Apply JMESPath if provided — always uses full fields, outputDetail is ignored
         if let jmesQuery = query, !jmesQuery.isEmpty {
@@ -1511,6 +1541,9 @@ class RemindersManager {
         }
 
         if let includesTime = input.dueDateIncludesTime {
+            if mutableReminder.dueDateComponents == nil {
+                throw MCPToolError("dueDateIncludesTime requires a dueDate to be set.")
+            }
             mutableReminder.isAllDay = !includesTime
         }
 
@@ -1649,6 +1682,9 @@ class RemindersManager {
 
         // Update dueDateIncludesTime
         if let includesTime = input.dueDateIncludesTime {
+            if reminder.dueDateComponents == nil {
+                throw MCPToolError("dueDateIncludesTime requires a dueDate to be set.")
+            }
             reminder.isAllDay = !includesTime
         }
 
@@ -1723,6 +1759,18 @@ class RemindersManager {
         let interval = input.interval ?? 1
         if interval < 1 {
             throw MCPToolError("Recurrence interval must be at least 1")
+        }
+
+        if input.endDate != nil && input.endCount != nil {
+            throw MCPToolError("Cannot specify both endDate and endCount in a recurrence rule. Use one or the other.")
+        }
+
+        if let position = input.weekPosition {
+            let validRanges = (-4)...(-1)
+            let validPositive = 1...5
+            if position != 0 && !validRanges.contains(position) && !validPositive.contains(position) {
+                throw MCPToolError("Invalid weekPosition: \(position). Must be 1-5 (first through fifth), -1 to -4 (last through fourth-to-last), or 0.")
+            }
         }
 
         var endDate: Date? = nil
@@ -2384,8 +2432,8 @@ class MCPServer {
                                             ]),
                                             "daysOfMonth": .object([
                                                 "type": .string("array"),
-                                                "items": .object(["type": .string("integer"), "minimum": .int(1), "maximum": .int(31)]),
-                                                "description": .string("Days of month (1-31). For monthly frequency.")
+                                                "items": .object(["type": .string("integer"), "minimum": .int(-31), "maximum": .int(31)]),
+                                                "description": .string("Days of month (1-31, or negative for last N days: -1=last day, -2=second-to-last, etc.). For monthly frequency.")
                                             ]),
                                             "monthsOfYear": .object([
                                                 "type": .string("array"),

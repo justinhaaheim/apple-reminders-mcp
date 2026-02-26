@@ -100,12 +100,13 @@ describe('API Parity features', () => {
     });
 
     test('creates reminder with dueDateIncludesTime=false (all-day)', async () => {
+      // Use a non-midnight time to verify that time components are stripped
       const result = await client.callTool('create_reminders', {
         reminders: [
           {
             title: 'All-day reminder',
             list: {name: testListName},
-            dueDate: '2026-06-15T00:00:00-05:00',
+            dueDate: '2026-06-15T14:30:00-05:00',
             dueDateIncludesTime: false,
           },
         ],
@@ -116,6 +117,9 @@ describe('API Parity features', () => {
         dueDate: string;
       }>;
       expect(reminders[0].dueDateIncludesTime).toBe(false);
+      // The returned dueDate should not contain the original 14:30 time
+      // since isAllDay strips hour/minute/second from dueDateComponents
+      expect(reminders[0].dueDate).not.toContain('T14:30:00');
     });
 
     test('dueDateIncludesTime is null when no due date set', async () => {
