@@ -82,7 +82,8 @@ protocol Reminder {
 struct ReminderAlarm {
     /// Specific date/time for the alarm
     let absoluteDate: Date?
-    /// Offset in seconds before the due date (negative = before)
+    /// Offset in seconds relative to the due date. Always stored as a negative value
+    /// (e.g., -3600 = 1 hour before). Matches EventKit's EKAlarm.relativeOffset convention.
     let relativeOffset: TimeInterval?
 }
 
@@ -180,6 +181,9 @@ class EKReminderWrapper: Reminder {
         get {
             // EKReminder doesn't have isAllDay (that's EKEvent-only).
             // Infer from dueDateComponents: if hour is set, it includes time (not all-day).
+            // Heuristic limitations:
+            // - A reminder at exactly midnight (hour=0) reports isAllDay=false (has time)
+            // - A reminder with no due date returns false rather than nil
             guard let components = reminder.dueDateComponents else { return false }
             return components.hour == nil
         }
@@ -451,6 +455,9 @@ class MockReminder: Reminder {
 
     // Mirror EKReminderWrapper.isAllDay: infer from dueDateComponents and
     // strip/retain time components on set, so mock behavior matches real EventKit.
+    // Heuristic limitations:
+    // - A reminder at exactly midnight (hour=0) reports isAllDay=false (has time)
+    // - A reminder with no due date returns false rather than nil
     var isAllDay: Bool {
         get {
             guard let components = dueDateComponents else { return false }
@@ -781,6 +788,13 @@ struct AlarmOutput: Codable {
     let type: String       // "absolute" or "relative"
     let date: String?      // ISO 8601 for absolute alarms
     let offset: Int?       // seconds before due date for relative alarms
+
+    func toDict() -> [String: Any] {
+        var dict: [String: Any] = ["type": type]
+        if let date = date { dict["date"] = date }
+        if let offset = offset { dict["offset"] = offset }
+        return dict
+    }
 }
 
 struct RecurrenceRuleOutput: Codable {
@@ -792,6 +806,20 @@ struct RecurrenceRuleOutput: Codable {
     let weekPosition: Int?
     let endDate: String?
     let endCount: Int?
+
+    func toDict() -> [String: Any] {
+        var dict: [String: Any] = [
+            "frequency": frequency,
+            "interval": interval
+        ]
+        if let daysOfWeek = daysOfWeek { dict["daysOfWeek"] = daysOfWeek }
+        if let daysOfMonth = daysOfMonth { dict["daysOfMonth"] = daysOfMonth }
+        if let monthsOfYear = monthsOfYear { dict["monthsOfYear"] = monthsOfYear }
+        if let weekPosition = weekPosition { dict["weekPosition"] = weekPosition }
+        if let endDate = endDate { dict["endDate"] = endDate }
+        if let endCount = endCount { dict["endCount"] = endCount }
+        return dict
+    }
 }
 
 struct ReminderOutput: Codable {
@@ -869,6 +897,13 @@ struct ListSelector {
     }
 }
 
+/// Represents a field that can be set to a value or explicitly cleared (null).
+/// Used in update operations where omission means "don't change" vs null means "clear".
+enum Clearable<T> {
+    case value(T)
+    case clear
+}
+
 struct AlarmInput {
     let type: String          // "absolute" or "relative"
     let date: String?         // ISO 8601 for absolute alarms
@@ -901,16 +936,16 @@ struct CreateReminderInput {
 struct UpdateReminderInput {
     let id: String
     let title: String?
-    let notes: Any?  // Can be String or NSNull to clear
+    let notes: Clearable<String>?
     let list: ListSelector?
-    let dueDate: Any?  // Can be String or NSNull to clear
+    let dueDate: Clearable<String>?
     let priority: String?
     let completed: Bool?
-    let completedDate: Any?  // Can be String or NSNull to clear
-    let url: Any?  // Can be String or NSNull to clear
+    let completedDate: Clearable<String>?
+    let url: Clearable<String>?
     let dueDateIncludesTime: Bool?
-    let alarms: Any?  // Can be array or NSNull to clear
-    let recurrenceRule: Any?  // Can be dict or NSNull to clear
+    let alarms: Clearable<[AlarmInput]>?
+    let recurrenceRule: Clearable<RecurrenceRuleInput>?
 }
 
 // MARK: - Priority Conversion
@@ -1153,9 +1188,8 @@ class RemindersManager {
         log("Resolved \(calendars.count) calendar(s)")
 
         // 2. Fetch reminders with status filter
-        let statusFilter = status ?? "incomplete"
         let reminderStatus: ReminderStatus
-        switch statusFilter {
+        switch status ?? "incomplete" {
         case "completed":
             reminderStatus = .completed
         case "incomplete":
@@ -1261,7 +1295,7 @@ class RemindersManager {
         // 6. Apply outputDetail field filtering
         let detail = outputDetail ?? "compact"
         let isSingleList = list == nil || list?.all != true
-        return formatReminders(reminderOutputs, outputDetail: detail, isSingleList: isSingleList, statusFilter: statusFilter)
+        return formatReminders(reminderOutputs, outputDetail: detail, isSingleList: isSingleList, statusFilter: reminderStatus)
     }
 
     private func applyJMESPath(_ reminders: [ReminderOutput], query: String) throws -> Any {
@@ -1290,7 +1324,7 @@ class RemindersManager {
         _ reminders: [ReminderOutput],
         outputDetail: String,
         isSingleList: Bool,
-        statusFilter: String
+        statusFilter: ReminderStatus
     ) -> [[String: Any]] {
         let allowedFields: Set<String>?
         let stripNulls: Bool
@@ -1309,7 +1343,7 @@ class RemindersManager {
 
         // Determine which context-dependent fields to omit
         let omitListName = isSingleList && outputDetail != "full"
-        let omitIsCompleted = (statusFilter == "incomplete" || statusFilter == "completed") && outputDetail != "full"
+        let omitIsCompleted = (statusFilter == .incomplete || statusFilter == .completed) && outputDetail != "full"
 
         return reminders.map { reminder in
             var dict = buildFullDict(reminder)
@@ -1358,31 +1392,14 @@ class RemindersManager {
 
         // Alarms: array if present, NSNull if not
         if let alarms = reminder.alarms {
-            dict["alarms"] = alarms.map { alarm -> [String: Any] in
-                var alarmDict: [String: Any] = ["type": alarm.type]
-                if let date = alarm.date { alarmDict["date"] = date }
-                if let offset = alarm.offset { alarmDict["offset"] = offset }
-                return alarmDict
-            }
+            dict["alarms"] = alarms.map { $0.toDict() }
         } else {
             dict["alarms"] = NSNull()
         }
 
         // Recurrence rules: array if present, NSNull if not
         if let rules = reminder.recurrenceRules {
-            dict["recurrenceRules"] = rules.map { rule -> [String: Any] in
-                var ruleDict: [String: Any] = [
-                    "frequency": rule.frequency,
-                    "interval": rule.interval
-                ]
-                if let daysOfWeek = rule.daysOfWeek { ruleDict["daysOfWeek"] = daysOfWeek }
-                if let daysOfMonth = rule.daysOfMonth { ruleDict["daysOfMonth"] = daysOfMonth }
-                if let monthsOfYear = rule.monthsOfYear { ruleDict["monthsOfYear"] = monthsOfYear }
-                if let weekPosition = rule.weekPosition { ruleDict["weekPosition"] = weekPosition }
-                if let endDate = rule.endDate { ruleDict["endDate"] = endDate }
-                if let endCount = rule.endCount { ruleDict["endCount"] = endCount }
-                return ruleDict
-            }
+            dict["recurrenceRules"] = rules.map { $0.toDict() }
         } else {
             dict["recurrenceRules"] = NSNull()
         }
@@ -1435,7 +1452,7 @@ class RemindersManager {
                 return AlarmOutput(
                     type: "relative",
                     date: nil,
-                    offset: Int(abs(alarm.relativeOffset ?? 0))
+                    offset: Int(-(alarm.relativeOffset ?? 0))
                 )
             }
         }
@@ -1603,9 +1620,10 @@ class RemindersManager {
 
         // Update notes (can be cleared with null)
         if let notesValue = input.notes {
-            if notesValue is NSNull {
+            switch notesValue {
+            case .clear:
                 reminder.notes = nil
-            } else if let notes = notesValue as? String {
+            case .value(let notes):
                 reminder.notes = notes
             }
         }
@@ -1627,17 +1645,17 @@ class RemindersManager {
 
         // Update due date (can be cleared with null)
         if let dueDateValue = input.dueDate {
-            if dueDateValue is NSNull {
+            switch dueDateValue {
+            case .clear:
                 reminder.dueDateComponents = nil
-            } else if let dueDateString = dueDateValue as? String {
-                if let date = Date.fromISO8601(dueDateString) {
-                    reminder.dueDateComponents = Calendar.current.dateComponents(
-                        [.year, .month, .day, .hour, .minute],
-                        from: date
-                    )
-                } else {
+            case .value(let dueDateString):
+                guard let date = Date.fromISO8601(dueDateString) else {
                     throw MCPToolError("Invalid date format: '\(dueDateString)'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.")
                 }
+                reminder.dueDateComponents = Calendar.current.dateComponents(
+                    [.year, .month, .day, .hour, .minute],
+                    from: date
+                )
             }
         }
 
@@ -1651,14 +1669,14 @@ class RemindersManager {
 
         // Handle completion - completedDate takes precedence over completed
         if let completedDateValue = input.completedDate {
-            if completedDateValue is NSNull {
+            switch completedDateValue {
+            case .clear:
                 reminder.completionDate = nil
-            } else if let completedDateString = completedDateValue as? String {
-                if let date = Date.fromISO8601(completedDateString) {
-                    reminder.completionDate = date
-                } else {
+            case .value(let completedDateString):
+                guard let date = Date.fromISO8601(completedDateString) else {
                     throw MCPToolError("Invalid date format: '\(completedDateString)'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.")
                 }
+                reminder.completionDate = date
             }
         } else if let completed = input.completed {
             if completed {
@@ -1670,9 +1688,10 @@ class RemindersManager {
 
         // Update URL (can be cleared with null)
         if let urlValue = input.url {
-            if urlValue is NSNull {
+            switch urlValue {
+            case .clear:
                 reminder.url = nil
-            } else if let urlString = urlValue as? String {
+            case .value(let urlString):
                 guard let url = URL(string: urlString) else {
                     throw MCPToolError("Invalid URL: '\(urlString)'")
                 }
@@ -1690,35 +1709,20 @@ class RemindersManager {
 
         // Update alarms (can be cleared with null)
         if let alarmsValue = input.alarms {
-            if alarmsValue is NSNull {
+            switch alarmsValue {
+            case .clear:
                 reminder.alarms = []
-            } else if let alarmsArray = alarmsValue as? [[String: Any]] {
-                reminder.alarms = try alarmsArray.map { dict in
-                    let alarmInput = AlarmInput(
-                        type: dict["type"] as? String ?? "relative",
-                        date: dict["date"] as? String,
-                        offset: dict["offset"] as? Int
-                    )
-                    return try parseAlarmInput(alarmInput)
-                }
+            case .value(let alarmInputs):
+                reminder.alarms = try alarmInputs.map { try parseAlarmInput($0) }
             }
         }
 
         // Update recurrence rule (can be cleared with null)
         if let ruleValue = input.recurrenceRule {
-            if ruleValue is NSNull {
+            switch ruleValue {
+            case .clear:
                 reminder.recurrenceRules = []
-            } else if let ruleDict = ruleValue as? [String: Any] {
-                let ruleInput = RecurrenceRuleInput(
-                    frequency: ruleDict["frequency"] as? String ?? "daily",
-                    interval: ruleDict["interval"] as? Int,
-                    daysOfWeek: ruleDict["daysOfWeek"] as? [Int],
-                    daysOfMonth: ruleDict["daysOfMonth"] as? [Int],
-                    monthsOfYear: ruleDict["monthsOfYear"] as? [Int],
-                    weekPosition: ruleDict["weekPosition"] as? Int,
-                    endDate: ruleDict["endDate"] as? String,
-                    endCount: ruleDict["endCount"] as? Int
-                )
+            case .value(let ruleInput):
                 reminder.recurrenceRules = [try parseRecurrenceInput(ruleInput)]
             }
         }
@@ -1745,7 +1749,10 @@ class RemindersManager {
             guard let offset = input.offset else {
                 throw MCPToolError("Relative alarm requires 'offset' field (seconds before due date)")
             }
-            return ReminderAlarm(absoluteDate: nil, relativeOffset: TimeInterval(-abs(offset)))
+            if offset < 0 {
+                throw MCPToolError("Alarm offset must be a positive number of seconds (e.g., 3600 = 1 hour before due date). Got \(offset).")
+            }
+            return ReminderAlarm(absoluteDate: nil, relativeOffset: TimeInterval(-offset))
         default:
             throw MCPToolError("Invalid alarm type: '\(input.type)'. Must be 'absolute' or 'relative'.")
         }
@@ -2029,8 +2036,9 @@ class MCPServer {
             1. Call query_reminders with {} to see incomplete reminders from default list
             2. Use get_lists to see all available lists
             3. Specify list by name: {"list": {"name": "Work"}}
-            4. Search by text: {"searchText": "meeting"}
-            5. Search all lists: {"list": {"all": true}}
+            4. Specify list by ID: {"list": {"id": "x-apple-..."}}
+            5. Search by text: {"searchText": "meeting"}
+            6. Search all lists: {"list": {"all": true}}
 
             PRIORITY: Use "none", "low", "medium", or "high" (not numbers)
             DATES: ISO 8601 with timezone, e.g., "2024-01-15T10:00:00-05:00"
@@ -2492,6 +2500,21 @@ class MCPServer {
                 Update title:
                   {"reminders": [{"id": "...", "title": "Buy oat milk"}]}
 
+                Move to different list:
+                  {"reminders": [{"id": "...", "list": {"name": "Groceries"}}]}
+
+                Complete a reminder:
+                  {"reminders": [{"id": "...", "completed": true}]}
+
+                Uncomplete a reminder:
+                  {"reminders": [{"id": "...", "completed": false}]}
+
+                Complete with specific date:
+                  {"reminders": [{"id": "...", "completedDate": "2024-01-15T10:00:00-05:00"}]}
+
+                Clear due date:
+                  {"reminders": [{"id": "...", "dueDate": null}]}
+
                 Add alarm:
                   {"reminders": [{"id": "...", "alarms": [{"type": "relative", "offset": 1800}]}]}
 
@@ -2500,9 +2523,6 @@ class MCPServer {
 
                 Clear recurrence:
                   {"reminders": [{"id": "...", "recurrenceRule": null}]}
-
-                Complete a reminder:
-                  {"reminders": [{"id": "...", "completed": true}]}
 
                 Batch update (complete multiple):
                   {"reminders": [
@@ -2833,19 +2853,54 @@ class MCPServer {
                 guard let id = dict["id"] as? String else {
                     throw MCPToolError("Missing required field 'id' in reminder at index \(index)")
                 }
+                // Parse alarm inputs if present
+                var alarmsClearable: Clearable<[AlarmInput]>? = nil
+                if let alarmsRaw = dict["alarms"] {
+                    if alarmsRaw is NSNull {
+                        alarmsClearable = .clear
+                    } else if let alarmsArray = alarmsRaw as? [[String: Any]] {
+                        alarmsClearable = .value(alarmsArray.map { alarmDict in
+                            AlarmInput(
+                                type: alarmDict["type"] as? String ?? "relative",
+                                date: alarmDict["date"] as? String,
+                                offset: alarmDict["offset"] as? Int
+                            )
+                        })
+                    }
+                }
+
+                // Parse recurrence rule if present
+                var recurrenceClearable: Clearable<RecurrenceRuleInput>? = nil
+                if let ruleRaw = dict["recurrenceRule"] {
+                    if ruleRaw is NSNull {
+                        recurrenceClearable = .clear
+                    } else if let ruleDict = ruleRaw as? [String: Any] {
+                        recurrenceClearable = .value(RecurrenceRuleInput(
+                            frequency: ruleDict["frequency"] as? String ?? "daily",
+                            interval: ruleDict["interval"] as? Int,
+                            daysOfWeek: ruleDict["daysOfWeek"] as? [Int],
+                            daysOfMonth: ruleDict["daysOfMonth"] as? [Int],
+                            monthsOfYear: ruleDict["monthsOfYear"] as? [Int],
+                            weekPosition: ruleDict["weekPosition"] as? Int,
+                            endDate: ruleDict["endDate"] as? String,
+                            endCount: ruleDict["endCount"] as? Int
+                        ))
+                    }
+                }
+
                 inputs.append(UpdateReminderInput(
                     id: id,
                     title: dict["title"] as? String,
-                    notes: dict["notes"],
+                    notes: parseClearable(dict["notes"]),
                     list: ListSelector(from: dict["list"] as? [String: Any]),
-                    dueDate: dict["dueDate"],
+                    dueDate: parseClearable(dict["dueDate"]),
                     priority: dict["priority"] as? String,
                     completed: dict["completed"] as? Bool,
-                    completedDate: dict["completedDate"],
-                    url: dict["url"],
+                    completedDate: parseClearable(dict["completedDate"]),
+                    url: parseClearable(dict["url"]),
                     dueDateIncludesTime: dict["dueDateIncludesTime"] as? Bool,
-                    alarms: dict["alarms"],
-                    recurrenceRule: dict["recurrenceRule"]
+                    alarms: alarmsClearable,
+                    recurrenceRule: recurrenceClearable
                 ))
             }
 
@@ -2892,6 +2947,14 @@ class MCPServer {
         }
     }
 
+    /// Parses a JSON value into a Clearable: NSNull → .clear, castable T → .value(T), absent key → nil
+    private func parseClearable<T>(_ raw: Any?) -> Clearable<T>? {
+        guard let raw = raw else { return nil }
+        if raw is NSNull { return .clear }
+        if let value = raw as? T { return .value(value) }
+        return nil
+    }
+
     private func encodableArray(_ reminders: [ReminderOutput]) -> [[String: Any]] {
         return reminders.map { reminder in
             var dict: [String: Any] = [
@@ -2920,27 +2983,10 @@ class MCPServer {
                 dict["url"] = url
             }
             if let alarms = reminder.alarms {
-                dict["alarms"] = alarms.map { alarm -> [String: Any] in
-                    var alarmDict: [String: Any] = ["type": alarm.type]
-                    if let date = alarm.date { alarmDict["date"] = date }
-                    if let offset = alarm.offset { alarmDict["offset"] = offset }
-                    return alarmDict
-                }
+                dict["alarms"] = alarms.map { $0.toDict() }
             }
             if let rules = reminder.recurrenceRules {
-                dict["recurrenceRules"] = rules.map { rule -> [String: Any] in
-                    var ruleDict: [String: Any] = [
-                        "frequency": rule.frequency,
-                        "interval": rule.interval
-                    ]
-                    if let daysOfWeek = rule.daysOfWeek { ruleDict["daysOfWeek"] = daysOfWeek }
-                    if let daysOfMonth = rule.daysOfMonth { ruleDict["daysOfMonth"] = daysOfMonth }
-                    if let monthsOfYear = rule.monthsOfYear { ruleDict["monthsOfYear"] = monthsOfYear }
-                    if let weekPosition = rule.weekPosition { ruleDict["weekPosition"] = weekPosition }
-                    if let endDate = rule.endDate { ruleDict["endDate"] = endDate }
-                    if let endCount = rule.endCount { ruleDict["endCount"] = endCount }
-                    return ruleDict
-                }
+                dict["recurrenceRules"] = rules.map { $0.toDict() }
             }
             return dict
         }
