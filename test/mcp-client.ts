@@ -26,13 +26,22 @@ interface MCPRequest {
   params?: Record<string, unknown>;
 }
 
+interface MCPTool {
+  name: string;
+  description: string;
+  inputSchema?: Record<string, unknown>;
+}
+
 interface MCPResponse {
   jsonrpc: '2.0';
   id: number;
   result?: {
     content?: Array<{type: string; text: string}>;
-    tools?: Array<{name: string; description: string}>;
+    tools?: MCPTool[];
     protocolVersion?: string;
+    capabilities?: Record<string, unknown>;
+    serverInfo?: {name: string; version: string};
+    instructions?: string;
     isError?: boolean;
   };
   error?: {
@@ -58,6 +67,7 @@ export class MCPClient {
   private testListName: string | null = null;
   private createdReminderIds: string[] = [];
   private useMockMode: boolean;
+  private initializeResult: MCPResponse['result'] | null = null;
 
   private constructor(
     proc: Subprocess<'pipe', 'pipe', 'pipe'>,
@@ -139,11 +149,12 @@ export class MCPClient {
   }
 
   private async initialize(): Promise<void> {
-    await this.sendRequest('initialize', {
+    const response = await this.sendRequest('initialize', {
       protocolVersion: '2024-11-05',
       capabilities: {},
       clientInfo: {name: 'test-client', version: '1.0'},
     });
+    this.initializeResult = response.result ?? null;
   }
 
   /**
@@ -237,11 +248,33 @@ export class MCPClient {
   }
 
   /**
-   * List available tools.
+   * List available tools (name and description only).
    */
   async listTools(): Promise<Array<{name: string; description: string}>> {
     const response = await this.sendRequest('tools/list', {});
     return response.result?.tools ?? [];
+  }
+
+  /**
+   * List available tools with full details including inputSchema.
+   */
+  async listToolsWithSchemas(): Promise<MCPTool[]> {
+    const response = await this.sendRequest('tools/list', {});
+    return response.result?.tools ?? [];
+  }
+
+  /**
+   * Get the instructions text from the initialize response.
+   */
+  getInstructions(): string | null {
+    return this.initializeResult?.instructions ?? null;
+  }
+
+  /**
+   * Get server info from the initialize response.
+   */
+  getServerInfo(): {name: string; version: string} | null {
+    return this.initializeResult?.serverInfo ?? null;
   }
 
   /**
