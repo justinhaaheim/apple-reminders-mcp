@@ -19,3 +19,8 @@ bun.lockb
 
 # Temp
 /tmp
+
+# Swift installer artifacts
+swiftly
+swiftly-*.tar.gz
+LICENSE.txt

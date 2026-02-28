@@ -1,0 +1,789 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`MCP schema snapshots initialize response instructions text 1`] = `
+"Apple Reminders MCP Server - Access Apple Reminders with 7 powerful tools.
+
+TOOLS:
+• query_reminders - Search and filter reminders (text search, date range, JMESPath)
+• get_lists - Get all reminder lists
+• create_list - Create a new list
+• create_reminders - Create reminders with alarms, recurrence, URLs
+• update_reminders - Update reminders (including mark complete/incomplete)
+• delete_reminders - Delete reminders
+• export_reminders - Export reminders to JSON file (for backup)
+
+QUICK START:
+1. Call query_reminders with {} to see incomplete reminders from default list
+2. Use get_lists to see all available lists
+3. Specify list by name: {"list": {"name": "Work"}}
+4. Specify list by ID: {"list": {"id": "x-apple-..."}}
+5. Search by text: {"searchText": "meeting"}
+6. Search all lists: {"list": {"all": true}}
+
+PRIORITY: Use "none", "low", "medium", or "high" (not numbers)
+DATES: ISO 8601 with timezone, e.g., "2024-01-15T10:00:00-05:00"
+ALARMS: [{"type": "relative", "offset": 3600}] (1 hour before)
+RECURRENCE: {"frequency": "weekly", "interval": 1}"
+`;
+
+exports[`MCP schema snapshots initialize response server info 1`] = `
+{
+  "name": "apple-reminders",
+  "version": "2.0.0",
+}
+`;
+
+exports[`MCP schema snapshots tool schemas query_reminders 1`] = `
+{
+  "description": 
+"Query reminders from Apple Reminders.
+
+**Default behavior (no parameters needed):**
+- Searches DEFAULT LIST only
+- Returns INCOMPLETE reminders only
+- Sorted by NEWEST CREATED first
+- Limited to 50 results
+- Uses "compact" output (most useful fields, nulls omitted)
+
+**Parameters (all optional):**
+
+list — Which list to search. Omit for default list.
+  • {"name": "Work"} → by exact name (case-insensitive)
+  • {"id": "x-apple-..."} → by exact ID
+  • {"all": true} → all lists
+
+status — "incomplete" (default), "completed", or "all"
+
+searchText — Case-insensitive text search across title and notes
+
+dateFrom / dateTo — Date range filter (ISO 8601). For incomplete reminders filters by dueDate, for completed by completionDate.
+
+sortBy — "newest" (default), "oldest", "priority", "dueDate"
+
+query — JMESPath expression for advanced filtering (overrides sortBy and outputDetail — always uses full fields as input)
+
+outputDetail — Controls which fields are returned:
+  • "minimal" — id, title only (plus listName if searching all lists, isCompleted if status is "all")
+  • "compact" (default) — id, title, notes, dueDate, priority, createdDate, lastModifiedDate (plus listName/isCompleted when contextually useful). Null fields omitted.
+  • "full" — All fields always included, null values shown explicitly
+
+limit — Max results (default 50, max 200)
+
+**Examples:**
+
+Recent incomplete from default list:
+  {}
+
+From specific list:
+  {"list": {"name": "Work"}}
+
+All lists, completed:
+  {"list": {"all": true}, "status": "completed"}
+
+Search by text:
+  {"searchText": "meeting"}
+
+Due this week:
+  {"dateFrom": "2024-01-15T00:00:00-05:00", "dateTo": "2024-01-21T23:59:59-05:00"}
+
+Full detail for debugging:
+  {"outputDetail": "full"}
+
+Minimal for quick overview:
+  {"outputDetail": "minimal"}
+
+High priority only:
+  {"query": "[?priority == 'high']"}
+
+Created today or later (via JMESPath):
+  {"query": "[?createdDate >= '2024-01-15']"}
+
+Modified in the last week (via JMESPath):
+  {"query": "[?lastModifiedDate >= '2024-01-08']"}
+
+**Reminder fields available in JMESPath (always full):**
+- id, title, notes, listId, listName, isCompleted
+- priority (string: "none", "low", "medium", "high")
+- dueDate, dueDateIncludesTime, completionDate, createdDate, lastModifiedDate
+- url, alarms, recurrenceRules"
+,
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "dateFrom": {
+        "description": "Start of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.",
+        "type": "string",
+      },
+      "dateTo": {
+        "description": "End of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.",
+        "type": "string",
+      },
+      "limit": {
+        "default": 50,
+        "description": "Maximum results to return",
+        "maximum": 200,
+        "minimum": 1,
+        "type": "integer",
+      },
+      "list": {
+        "additionalProperties": false,
+        "description": "Which list to search. Omit for default list.",
+        "properties": {
+          "all": {
+            "description": "Set true to search all lists",
+            "type": "boolean",
+          },
+          "id": {
+            "description": "Exact list ID",
+            "type": "string",
+          },
+          "name": {
+            "description": "List name (case-insensitive match)",
+            "type": "string",
+          },
+        },
+        "type": "object",
+      },
+      "outputDetail": {
+        "default": "compact",
+        "description": "Controls which fields are returned. 'minimal': id, title. 'compact' (default): most useful fields, nulls omitted. 'full': all fields, nulls shown. Ignored when 'query' (JMESPath) is provided. listName and isCompleted are contextually omitted in minimal/compact when implied by query params.",
+        "enum": [
+          "minimal",
+          "compact",
+          "full",
+        ],
+        "type": "string",
+      },
+      "query": {
+        "description": "JMESPath expression for advanced filtering/projection. Applied after list, status, searchText, and date filters. When provided, outputDetail is ignored (always uses full fields as input).",
+        "type": "string",
+      },
+      "searchText": {
+        "description": "Case-insensitive text search across reminder titles and notes",
+        "type": "string",
+      },
+      "sortBy": {
+        "default": "newest",
+        "description": "Sort order. Ignored if 'query' includes sorting.",
+        "enum": [
+          "newest",
+          "oldest",
+          "priority",
+          "dueDate",
+        ],
+        "type": "string",
+      },
+      "status": {
+        "default": "incomplete",
+        "description": "Filter by completion status",
+        "enum": [
+          "incomplete",
+          "completed",
+          "all",
+        ],
+        "type": "string",
+      },
+    },
+    "type": "object",
+  },
+  "name": "query_reminders",
+}
+`;
+
+exports[`MCP schema snapshots tool schemas get_lists 1`] = `
+{
+  "description": 
+"Get all available reminder lists.
+
+Returns list names, IDs, and which one is the default. Call this if you need to know what lists exist before querying reminders.
+
+**Parameters:** None
+
+**Example:**
+  {}"
+,
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object",
+  },
+  "name": "get_lists",
+}
+`;
+
+exports[`MCP schema snapshots tool schemas create_list 1`] = `
+{
+  "description": 
+"Create a new reminder list.
+
+**Parameters:**
+
+name (required) — Name for the new list
+
+**Example:**
+
+Create a "Groceries" list:
+  {"name": "Groceries"}"
+,
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "description": "Name for the new list",
+        "type": "string",
+      },
+    },
+    "required": [
+      "name",
+    ],
+    "type": "object",
+  },
+  "name": "create_list",
+}
+`;
+
+exports[`MCP schema snapshots tool schemas create_reminders 1`] = `
+{
+  "description": 
+"Create one or more reminders.
+
+**Parameters:**
+
+reminders — Array of reminder objects to create. Each object:
+  • title (required) — Reminder title
+  • notes — Body text
+  • list — Target list as {"name": "..."} or {"id": "..."}. Default list if omitted.
+  • dueDate — ISO 8601 datetime (e.g., "2024-01-15T10:00:00-05:00")
+  • dueDateIncludesTime — Whether the due date has a specific time (default true). Set false for all-day reminders.
+  • priority — "none", "low", "medium", or "high"
+  • url — URL to associate with the reminder
+  • alarms — Array of alarm objects: {"type": "relative", "offset": 3600} or {"type": "absolute", "date": "..."}
+  • recurrenceRule — Recurrence rule: {"frequency": "daily|weekly|monthly|yearly", "interval": 1, ...}
+
+**Examples:**
+
+Single reminder:
+  {"reminders": [{"title": "Buy milk"}]}
+
+With details:
+  {"reminders": [{"title": "Call dentist", "list": {"name": "Personal"}, "dueDate": "2024-01-20T09:00:00-05:00", "priority": "high"}]}
+
+With alarm (1 hour before):
+  {"reminders": [{"title": "Meeting", "dueDate": "2024-01-20T14:00:00-05:00", "alarms": [{"type": "relative", "offset": 3600}]}]}
+
+Weekly recurrence:
+  {"reminders": [{"title": "Team standup", "dueDate": "2024-01-20T09:00:00-05:00", "recurrenceRule": {"frequency": "weekly", "interval": 1, "daysOfWeek": [2, 3, 4, 5, 6]}}]}
+
+Batch create:
+  {"reminders": [
+    {"title": "Buy milk"},
+    {"title": "Buy eggs"},
+    {"title": "Buy bread", "priority": "low"}
+  ]}"
+,
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "reminders": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "alarms": {
+              "description": "Alarm notifications for the reminder",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "date": {
+                    "description": "ISO 8601 date/time (for absolute alarms)",
+                    "type": "string",
+                  },
+                  "offset": {
+                    "description": "Seconds before due date (for relative alarms). E.g., 3600 = 1 hour before.",
+                    "type": "integer",
+                  },
+                  "type": {
+                    "description": "Alarm type: 'relative' (offset from due date) or 'absolute' (specific date/time)",
+                    "enum": [
+                      "relative",
+                      "absolute",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "type",
+                ],
+                "type": "object",
+              },
+              "type": "array",
+            },
+            "dueDate": {
+              "description": "Due date in ISO 8601 format",
+              "type": "string",
+            },
+            "dueDateIncludesTime": {
+              "description": "Whether the due date includes a specific time. Set false for all-day reminders. Default: true.",
+              "type": "boolean",
+            },
+            "list": {
+              "additionalProperties": false,
+              "description": "Target list. Uses default list if omitted.",
+              "properties": {
+                "id": {
+                  "type": "string",
+                },
+                "name": {
+                  "type": "string",
+                },
+              },
+              "type": "object",
+            },
+            "notes": {
+              "description": "Reminder notes/body text",
+              "type": "string",
+            },
+            "priority": {
+              "description": "Priority level",
+              "enum": [
+                "none",
+                "low",
+                "medium",
+                "high",
+              ],
+              "type": "string",
+            },
+            "recurrenceRule": {
+              "additionalProperties": false,
+              "description": "Recurrence rule for repeating reminders",
+              "properties": {
+                "daysOfMonth": {
+                  "description": "Days of month (1-31, or negative for last N days: -1=last day, -2=second-to-last, etc.). For monthly frequency.",
+                  "items": {
+                    "maximum": 31,
+                    "minimum": -31,
+                    "type": "integer",
+                  },
+                  "type": "array",
+                },
+                "daysOfWeek": {
+                  "description": "Days of week (1=Sunday, 2=Monday, ..., 7=Saturday). For weekly/monthly frequency.",
+                  "items": {
+                    "maximum": 7,
+                    "minimum": 1,
+                    "type": "integer",
+                  },
+                  "type": "array",
+                },
+                "endCount": {
+                  "description": "Number of occurrences before stopping",
+                  "minimum": 1,
+                  "type": "integer",
+                },
+                "endDate": {
+                  "description": "ISO 8601 date when recurrence stops",
+                  "type": "string",
+                },
+                "frequency": {
+                  "description": "How often the reminder repeats",
+                  "enum": [
+                    "daily",
+                    "weekly",
+                    "monthly",
+                    "yearly",
+                  ],
+                  "type": "string",
+                },
+                "interval": {
+                  "default": 1,
+                  "description": "Repeat every N periods (e.g., 2 = every other week)",
+                  "minimum": 1,
+                  "type": "integer",
+                },
+                "monthsOfYear": {
+                  "description": "Months of year (1-12). For yearly frequency.",
+                  "items": {
+                    "maximum": 12,
+                    "minimum": 1,
+                    "type": "integer",
+                  },
+                  "type": "array",
+                },
+                "weekPosition": {
+                  "description": "Week position within month: 1=first, 2=second, ..., -1=last. Used with daysOfWeek for 'first Monday' patterns.",
+                  "type": "integer",
+                },
+              },
+              "required": [
+                "frequency",
+              ],
+              "type": "object",
+            },
+            "title": {
+              "description": "Reminder title",
+              "type": "string",
+            },
+            "url": {
+              "description": "URL to associate with the reminder",
+              "type": "string",
+            },
+          },
+          "required": [
+            "title",
+          ],
+          "type": "object",
+        },
+        "minItems": 1,
+        "type": "array",
+      },
+    },
+    "required": [
+      "reminders",
+    ],
+    "type": "object",
+  },
+  "name": "create_reminders",
+}
+`;
+
+exports[`MCP schema snapshots tool schemas update_reminders 1`] = `
+{
+  "description": 
+"Update one or more reminders. Only specified fields are changed.
+
+**Parameters:**
+
+reminders — Array of update objects. Each object:
+  • id (required) — Reminder ID to update
+  • title — New title
+  • notes — New notes (null to clear)
+  • list — Move to list as {"name": "..."} or {"id": "..."}
+  • dueDate — New due date as ISO 8601 (null to clear)
+  • dueDateIncludesTime — Whether due date has specific time (false = all-day)
+  • priority — "none", "low", "medium", or "high"
+  • completed — true to complete, false to uncomplete
+  • completedDate — ISO 8601 completion date (null to uncomplete)
+  • url — URL to associate (null to clear)
+  • alarms — Array of alarm objects (null to clear all alarms)
+  • recurrenceRule — Recurrence rule object (null to clear)
+
+**Examples:**
+
+Update title:
+  {"reminders": [{"id": "...", "title": "Buy oat milk"}]}
+
+Move to different list:
+  {"reminders": [{"id": "...", "list": {"name": "Groceries"}}]}
+
+Complete a reminder:
+  {"reminders": [{"id": "...", "completed": true}]}
+
+Uncomplete a reminder:
+  {"reminders": [{"id": "...", "completed": false}]}
+
+Complete with specific date:
+  {"reminders": [{"id": "...", "completedDate": "2024-01-15T10:00:00-05:00"}]}
+
+Clear due date:
+  {"reminders": [{"id": "...", "dueDate": null}]}
+
+Add alarm:
+  {"reminders": [{"id": "...", "alarms": [{"type": "relative", "offset": 1800}]}]}
+
+Set weekly recurrence:
+  {"reminders": [{"id": "...", "recurrenceRule": {"frequency": "weekly"}}]}
+
+Clear recurrence:
+  {"reminders": [{"id": "...", "recurrenceRule": null}]}
+
+Batch update (complete multiple):
+  {"reminders": [
+    {"id": "abc", "completed": true},
+    {"id": "def", "completed": true},
+    {"id": "ghi", "completed": true}
+  ]}"
+,
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "reminders": {
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "alarms": {
+              "description": "Alarm notifications. Set to null to clear all alarms.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "date": {
+                    "description": "ISO 8601 date/time (for absolute alarms)",
+                    "type": "string",
+                  },
+                  "offset": {
+                    "description": "Seconds before due date (for relative alarms)",
+                    "type": "integer",
+                  },
+                  "type": {
+                    "description": "Alarm type",
+                    "enum": [
+                      "relative",
+                      "absolute",
+                    ],
+                    "type": "string",
+                  },
+                },
+                "required": [
+                  "type",
+                ],
+                "type": "object",
+              },
+              "type": "array",
+            },
+            "completed": {
+              "description": "Set true to complete, false to uncomplete",
+              "type": "boolean",
+            },
+            "completedDate": {
+              "description": "Completion date in ISO 8601 format. Set to null to uncomplete. Overrides 'completed' if both provided.",
+              "type": "string",
+            },
+            "dueDate": {
+              "description": "New due date in ISO 8601 format. Set to null to clear.",
+              "type": "string",
+            },
+            "dueDateIncludesTime": {
+              "description": "Whether the due date includes a specific time. Set false for all-day reminders.",
+              "type": "boolean",
+            },
+            "id": {
+              "description": "Reminder ID to update",
+              "type": "string",
+            },
+            "list": {
+              "additionalProperties": false,
+              "description": "Move to this list",
+              "properties": {
+                "id": {
+                  "type": "string",
+                },
+                "name": {
+                  "type": "string",
+                },
+              },
+              "type": "object",
+            },
+            "notes": {
+              "description": "New notes. Set to null to clear.",
+              "type": "string",
+            },
+            "priority": {
+              "description": "New priority level",
+              "enum": [
+                "none",
+                "low",
+                "medium",
+                "high",
+              ],
+              "type": "string",
+            },
+            "recurrenceRule": {
+              "additionalProperties": false,
+              "description": "Recurrence rule. Set to null to clear.",
+              "properties": {
+                "daysOfMonth": {
+                  "items": {
+                    "type": "integer",
+                  },
+                  "type": "array",
+                },
+                "daysOfWeek": {
+                  "items": {
+                    "type": "integer",
+                  },
+                  "type": "array",
+                },
+                "endCount": {
+                  "minimum": 1,
+                  "type": "integer",
+                },
+                "endDate": {
+                  "type": "string",
+                },
+                "frequency": {
+                  "enum": [
+                    "daily",
+                    "weekly",
+                    "monthly",
+                    "yearly",
+                  ],
+                  "type": "string",
+                },
+                "interval": {
+                  "default": 1,
+                  "minimum": 1,
+                  "type": "integer",
+                },
+                "monthsOfYear": {
+                  "items": {
+                    "type": "integer",
+                  },
+                  "type": "array",
+                },
+                "weekPosition": {
+                  "type": "integer",
+                },
+              },
+              "required": [
+                "frequency",
+              ],
+              "type": "object",
+            },
+            "title": {
+              "description": "New title",
+              "type": "string",
+            },
+            "url": {
+              "description": "URL to associate with the reminder. Set to null to clear.",
+              "type": "string",
+            },
+          },
+          "required": [
+            "id",
+          ],
+          "type": "object",
+        },
+        "minItems": 1,
+        "type": "array",
+      },
+    },
+    "required": [
+      "reminders",
+    ],
+    "type": "object",
+  },
+  "name": "update_reminders",
+}
+`;
+
+exports[`MCP schema snapshots tool schemas delete_reminders 1`] = `
+{
+  "description": 
+"Delete one or more reminders permanently.
+
+**Parameters:**
+
+ids — Array of reminder IDs to delete
+
+**Examples:**
+
+Single delete:
+  {"ids": ["abc123"]}
+
+Batch delete:
+  {"ids": ["abc123", "def456", "ghi789"]}"
+,
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "ids": {
+        "description": "Array of reminder IDs to delete",
+        "items": {
+          "type": "string",
+        },
+        "minItems": 1,
+        "type": "array",
+      },
+    },
+    "required": [
+      "ids",
+    ],
+    "type": "object",
+  },
+  "name": "delete_reminders",
+}
+`;
+
+exports[`MCP schema snapshots tool schemas export_reminders 1`] = `
+{
+  "description": 
+"Export reminders to a JSON file for backup or data portability.
+
+Writes all reminder data to a file without consuming LLM context tokens.
+Default location is system temp directory; move the file to keep it permanently.
+
+**Parameters (all optional):**
+
+path — Custom file path (default: temp directory with timestamp)
+  • Supports ~ for home directory
+  • Example: "~/Desktop/my-backup.json"
+
+lists — Array of lists to export (default: all lists)
+  • Each item: {"name": "..."} or {"id": "..."}
+  • Example: [{"name": "Work"}, {"name": "Personal"}]
+
+includeCompleted — Include completed reminders (default: true)
+
+**Examples:**
+
+Export everything to temp:
+  {}
+
+Export to Desktop:
+  {"path": "~/Desktop/reminders-backup.json"}
+
+Export only incomplete reminders:
+  {"includeCompleted": false}
+
+Export specific lists:
+  {"lists": [{"name": "Work"}, {"name": "Shopping"}]}
+
+**File format:**
+JSON with exportVersion, exportDate, stats, lists[], and reminders[]."
+,
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "includeCompleted": {
+        "default": true,
+        "description": "Include completed reminders in export",
+        "type": "boolean",
+      },
+      "lists": {
+        "description": "Lists to export. Default: all lists.",
+        "items": {
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "description": "List ID",
+              "type": "string",
+            },
+            "name": {
+              "description": "List name",
+              "type": "string",
+            },
+          },
+          "type": "object",
+        },
+        "type": "array",
+      },
+      "path": {
+        "description": "Custom file path. Supports ~ for home directory. Default: temp directory with timestamp.",
+        "type": "string",
+      },
+    },
+    "type": "object",
+  },
+  "name": "export_reminders",
+}
+`;
+
+exports[`MCP schema snapshots tool schemas tool count has not changed 1`] = `
+[
+  "create_list",
+  "create_reminders",
+  "delete_reminders",
+  "export_reminders",
+  "get_lists",
+  "query_reminders",
+  "update_reminders",
+]
+`;
