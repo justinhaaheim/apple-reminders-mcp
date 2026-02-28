@@ -95,7 +95,7 @@ Complete feature parity with Claude iOS.
 - [ ] Priority enum (none/low/medium/high) instead of 0-9 integers
 - [ ] List search filter for `list_reminder_lists`
 - [ ] Consider tool renaming to match Claude iOS (`reminder_create_v0` style)
-- [ ] Code refactoring to multiple Swift files (if complexity warrants)
+- [x] Code refactoring to multiple Swift files (9 files, completed 2026-02-28)
 - [ ] Add `listId` support alongside `list_name` for more robust list identification
 
 ### Bugs / Issues

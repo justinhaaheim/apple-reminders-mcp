@@ -42,7 +42,15 @@ Apple Reminders MCP Server - A Model Context Protocol server that provides Claud
 ### Source Structure
 ```
 Sources/
-└── main.swift    # All MCP server and EventKit code
+├── main.swift                  # Entry point + logging
+├── Configuration.swift         # TestModeConfig, MockModeConfig
+├── ReminderStoreProtocol.swift # ReminderStore protocol, model types
+├── EventKitStore.swift         # EKCalendarWrapper, EKReminderWrapper, EKReminderStore
+├── MockStore.swift             # MockCalendar, MockReminder, MockReminderStore
+├── MCPTypes.swift              # MCPRequest, MCPResponse, JSONValue, AnyCodable
+├── Models.swift                # API data models, input/output types, Priority, Date ext
+├── RemindersManager.swift      # RemindersManager class (business logic)
+└── MCPServer.swift             # MCPServer class (protocol handling, tool definitions)
 ```
 
 ## Available Tools
