@@ -566,17 +566,13 @@ And the MCP server becomes just another subcommand of the CLI, alongside `query`
 
 ---
 
-## Open Questions
+## Decisions (Resolved)
 
-1. **Repo rename?** Should we rename the repo to `apple-reminders-tools`? Or keep `apple-reminders-mcp` since that's the established name? Could just update the package name without renaming the repo.
-
-2. **CLI binary name**: `reminders` is clean but could conflict with a hypothetical Apple CLI tool. Alternatives: `ar` (short but ambiguous), `apple-reminders` (verbose), `rem` (nice and short). Leaning toward `reminders` for now.
-
-3. **Snapshot auto-commit message format**: Simple timestamp? Or include a summary like "847 reminders, 12 lists"?
-
-4. **Should `query` be the default subcommand?** If you just type `reminders` with no subcommand, should it run `query` with defaults? ArgumentParser supports this pattern.
-
-5. **One binary or two?** See "Key Decision" section above. Recommendation is single binary (Option B).
+1. **Repo rename?** → **Yes**, rename to `apple-reminders-tools`
+2. **CLI binary name** → `reminders`
+3. **Snapshot commit message** → Timestamp + summary: `"Snapshot 2026-03-04T12:30:00-08:00 — 847 reminders, 12 lists"`
+4. **Default subcommand** → **Yes**, `query` is the default (just `reminders` = `reminders query`)
+5. **One binary or two?** → **One binary** (Option B). MCP server via `reminders mcp`.
 
 ---
 
