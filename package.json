@@ -7,6 +7,7 @@
     "build": "swift build -c release",
     "build:debug": "swift build",
     "run": ".build/release/apple-reminders-mcp",
+    "run:cli": ".build/release/reminders",
     "test": "bun test",
     "test:cleanup": "bun test/cleanup-test-lists.ts",
     "prettier-check": "prettier --check .",
