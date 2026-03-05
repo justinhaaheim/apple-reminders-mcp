@@ -1,4 +1,5 @@
 import Foundation
+import AppleRemindersCore
 
 // MARK: - MCP Server
 
