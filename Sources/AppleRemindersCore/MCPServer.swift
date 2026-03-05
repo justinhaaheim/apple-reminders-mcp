@@ -1,12 +1,11 @@
 import Foundation
-import AppleRemindersCore
 
 // MARK: - MCP Server
 
-class MCPServer {
+public class MCPServer {
     private let remindersManager: RemindersManager
 
-    init() {
+    public init() {
         // Choose store based on mock mode
         let store: ReminderStore
         if MockModeConfig.isEnabled {
@@ -22,7 +21,7 @@ class MCPServer {
         self.remindersManager = RemindersManager(store: store)
     }
 
-    func start() async {
+    public func start() async {
         do {
             try await remindersManager.requestAccess()
             log("Successfully obtained access to Reminders")
