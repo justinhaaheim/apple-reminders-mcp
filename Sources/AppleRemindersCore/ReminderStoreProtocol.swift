@@ -4,7 +4,7 @@ import Foundation
 
 /// Protocol abstracting reminder storage operations.
 /// Allows swapping between real EventKit and mock implementations.
-protocol ReminderStore {
+public protocol ReminderStore {
     func requestAccess() async throws -> Bool
     func getAllCalendars() -> [ReminderCalendar]
     func getDefaultCalendar() -> ReminderCalendar?
@@ -17,20 +17,20 @@ protocol ReminderStore {
 }
 
 /// Status filter for fetching reminders
-enum ReminderStatus {
+public enum ReminderStatus {
     case incomplete
     case completed
     case all
 }
 
 /// Protocol-agnostic calendar representation
-protocol ReminderCalendar {
+public protocol ReminderCalendar {
     var id: String { get }
     var name: String { get }
 }
 
 /// Protocol-agnostic reminder representation
-protocol Reminder {
+public protocol Reminder {
     var id: String { get }
     var title: String { get set }
     var notes: String? { get set }
@@ -50,27 +50,52 @@ protocol Reminder {
 }
 
 /// Alarm representation (absolute date or relative offset)
-struct ReminderAlarm {
+public struct ReminderAlarm {
     /// Specific date/time for the alarm
-    let absoluteDate: Date?
+    public let absoluteDate: Date?
     /// Offset in seconds relative to the due date. Always stored as a negative value
     /// (e.g., -3600 = 1 hour before). Matches EventKit's EKAlarm.relativeOffset convention.
-    let relativeOffset: TimeInterval?
+    public let relativeOffset: TimeInterval?
+
+    public init(absoluteDate: Date?, relativeOffset: TimeInterval?) {
+        self.absoluteDate = absoluteDate
+        self.relativeOffset = relativeOffset
+    }
 }
 
 /// Recurrence rule representation
-struct ReminderRecurrenceRule {
-    let frequency: RecurrenceFrequency
-    let interval: Int
-    let daysOfWeek: [Int]?       // 1=Sunday ... 7=Saturday
-    let daysOfMonth: [Int]?      // 1-31, or negative (-1=last day, -2=second-to-last, etc.)
-    let monthsOfYear: [Int]?     // 1-12
-    let weekPosition: Int?       // -1=last, 1=first, 2=second, etc.
-    let endDate: Date?
-    let endCount: Int?
+public struct ReminderRecurrenceRule {
+    public let frequency: RecurrenceFrequency
+    public let interval: Int
+    public let daysOfWeek: [Int]?       // 1=Sunday ... 7=Saturday
+    public let daysOfMonth: [Int]?      // 1-31, or negative (-1=last day, -2=second-to-last, etc.)
+    public let monthsOfYear: [Int]?     // 1-12
+    public let weekPosition: Int?       // -1=last, 1=first, 2=second, etc.
+    public let endDate: Date?
+    public let endCount: Int?
+
+    public init(
+        frequency: RecurrenceFrequency,
+        interval: Int,
+        daysOfWeek: [Int]?,
+        daysOfMonth: [Int]?,
+        monthsOfYear: [Int]?,
+        weekPosition: Int?,
+        endDate: Date?,
+        endCount: Int?
+    ) {
+        self.frequency = frequency
+        self.interval = interval
+        self.daysOfWeek = daysOfWeek
+        self.daysOfMonth = daysOfMonth
+        self.monthsOfYear = monthsOfYear
+        self.weekPosition = weekPosition
+        self.endDate = endDate
+        self.endCount = endCount
+    }
 }
 
-enum RecurrenceFrequency: String, Codable {
+public enum RecurrenceFrequency: String, Codable {
     case daily
     case weekly
     case monthly

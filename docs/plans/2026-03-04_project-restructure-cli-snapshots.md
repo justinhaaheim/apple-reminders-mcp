@@ -411,12 +411,13 @@ reminders snapshot status             # Show last snapshot time, change count
 reminders snapshot diff               # Show what changed since last snapshot
 ```
 
-**MCP server integration** (future):
+**MCP server integration** (built-in, disabled by default):
 
 - Config option: `AR_MCP_SNAPSHOT_ENABLED=1` and `AR_MCP_SNAPSHOT_REPO=~/.config/apple-reminders-data`
 - Auto-snapshot on MCP session start
 - Auto-snapshot after each write operation (create/update/delete)
-- This is a future enhancement — not part of the initial build
+- Incremental background backups while MCP server is running
+- Part of the core build — snapshot logic lives in `AppleRemindersCore` so both CLI and MCP can use it
 
 ### Default snapshot repo location
 
@@ -589,7 +590,13 @@ And the MCP server becomes just another subcommand of the CLI, alongside `query`
 
 ## Progress
 
-- [ ] Phase 1: Restructure into multi-target project
+- [x] Phase 1: Restructure into multi-target project
+  - Created `Sources/AppleRemindersCore/`, `Sources/AppleRemindersMCP/`, `Sources/AppleRemindersCLI/`
+  - Extracted `MCPToolError` → `RemindersError` in core library
+  - Created shared `Logging.swift`
+  - Moved files to targets, added `public` access modifiers
+  - Updated `Package.swift` for multi-target build
+  - Note: No Swift compiler on Linux CI, but structure is logically verified
 - [ ] Phase 2: Build the CLI tool
 - [ ] Phase 3: Snapshot system
 - [ ] Phase 4: Polish and integration

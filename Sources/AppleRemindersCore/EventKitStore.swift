@@ -5,40 +5,40 @@ import EventKit
 // MARK: - EventKit Implementations
 
 /// Wrapper around EKCalendar to conform to ReminderCalendar
-class EKCalendarWrapper: ReminderCalendar {
-    let calendar: EKCalendar
+public class EKCalendarWrapper: ReminderCalendar {
+    public let calendar: EKCalendar
 
-    init(_ calendar: EKCalendar) {
+    public init(_ calendar: EKCalendar) {
         self.calendar = calendar
     }
 
-    var id: String { calendar.calendarIdentifier }
-    var name: String { calendar.title }
+    public var id: String { calendar.calendarIdentifier }
+    public var name: String { calendar.title }
 }
 
 /// Wrapper around EKReminder to conform to Reminder
-class EKReminderWrapper: Reminder {
-    let reminder: EKReminder
+public class EKReminderWrapper: Reminder {
+    public let reminder: EKReminder
     private let eventStore: EKEventStore
 
-    init(_ reminder: EKReminder, eventStore: EKEventStore) {
+    public init(_ reminder: EKReminder, eventStore: EKEventStore) {
         self.reminder = reminder
         self.eventStore = eventStore
     }
 
-    var id: String { reminder.calendarItemIdentifier }
+    public var id: String { reminder.calendarItemIdentifier }
 
-    var title: String {
+    public var title: String {
         get { reminder.title ?? "" }
         set { reminder.title = newValue }
     }
 
-    var notes: String? {
+    public var notes: String? {
         get { reminder.notes }
         set { reminder.notes = newValue }
     }
 
-    var calendarId: String {
+    public var calendarId: String {
         get { reminder.calendar?.calendarIdentifier ?? "" }
         set {
             if let calendar = eventStore.calendar(withIdentifier: newValue) {
@@ -47,32 +47,32 @@ class EKReminderWrapper: Reminder {
         }
     }
 
-    var isCompleted: Bool { reminder.isCompleted }
+    public var isCompleted: Bool { reminder.isCompleted }
 
-    var priority: Int {
+    public var priority: Int {
         get { reminder.priority }
         set { reminder.priority = newValue }
     }
 
-    var dueDateComponents: DateComponents? {
+    public var dueDateComponents: DateComponents? {
         get { reminder.dueDateComponents }
         set { reminder.dueDateComponents = newValue }
     }
 
-    var completionDate: Date? {
+    public var completionDate: Date? {
         get { reminder.completionDate }
         set { reminder.completionDate = newValue }
     }
 
-    var creationDate: Date? { reminder.creationDate }
-    var lastModifiedDate: Date? { reminder.lastModifiedDate }
+    public var creationDate: Date? { reminder.creationDate }
+    public var lastModifiedDate: Date? { reminder.lastModifiedDate }
 
-    var url: URL? {
+    public var url: URL? {
         get { reminder.url }
         set { reminder.url = newValue }
     }
 
-    var isAllDay: Bool {
+    public var isAllDay: Bool {
         get {
             // EKReminder doesn't have isAllDay (that's EKEvent-only).
             // Infer from dueDateComponents: if hour is set, it includes time (not all-day).
@@ -97,7 +97,7 @@ class EKReminderWrapper: Reminder {
         }
     }
 
-    var alarms: [ReminderAlarm] {
+    public var alarms: [ReminderAlarm] {
         get {
             return (reminder.alarms ?? []).map { ekAlarm in
                 ReminderAlarm(
@@ -117,7 +117,7 @@ class EKReminderWrapper: Reminder {
         }
     }
 
-    var recurrenceRules: [ReminderRecurrenceRule] {
+    public var recurrenceRules: [ReminderRecurrenceRule] {
         get {
             return (reminder.recurrenceRules ?? []).map { rule in
                 let frequency: RecurrenceFrequency
@@ -208,36 +208,38 @@ class EKReminderWrapper: Reminder {
         }
     }
 
-    func getCalendarName(from store: ReminderStore) -> String {
+    public func getCalendarName(from store: ReminderStore) -> String {
         return reminder.calendar?.title ?? ""
     }
 }
 
 /// Real EventKit-based reminder store
-class EKReminderStore: ReminderStore {
+public class EKReminderStore: ReminderStore {
     private let eventStore = EKEventStore()
 
-    func requestAccess() async throws -> Bool {
+    public init() {}
+
+    public func requestAccess() async throws -> Bool {
         return try await eventStore.requestFullAccessToReminders()
     }
 
-    func getAllCalendars() -> [ReminderCalendar] {
+    public func getAllCalendars() -> [ReminderCalendar] {
         return eventStore.calendars(for: .reminder).map { EKCalendarWrapper($0) }
     }
 
-    func getDefaultCalendar() -> ReminderCalendar? {
+    public func getDefaultCalendar() -> ReminderCalendar? {
         guard let calendar = eventStore.defaultCalendarForNewReminders() else {
             return nil
         }
         return EKCalendarWrapper(calendar)
     }
 
-    func createCalendar(name: String) throws -> ReminderCalendar {
+    public func createCalendar(name: String) throws -> ReminderCalendar {
         let calendar = EKCalendar(for: .reminder, eventStore: eventStore)
         calendar.title = name
 
         guard let source = findBestSource() else {
-            throw MCPToolError("No available source for creating reminder list")
+            throw RemindersError("No available source for creating reminder list")
         }
 
         calendar.source = source
@@ -255,7 +257,7 @@ class EKReminderStore: ReminderStore {
         return eventStore.sources.first
     }
 
-    func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder] {
+    public func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder] {
         let ekCalendars = calendars.compactMap { wrapper -> EKCalendar? in
             guard let ekWrapper = wrapper as? EKCalendarWrapper else { return nil }
             return ekWrapper.calendar
@@ -287,29 +289,29 @@ class EKReminderStore: ReminderStore {
         }
     }
 
-    func getReminder(withId id: String) -> Reminder? {
+    public func getReminder(withId id: String) -> Reminder? {
         guard let ekReminder = eventStore.calendarItem(withIdentifier: id) as? EKReminder else {
             return nil
         }
         return EKReminderWrapper(ekReminder, eventStore: eventStore)
     }
 
-    func saveReminder(_ reminder: Reminder) throws {
+    public func saveReminder(_ reminder: Reminder) throws {
         guard let wrapper = reminder as? EKReminderWrapper else {
-            throw MCPToolError("Invalid reminder type")
+            throw RemindersError("Invalid reminder type")
         }
         try eventStore.save(wrapper.reminder, commit: true)
     }
 
-    func deleteReminder(_ reminder: Reminder) throws {
+    public func deleteReminder(_ reminder: Reminder) throws {
         guard let wrapper = reminder as? EKReminderWrapper else {
-            throw MCPToolError("Invalid reminder type")
+            throw RemindersError("Invalid reminder type")
         }
         try eventStore.remove(wrapper.reminder, commit: true)
     }
 
     /// Create a new reminder in the specified calendar
-    func createReminder(in calendar: ReminderCalendar) -> Reminder {
+    public func createReminder(in calendar: ReminderCalendar) -> Reminder {
         guard let wrapper = calendar as? EKCalendarWrapper else {
             fatalError("Invalid calendar type")
         }
