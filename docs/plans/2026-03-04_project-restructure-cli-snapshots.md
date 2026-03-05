@@ -597,6 +597,18 @@ And the MCP server becomes just another subcommand of the CLI, alongside `query`
   - Moved files to targets, added `public` access modifiers
   - Updated `Package.swift` for multi-target build
   - Note: No Swift compiler on Linux CI, but structure is logically verified
-- [ ] Phase 2: Build the CLI tool
-- [ ] Phase 3: Snapshot system
+- [x] Phase 2: Build the CLI tool
+  - Added swift-argument-parser dependency
+  - Created `reminders` binary with subcommands: query (default), lists, create,
+    create-list, update, delete, export, snapshot, mcp
+  - Moved MCPServer + MCPTypes to core library so CLI `mcp` subcommand works
+  - JSON output to stdout, errors to stderr
+- [x] Phase 3: Snapshot system
+  - Created SnapshotManager in core library (git-backed, delete-and-regenerate)
+  - Individual JSON files per reminder with millisecond epoch timestamps
+  - `reminders snapshot [take]` — take a full snapshot
+  - `reminders snapshot status` — show repo status
+  - `reminders snapshot diff` — show changes since last snapshot
+  - Wired into MCP server (disabled by default, enabled via AR_MCP_SNAPSHOT_ENABLED=1)
+  - Auto-snapshots on session start and after each write operation
 - [ ] Phase 4: Polish and integration
