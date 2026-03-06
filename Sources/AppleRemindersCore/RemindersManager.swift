@@ -3,26 +3,26 @@ import JMESPath
 
 // MARK: - Reminders Manager
 
-class RemindersManager {
+public class RemindersManager {
     private let store: ReminderStore
     private var hasAccess = false
 
-    init(store: ReminderStore) {
+    public init(store: ReminderStore) {
         self.store = store
     }
 
     // MARK: - Access
 
-    func requestAccess() async throws {
+    public func requestAccess() async throws {
         hasAccess = try await store.requestAccess()
         if !hasAccess {
-            throw MCPToolError("Access to Reminders denied")
+            throw RemindersError("Access to Reminders denied")
         }
     }
 
     // MARK: - List Operations
 
-    func getAllLists() -> [ReminderListOutput] {
+    public func getAllLists() -> [ReminderListOutput] {
         let calendars = store.getAllCalendars()
         let defaultCalendar = store.getDefaultCalendar()
 
@@ -35,13 +35,13 @@ class RemindersManager {
         }
     }
 
-    func resolveList(_ selector: ListSelector?) throws -> [ReminderCalendar] {
+    public func resolveList(_ selector: ListSelector?) throws -> [ReminderCalendar] {
         let allCalendars = store.getAllCalendars()
 
         guard let selector = selector, !selector.isEmpty else {
             // No selector → default list
             guard let defaultCalendar = store.getDefaultCalendar() else {
-                throw MCPToolError("No default list found")
+                throw RemindersError("No default list found")
             }
             return [defaultCalendar]
         }
@@ -49,7 +49,7 @@ class RemindersManager {
         // Validate exactly one key is set
         let setCount = [selector.id != nil, selector.name != nil, selector.all == true].filter { $0 }.count
         if setCount != 1 {
-            throw MCPToolError("List selector must specify exactly one of: 'id', 'name', or 'all'")
+            throw RemindersError("List selector must specify exactly one of: 'id', 'name', or 'all'")
         }
 
         if selector.all == true {
@@ -58,7 +58,7 @@ class RemindersManager {
 
         if let id = selector.id {
             guard let match = allCalendars.first(where: { $0.id == id }) else {
-                throw MCPToolError("No list found with ID: '\(id)'")
+                throw RemindersError("No list found with ID: '\(id)'")
             }
             return [match]
         }
@@ -68,38 +68,38 @@ class RemindersManager {
                 $0.name.caseInsensitiveCompare(name) == .orderedSame
             }) else {
                 let available = allCalendars.map { $0.name }.joined(separator: ", ")
-                throw MCPToolError("No list found with name: '\(name)'. Available lists: \(available).")
+                throw RemindersError("No list found with name: '\(name)'. Available lists: \(available).")
             }
             return [match]
         }
 
-        throw MCPToolError("Invalid list selector")
+        throw RemindersError("Invalid list selector")
     }
 
-    func resolveListForCreate(_ selector: ListSelector?) throws -> ReminderCalendar {
+    public func resolveListForCreate(_ selector: ListSelector?) throws -> ReminderCalendar {
         guard let selector = selector, !selector.isEmpty else {
             // No selector → default list
             guard let defaultCalendar = store.getDefaultCalendar() else {
-                throw MCPToolError("No default list found")
+                throw RemindersError("No default list found")
             }
             return defaultCalendar
         }
 
         // Validate: only name or id allowed (not all)
         if selector.all == true {
-            throw MCPToolError("Cannot create reminder in 'all' lists. Specify a single list by name or ID.")
+            throw RemindersError("Cannot create reminder in 'all' lists. Specify a single list by name or ID.")
         }
 
         let setCount = [selector.id != nil, selector.name != nil].filter { $0 }.count
         if setCount != 1 {
-            throw MCPToolError("List selector must specify exactly one of: 'id' or 'name'")
+            throw RemindersError("List selector must specify exactly one of: 'id' or 'name'")
         }
 
         let allCalendars = store.getAllCalendars()
 
         if let id = selector.id {
             guard let match = allCalendars.first(where: { $0.id == id }) else {
-                throw MCPToolError("No list found with ID: '\(id)'")
+                throw RemindersError("No list found with ID: '\(id)'")
             }
             return match
         }
@@ -109,18 +109,18 @@ class RemindersManager {
                 $0.name.caseInsensitiveCompare(name) == .orderedSame
             }) else {
                 let available = allCalendars.map { $0.name }.joined(separator: ", ")
-                throw MCPToolError("No list found with name: '\(name)'. Available lists: \(available).")
+                throw RemindersError("No list found with name: '\(name)'. Available lists: \(available).")
             }
             return match
         }
 
-        throw MCPToolError("Invalid list selector")
+        throw RemindersError("Invalid list selector")
     }
 
-    func createList(name: String) throws -> ReminderListOutput {
+    public func createList(name: String) throws -> ReminderListOutput {
         // Test mode validation
         if TestModeConfig.isEnabled && !TestModeConfig.isTestList(name) {
-            throw MCPToolError(
+            throw RemindersError(
                 "TEST MODE: Cannot create list '\(name)'. " +
                 "List name must start with '\(TestModeConfig.testListPrefix)'"
             )
@@ -138,7 +138,7 @@ class RemindersManager {
 
     // MARK: - Query Operations
 
-    func queryReminders(
+    public func queryReminders(
         list: ListSelector?,
         status: String?,
         sortBy: String?,
@@ -193,10 +193,10 @@ class RemindersManager {
             let toDate: Date? = dateTo != nil ? Date.fromISO8601(dateTo!) : nil
 
             if dateFrom != nil && fromDate == nil {
-                throw MCPToolError("Invalid dateFrom format: '\(dateFrom!)'. Expected ISO 8601.")
+                throw RemindersError("Invalid dateFrom format: '\(dateFrom!)'. Expected ISO 8601.")
             }
             if dateTo != nil && toDate == nil {
-                throw MCPToolError("Invalid dateTo format: '\(dateTo!)'. Expected ISO 8601.")
+                throw RemindersError("Invalid dateTo format: '\(dateTo!)'. Expected ISO 8601.")
             }
 
             filteredReminders = filteredReminders.filter { reminder in
@@ -244,7 +244,7 @@ class RemindersManager {
                 }
                 return result
             } catch {
-                throw MCPToolError("Invalid JMESPath expression: \(error.localizedDescription). Expression: '\(jmesQuery)'.")
+                throw RemindersError("Invalid JMESPath expression: \(error.localizedDescription). Expression: '\(jmesQuery)'.")
             }
         }
 
@@ -464,7 +464,7 @@ class RemindersManager {
 
     // MARK: - Create Operations
 
-    func createReminders(inputs: [CreateReminderInput]) -> (created: [ReminderOutput], failed: [(index: Int, error: String)]) {
+    public func createReminders(inputs: [CreateReminderInput]) -> (created: [ReminderOutput], failed: [(index: Int, error: String)]) {
         var created: [ReminderOutput] = []
         var failed: [(index: Int, error: String)] = []
 
@@ -485,7 +485,7 @@ class RemindersManager {
 
         // Test mode validation
         if TestModeConfig.isEnabled && !TestModeConfig.isTestList(calendar.name) {
-            throw MCPToolError(
+            throw RemindersError(
                 "TEST MODE: Cannot create reminder in list '\(calendar.name)'. " +
                 "Target list must start with '\(TestModeConfig.testListPrefix)'"
             )
@@ -508,27 +508,27 @@ class RemindersManager {
                     from: date
                 )
             } else {
-                throw MCPToolError("Invalid date format: '\(dueDateString)'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.")
+                throw RemindersError("Invalid date format: '\(dueDateString)'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.")
             }
         }
 
         if let priorityString = input.priority {
             guard let priority = Priority.fromString(priorityString) else {
-                throw MCPToolError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
+                throw RemindersError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
             }
             mutableReminder.priority = priority.internalValue
         }
 
         if let urlString = input.url {
             guard let url = URL(string: urlString) else {
-                throw MCPToolError("Invalid URL: '\(urlString)'")
+                throw RemindersError("Invalid URL: '\(urlString)'")
             }
             mutableReminder.url = url
         }
 
         if let includesTime = input.dueDateIncludesTime {
             if mutableReminder.dueDateComponents == nil {
-                throw MCPToolError("dueDateIncludesTime requires a dueDate to be set.")
+                throw RemindersError("dueDateIncludesTime requires a dueDate to be set.")
             }
             mutableReminder.isAllDay = !includesTime
         }
@@ -551,7 +551,7 @@ class RemindersManager {
 
     // MARK: - Update Operations
 
-    func updateReminders(inputs: [UpdateReminderInput]) -> (updated: [ReminderOutput], failed: [(id: String, error: String)]) {
+    public func updateReminders(inputs: [UpdateReminderInput]) -> (updated: [ReminderOutput], failed: [(id: String, error: String)]) {
         var updated: [ReminderOutput] = []
         var failed: [(id: String, error: String)] = []
 
@@ -569,14 +569,14 @@ class RemindersManager {
 
     private func updateSingleReminder(_ input: UpdateReminderInput) throws -> ReminderOutput {
         guard var reminder = store.getReminder(withId: input.id) else {
-            throw MCPToolError("No reminder found with ID: '\(input.id)'")
+            throw RemindersError("No reminder found with ID: '\(input.id)'")
         }
 
         let calendarName = reminder.getCalendarName(from: store)
 
         // Test mode validation
         if TestModeConfig.isEnabled && !TestModeConfig.isTestList(calendarName) {
-            throw MCPToolError(
+            throw RemindersError(
                 "TEST MODE: Cannot modify reminder in list '\(calendarName)'. " +
                 "Reminder must be in a list starting with '\(TestModeConfig.testListPrefix)'"
             )
@@ -603,7 +603,7 @@ class RemindersManager {
 
             // Test mode validation for target list
             if TestModeConfig.isEnabled && !TestModeConfig.isTestList(newCalendar.name) {
-                throw MCPToolError(
+                throw RemindersError(
                     "TEST MODE: Cannot move reminder to list '\(newCalendar.name)'. " +
                     "Target list must start with '\(TestModeConfig.testListPrefix)'"
                 )
@@ -619,7 +619,7 @@ class RemindersManager {
                 reminder.dueDateComponents = nil
             case .value(let dueDateString):
                 guard let date = Date.fromISO8601(dueDateString) else {
-                    throw MCPToolError("Invalid date format: '\(dueDateString)'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.")
+                    throw RemindersError("Invalid date format: '\(dueDateString)'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.")
                 }
                 reminder.dueDateComponents = Calendar.current.dateComponents(
                     [.year, .month, .day, .hour, .minute],
@@ -631,7 +631,7 @@ class RemindersManager {
         // Update priority
         if let priorityString = input.priority {
             guard let priority = Priority.fromString(priorityString) else {
-                throw MCPToolError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
+                throw RemindersError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
             }
             reminder.priority = priority.internalValue
         }
@@ -643,7 +643,7 @@ class RemindersManager {
                 reminder.completionDate = nil
             case .value(let completedDateString):
                 guard let date = Date.fromISO8601(completedDateString) else {
-                    throw MCPToolError("Invalid date format: '\(completedDateString)'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.")
+                    throw RemindersError("Invalid date format: '\(completedDateString)'. Expected ISO 8601 format like '2024-01-15T10:00:00-05:00'.")
                 }
                 reminder.completionDate = date
             }
@@ -662,7 +662,7 @@ class RemindersManager {
                 reminder.url = nil
             case .value(let urlString):
                 guard let url = URL(string: urlString) else {
-                    throw MCPToolError("Invalid URL: '\(urlString)'")
+                    throw RemindersError("Invalid URL: '\(urlString)'")
                 }
                 reminder.url = url
             }
@@ -671,7 +671,7 @@ class RemindersManager {
         // Update dueDateIncludesTime
         if let includesTime = input.dueDateIncludesTime {
             if reminder.dueDateComponents == nil {
-                throw MCPToolError("dueDateIncludesTime requires a dueDate to be set.")
+                throw RemindersError("dueDateIncludesTime requires a dueDate to be set.")
             }
             reminder.isAllDay = !includesTime
         }
@@ -708,51 +708,51 @@ class RemindersManager {
         switch input.type {
         case "absolute":
             guard let dateString = input.date else {
-                throw MCPToolError("Absolute alarm requires 'date' field")
+                throw RemindersError("Absolute alarm requires 'date' field")
             }
             guard let date = Date.fromISO8601(dateString) else {
-                throw MCPToolError("Invalid alarm date format: '\(dateString)'. Expected ISO 8601.")
+                throw RemindersError("Invalid alarm date format: '\(dateString)'. Expected ISO 8601.")
             }
             return ReminderAlarm(absoluteDate: date, relativeOffset: nil)
         case "relative":
             guard let offset = input.offset else {
-                throw MCPToolError("Relative alarm requires 'offset' field (seconds before due date)")
+                throw RemindersError("Relative alarm requires 'offset' field (seconds before due date)")
             }
             if offset < 0 {
-                throw MCPToolError("Alarm offset must be a positive number of seconds (e.g., 3600 = 1 hour before due date). Got \(offset).")
+                throw RemindersError("Alarm offset must be a positive number of seconds (e.g., 3600 = 1 hour before due date). Got \(offset).")
             }
             return ReminderAlarm(absoluteDate: nil, relativeOffset: TimeInterval(-offset))
         default:
-            throw MCPToolError("Invalid alarm type: '\(input.type)'. Must be 'absolute' or 'relative'.")
+            throw RemindersError("Invalid alarm type: '\(input.type)'. Must be 'absolute' or 'relative'.")
         }
     }
 
     private func parseRecurrenceInput(_ input: RecurrenceRuleInput) throws -> ReminderRecurrenceRule {
         guard let frequency = RecurrenceFrequency(rawValue: input.frequency.lowercased()) else {
-            throw MCPToolError("Invalid recurrence frequency: '\(input.frequency)'. Must be one of: daily, weekly, monthly, yearly.")
+            throw RemindersError("Invalid recurrence frequency: '\(input.frequency)'. Must be one of: daily, weekly, monthly, yearly.")
         }
 
         let interval = input.interval ?? 1
         if interval < 1 {
-            throw MCPToolError("Recurrence interval must be at least 1")
+            throw RemindersError("Recurrence interval must be at least 1")
         }
 
         if input.endDate != nil && input.endCount != nil {
-            throw MCPToolError("Cannot specify both endDate and endCount in a recurrence rule. Use one or the other.")
+            throw RemindersError("Cannot specify both endDate and endCount in a recurrence rule. Use one or the other.")
         }
 
         if let position = input.weekPosition {
             let validRanges = (-4)...(-1)
             let validPositive = 1...5
             if position != 0 && !validRanges.contains(position) && !validPositive.contains(position) {
-                throw MCPToolError("Invalid weekPosition: \(position). Must be 1-5 (first through fifth), -1 to -4 (last through fourth-to-last), or 0.")
+                throw RemindersError("Invalid weekPosition: \(position). Must be 1-5 (first through fifth), -1 to -4 (last through fourth-to-last), or 0.")
             }
         }
 
         var endDate: Date? = nil
         if let endDateString = input.endDate {
             guard let date = Date.fromISO8601(endDateString) else {
-                throw MCPToolError("Invalid recurrence end date: '\(endDateString)'. Expected ISO 8601.")
+                throw RemindersError("Invalid recurrence end date: '\(endDateString)'. Expected ISO 8601.")
             }
             endDate = date
         }
@@ -771,7 +771,7 @@ class RemindersManager {
 
     // MARK: - Delete Operations
 
-    func deleteReminders(ids: [String]) -> (deleted: [String], failed: [(id: String, error: String)]) {
+    public func deleteReminders(ids: [String]) -> (deleted: [String], failed: [(id: String, error: String)]) {
         var deleted: [String] = []
         var failed: [(id: String, error: String)] = []
 
@@ -789,14 +789,14 @@ class RemindersManager {
 
     private func deleteSingleReminder(id: String) throws {
         guard let reminder = store.getReminder(withId: id) else {
-            throw MCPToolError("No reminder found with ID: '\(id)'")
+            throw RemindersError("No reminder found with ID: '\(id)'")
         }
 
         let calendarName = reminder.getCalendarName(from: store)
 
         // Test mode validation
         if TestModeConfig.isEnabled && !TestModeConfig.isTestList(calendarName) {
-            throw MCPToolError(
+            throw RemindersError(
                 "TEST MODE: Cannot delete reminder in list '\(calendarName)'. " +
                 "Reminder must be in a list starting with '\(TestModeConfig.testListPrefix)'"
             )
@@ -808,7 +808,7 @@ class RemindersManager {
 
     // MARK: - Export Operations
 
-    func exportReminders(
+    public func exportReminders(
         path: String?,
         lists: [ListSelector]?,
         includeCompleted: Bool

@@ -24,3 +24,7 @@ bun.lockb
 swiftly
 swiftly-*.tar.gz
 LICENSE.txt
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db

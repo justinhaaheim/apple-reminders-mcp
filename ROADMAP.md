@@ -1,8 +1,8 @@
-# Apple Reminders MCP Server - Roadmap
+# Apple Reminders Tools - Roadmap
 
 ## Vision
 
-A fully-featured MCP server that provides Claude iOS-level Reminders functionality on macOS, enabling rich task management with alarms, recurrence, search, and batch operations.
+A complete Apple Reminders toolkit: MCP server for Claude, CLI for humans and LLMs, and git-backed snapshot system for versioned backups. Full feature parity with Claude iOS Reminders tools.
 
 ---
 
@@ -25,16 +25,25 @@ Efficient bulk operations - critical for productivity workflows.
 - [x] Delete multiple reminders in one call (`delete_reminders`)
 - [x] Complete multiple reminders in one call (`complete_reminders`)
 
-### M3: Audit Log & Data Safety ⬅️ NEXT
+### M3: Project Restructure + CLI + Snapshots ✅
 
-Paranoid-level logging and data protection. Never lose data, always know what happened.
+Multi-target architecture, CLI tool, and git-backed snapshot system.
+
+- [x] Restructure into AppleRemindersCore library + AppleRemindersMCP + AppleRemindersCLI
+- [x] CLI tool (`reminders`) with ArgumentParser
+- [x] Git-backed snapshot system (`reminders snapshot`)
+- [x] MCP server auto-snapshot integration (disabled by default)
+- [x] Single binary with `mcp` subcommand
+
+### M4-next: Audit Log & Data Safety
+
+Paranoid-level logging and data protection.
 
 - [ ] Detailed operation logging (what model requested, what server did)
 - [ ] Capture before/after state for all modifications
 - [ ] Persist audit log (file or database)
 - [ ] Add `list_recent_operations` tool - let model review its own actions
 - [ ] Add `undo_operation` tool - revert a specific change
-- [ ] Consider: snapshot/backup before destructive operations
 
 ### M4: Enhanced Search ✅
 
@@ -44,47 +53,41 @@ Improve reminder discovery.
 - [x] `search_reminder_lists` tool with text search
 - [x] Modeled after Claude iOS `reminder_search_v0` API
 
-### M5: Recurrence Support
+### M5: Recurrence Support ✅
 
-Add repeating reminder support.
+- [x] Recurrence rules on create/update
+- [x] All patterns: daily, weekly, monthly, yearly
+- [x] Days of week, interval, end conditions
 
-- [ ] `recurrence` parameter on create/update
-- [ ] Common patterns: daily, weekly, monthly
-- [ ] Days of week, interval support
-- [ ] End conditions (count, date)
+### M6: Alarms Support ✅
 
-### M6: Alarms Support
+- [x] Absolute and relative alarms on create/update
+- [x] Return alarms in query responses
 
-Add alarm/notification support to reminders.
+### M7: URL & Minor Fields ✅
 
-- [ ] `alarms` parameter on create/update
-- [ ] Absolute alarms (specific date/time)
-- [ ] Relative alarms (X seconds before due date)
-- [ ] Return alarms in list responses
-
-### M7: URL & Minor Fields
-
-Complete feature parity with Claude iOS.
-
-- [ ] URL attachment support
-- [ ] startDate (separate from dueDate)
-- [ ] Explicit dueDateIncludesTime boolean
+- [x] URL attachment support
+- [x] Explicit dueDateIncludesTime boolean
 
 ---
 
 ## In Progress
 
-- [docs/plans/2025-12-26_mcp-server-improvements.md](docs/plans/2025-12-26_mcp-server-improvements.md) - Main improvement scratchpad
+- [docs/plans/2026-03-04_project-restructure-cli-snapshots.md](docs/plans/2026-03-04_project-restructure-cli-snapshots.md) - Restructure + CLI + Snapshots
 
 ---
 
 ## Next Actions
 
-1. **Implement recurrence support (M5)** - Add `recurrence` parameter to create/update. Start with common patterns: daily, weekly, monthly.
+1. **Test CLI on macOS** — Build and verify `reminders` binary against real Apple Reminders. Confirm all commands work end-to-end.
 
-2. **Implement alarm support (M6)** - Add `alarms` parameter for notifications. Support absolute and relative alarms.
+2. **Test snapshot system on macOS** — Run `reminders snapshot` with real data, verify git commits, inspect JSON files.
 
-3. **Design audit log schema (M3)** - Define what gets logged: timestamps, operation type, input params, result, before/after state.
+3. **Rename repo to apple-reminders-tools** — Update GitHub repo name, remotes, and references.
+
+4. **Wire up `reminders mcp` fully** — Ensure the unified binary can replace the standalone `apple-reminders-mcp` in Claude Desktop config.
+
+5. **Add `--format markdown` option** — Human-readable output for CLI queries (alternative to JSON).
 
 ---
 
@@ -92,11 +95,13 @@ Complete feature parity with Claude iOS.
 
 ### Features
 
-- [ ] Priority enum (none/low/medium/high) instead of 0-9 integers
-- [ ] List search filter for `list_reminder_lists`
-- [ ] Consider tool renaming to match Claude iOS (`reminder_create_v0` style)
-- [x] Code refactoring to multiple Swift files (9 files, completed 2026-02-28)
-- [ ] Add `listId` support alongside `list_name` for more robust list identification
+- [x] Priority enum (none/low/medium/high) instead of 0-9 integers
+- [x] Code refactoring to multiple Swift files (completed 2026-02-28)
+- [x] Multi-target restructure (core library + CLI + MCP) (completed 2026-03-05)
+- [ ] `--format markdown` for human-readable CLI output
+- [ ] Shell completion generation (bash/zsh/fish) via ArgumentParser
+- [ ] Scheduled periodic snapshots via launchd
+- [ ] Snapshot diff viewer (show what changed between two snapshots)
 
 ### Bugs / Issues
 
@@ -105,20 +110,22 @@ _(none currently tracked)_
 ### Ideas
 
 - AppleScript fallback for operations EventKit can't do (like deleting lists)
-- Explore Swift testing options (mocking EKEventStore is tricky)
-- Export/import functionality for backup purposes
-
----
-
-## Open Questions
-
-1. **Audit log storage** - JSON file? SQLite? How long to retain?
-2. **Undo granularity** - Undo individual operations or support "undo last N operations"?
-3. **Recurrence complexity** - Start with common cases or implement full RRULE support?
+- Swift testing for core library (unit tests against MockStore)
+- Audit log with before/after state capture
+- Undo support (revert specific operations)
 
 ---
 
 ## Progress Log
+
+### 2026-03-05
+
+- ✅ Completed M3: Project Restructure + CLI + Snapshots
+- Restructured into multi-target project: AppleRemindersCore (library) + AppleRemindersMCP (exe) + AppleRemindersCLI (exe)
+- Built `reminders` CLI with ArgumentParser: query, lists, create, create-list, update, delete, export, snapshot, mcp
+- Implemented git-backed snapshot system (delete-and-regenerate, individual JSON files per reminder)
+- Wired auto-snapshot into MCP server (disabled by default, AR_MCP_SNAPSHOT_ENABLED=1)
+- Single binary architecture: `reminders mcp` replaces standalone MCP server
 
 ### 2026-01-18
 

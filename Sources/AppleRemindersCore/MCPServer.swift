@@ -2,10 +2,12 @@ import Foundation
 
 // MARK: - MCP Server
 
-class MCPServer {
+public class MCPServer {
     private let remindersManager: RemindersManager
+    private let snapshotManager: SnapshotManager?
+    private let snapshotEnabled: Bool
 
-    init() {
+    public init() {
         // Choose store based on mock mode
         let store: ReminderStore
         if MockModeConfig.isEnabled {
@@ -19,9 +21,18 @@ class MCPServer {
             #endif
         }
         self.remindersManager = RemindersManager(store: store)
+
+        // Snapshot support (disabled by default)
+        self.snapshotEnabled = ProcessInfo.processInfo.environment["AR_MCP_SNAPSHOT_ENABLED"] == "1"
+        if snapshotEnabled {
+            let repoPath = ProcessInfo.processInfo.environment["AR_MCP_SNAPSHOT_REPO"]
+            self.snapshotManager = SnapshotManager(repoPath: repoPath, store: store)
+        } else {
+            self.snapshotManager = nil
+        }
     }
 
-    func start() async {
+    public func start() async {
         do {
             try await remindersManager.requestAccess()
             log("Successfully obtained access to Reminders")
@@ -38,10 +49,27 @@ class MCPServer {
             log("TEST MODE ENABLED - Write operations restricted to lists prefixed with '\(TestModeConfig.testListPrefix)'")
         }
 
+        if snapshotEnabled {
+            log("SNAPSHOT ENABLED - Auto-snapshotting after write operations")
+            // Take initial snapshot on startup
+            await autoSnapshot(reason: "session start")
+        }
+
         log("Apple Reminders MCP Server running on stdio")
 
         while let line = readLine() {
             await handleRequest(line)
+        }
+    }
+
+    /// Take an automatic snapshot after write operations (if enabled).
+    private func autoSnapshot(reason: String) async {
+        guard let snapshotManager = snapshotManager else { return }
+        do {
+            let result = try await snapshotManager.takeSnapshot()
+            log("Auto-snapshot (\(reason)): \(result.reminderCount) reminders, \(result.listCount) lists")
+        } catch {
+            logError("Auto-snapshot failed (\(reason)): \(error.localizedDescription)")
         }
     }
 
@@ -810,6 +838,7 @@ class MCPServer {
                 throw MCPToolError("Missing required field: 'name'")
             }
             let createdList = try remindersManager.createList(name: listName)
+            await autoSnapshot(reason: "create_list")
             return try toJSON(createdList)
 
         case "query_reminders":
@@ -890,6 +919,10 @@ class MCPServer {
 
             let (created, failed) = remindersManager.createReminders(inputs: inputs)
 
+            if !created.isEmpty {
+                await autoSnapshot(reason: "create_reminders")
+            }
+
             if failed.isEmpty {
                 return try toJSON(created)
             } else {
@@ -961,6 +994,10 @@ class MCPServer {
 
             let (updated, failed) = remindersManager.updateReminders(inputs: inputs)
 
+            if !updated.isEmpty {
+                await autoSnapshot(reason: "update_reminders")
+            }
+
             if failed.isEmpty {
                 return try toJSON(updated)
             } else {
@@ -975,6 +1012,11 @@ class MCPServer {
             }
 
             let (deleted, failed) = remindersManager.deleteReminders(ids: ids)
+
+            if !deleted.isEmpty {
+                await autoSnapshot(reason: "delete_reminders")
+            }
+
             let failedOutput = failed.map { ["id": $0.id, "error": $0.error] }
             let response: [String: Any] = ["deleted": deleted, "failed": failedOutput]
             return try toJSON(response)

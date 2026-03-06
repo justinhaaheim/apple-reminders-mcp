@@ -1,0 +1,11 @@
+{
+  "name": "apple-reminders",
+  "description": "Access and manage Apple Reminders on macOS — query, create, update, delete reminders with full alarm, recurrence, and batch support. Includes CLI tool and git-backed snapshot system.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Justin Haaheim"
+  },
+  "homepage": "https://github.com/justinhaaheim/apple-reminders-mcp",
+  "repository": "https://github.com/justinhaaheim/apple-reminders-mcp",
+  "license": "MIT"
+}
