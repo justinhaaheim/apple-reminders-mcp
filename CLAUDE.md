@@ -122,6 +122,8 @@ reminders mcp
 
 All commands output JSON to stdout. Use `--pretty` for human-readable output. Use `--mock` for testing.
 
+For the full CLI skill reference (common patterns, piping with jq, JMESPath queries, etc.), see @SKILL.md
+
 ## Claude Desktop Configuration
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
