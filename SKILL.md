@@ -1,6 +1,11 @@
-# Apple Reminders CLI Skill
+# Apple Reminders CLI — Skill Reference
 
-> **For**: Claude Code, Claude Desktop, and LLMs that have shell access on macOS
+This file is a standalone reference for the `reminders` CLI. For the Claude Code
+plugin skill (with frontmatter), see [`skills/reminders/SKILL.md`](skills/reminders/SKILL.md).
+
+---
+
+> **For**: Claude Code, Claude Desktop, and LLMs with shell access on macOS
 > **Binary**: `reminders` (built from this repo)
 > **Output**: All commands output JSON to stdout. Logs go to stderr.
 
