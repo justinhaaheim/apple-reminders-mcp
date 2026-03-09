@@ -28,3 +28,6 @@ LICENSE.txt
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# npm package binaries (built by CI)
+npm/bin/reminders
