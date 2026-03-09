@@ -1,0 +1,52 @@
+name: Build and Publish to npm
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (skip npm publish)'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
+
+jobs:
+  build-and-publish:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build universal binary
+        run: ./scripts/build-universal.sh --check
+
+      - name: Sync version from root package.json
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          cd npm
+          node -p "
+            const pkg = require('./package.json');
+            pkg.version = '$VERSION';
+            JSON.stringify(pkg, null, 2) + '\n'
+          " > package.json.tmp
+          mv package.json.tmp package.json
+          echo "Publishing version $VERSION"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Publish to npm
+        if: github.event_name == 'release' || inputs.dry_run == 'false'
+        run: npm publish ./npm --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Dry run
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == 'true'
+        run: npm publish ./npm --access public --dry-run

@@ -6,6 +6,8 @@
   "scripts": {
     "build": "swift build -c release",
     "build:debug": "swift build",
+    "build:universal": "./scripts/build-universal.sh",
+    "build:npm": "./scripts/build-universal.sh --check",
     "run": ".build/release/apple-reminders-mcp",
     "run:cli": ".build/release/reminders",
     "test": "bun test",
