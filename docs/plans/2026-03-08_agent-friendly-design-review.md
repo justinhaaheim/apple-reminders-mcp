@@ -300,24 +300,32 @@ Lower priority items that round out spec compliance:
 
 ## Progress
 
-- [ ] Phase 1: Tiered Help System
-  - [ ] Pre-parse argument interception for `--help --verbose` and `--help=skill`
-  - [ ] HelpContent.swift with content for query, create, update, delete
-  - [ ] Self-referencing footer on all help output
-  - [ ] Extend to remaining commands (lists, create-list, export, snapshot, mcp)
-- [ ] Phase 2: Audit Logging
-  - [ ] AuditLogger in AppleRemindersCore (JSONL, per-day files)
-  - [ ] Wire into RemindersManager for all mutations
-  - [ ] Before-state capture for updates and deletes
-  - [ ] `reminders audit` CLI command
-  - [ ] MCP surface writes to same log
-- [ ] Phase 3: MCP Progressive Disclosure
-  - [ ] Slim tool descriptions to 2-3 sentences
-  - [ ] Add `help` meta-tool
-  - [ ] Add `schema` meta-tool
-  - [ ] Add `guidance` meta-tool
-  - [ ] Slim `initialize` instructions
-- [ ] Phase 6: Bootstrap Skill File
+- [x] Phase 1: Tiered Help System ✅ (2026-03-10)
+  - [x] Pre-parse argument interception for `--help --verbose` and `--help=skill`
+  - [x] HelpContent.swift with content for ALL commands (query, create, update, delete, lists, create-list, export, snapshot, audit, mcp)
+  - [x] Self-referencing footer on all help output
+  - [x] HelpSystem.swift pre-parser intercepts before ArgumentParser
+- [x] Phase 2: Audit Logging ✅ (2026-03-10)
+  - [x] AuditLogger in AppleRemindersCore (JSONL, per-day files in ~/.config/apple-reminders-tools/logs/)
+  - [x] Wire into RemindersManager for all mutations (create, update, delete, create-list)
+  - [x] Before-state capture for updates and deletes
+  - [x] `reminders audit` CLI command (--days, --files flags)
+  - [x] MCP surface writes to same log (source: "mcp")
+- [x] Phase 3: MCP Progressive Disclosure ✅ (2026-03-10)
+  - [x] Slim tool descriptions to 2-3 sentences (from ~600 lines to ~30)
+  - [x] Add `help` meta-tool (with verbose flag)
+  - [x] Add `schema` meta-tool
+  - [x] Add `guidance` meta-tool
+  - [x] Slim `initialize` instructions (from ~25 lines to ~6)
+- [x] Phase 6: Bootstrap Skill File ✅ (2026-03-10)
+  - [x] Converted from ~115 line reference to ~25 line bootstrap redirect
 - [ ] Phase 4: Dry-run
 - [ ] Phase 5: Structured Errors
 - [ ] Phase 7: Minor Hardening
+
+### New Files Created
+
+- `Sources/AppleRemindersCore/HelpContent.swift` — Static help text at all tiers for all commands
+- `Sources/AppleRemindersCore/HelpSystem.swift` — Pre-parse interception for --help flags
+- `Sources/AppleRemindersCore/AuditLogger.swift` — JSONL audit logger
+- `Sources/AppleRemindersCLI/AuditCommand.swift` — `reminders audit` CLI command
