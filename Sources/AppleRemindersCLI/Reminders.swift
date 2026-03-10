@@ -21,6 +21,21 @@ struct Reminders: AsyncParsableCommand {
         ],
         defaultSubcommand: QueryCommand.self
     )
+
+    // Intercept --help --verbose and --help=skill before ArgumentParser runs
+    static func main() async {
+        HelpSystem.interceptIfNeeded()
+        do {
+            var command = try parseAsRoot()
+            if var asyncCommand = command as? AsyncParsableCommand {
+                try await asyncCommand.run()
+            } else {
+                try command.run()
+            }
+        } catch {
+            exit(withError: error)
+        }
+    }
 }
 
 // MARK: - Shared Options
