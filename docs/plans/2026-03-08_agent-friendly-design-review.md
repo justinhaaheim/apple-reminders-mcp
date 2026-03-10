@@ -1,7 +1,7 @@
 # Agent-Friendly Design Review & Adaptation Plan
 
-**Date:** 2026-03-08
-**Reference:** Agent-Friendly Tool Design skill doc (provided by user)
+**Date:** 2026-03-08 (updated 2026-03-09)
+**Reference:** Agent-Friendly Tool Design skill doc v2 (provided by user)
 
 ---
 
@@ -23,18 +23,18 @@
 
 ### Gaps vs. the Spec
 
-| Gap                                                  | Priority  | Rationale                                                                 |
-| ---------------------------------------------------- | --------- | ------------------------------------------------------------------------- |
-| **No tiered help system** (`--help=1/2/3/skill`)     | 🔴 High   | Core principle of the spec; currently only ArgumentParser's flat `--help` |
-| **MCP descriptions too verbose**                     | 🔴 High   | All tool schemas + 100+ lines of instructions dumped at connect time      |
-| **No MCP meta-tools** (`help`, `schema`, `guidance`) | 🔴 High   | No way for agent to query help on-demand; it's all-or-nothing             |
-| **No `--dry-run`**                                   | 🟡 Medium | Agents can't preview mutations before executing                           |
-| **No structured error codes**                        | 🟡 Medium | Errors are human-readable strings, not machine-parseable envelopes        |
-| **No TTY detection**                                 | 🟢 Low    | `--pretty` is explicit; agents prefer consistent output anyway            |
-| **No JSONL streaming**                               | 🟢 Low    | Datasets are small (personal reminders); not a real bottleneck            |
-| **No control character rejection**                   | 🟢 Low    | Unlikely attack vector for a local-only tool                              |
-| **No path traversal hardening**                      | 🟢 Low    | Only affects `--path` in export; local tool on user's own machine         |
-| **Skill file is a full reference**                   | 🟡 Medium | Should be a bootstrap redirect, not documentation                         |
+| Gap                                                      | Priority  | Rationale                                                                 |
+| -------------------------------------------------------- | --------- | ------------------------------------------------------------------------- |
+| **No tiered help system** (`--help --verbose`, `=skill`) | 🔴 High   | Core principle of the spec; currently only ArgumentParser's flat `--help` |
+| **No audit logging**                                     | 🔴 High   | #2 priority in retrofitting order; essential for safety and debugging     |
+| **MCP descriptions too verbose**                         | 🔴 High   | All tool schemas + 100+ lines of instructions dumped at connect time      |
+| **No MCP meta-tools** (`help`, `schema`, `guidance`)     | 🔴 High   | No way for agent to query help on-demand; it's all-or-nothing             |
+| **No `--dry-run`**                                       | 🟡 Medium | Agents can't preview mutations before executing                           |
+| **No structured error codes**                            | 🟡 Medium | Errors are human-readable strings, not machine-parseable envelopes        |
+| **Skill file is a full reference**                       | 🟡 Medium | Should be a bootstrap redirect, not documentation                         |
+| **No TTY detection**                                     | 🟢 Low    | `--pretty` is explicit; agents prefer consistent output anyway            |
+| **No JSONL streaming**                                   | 🟢 Low    | Datasets are small (personal reminders); not a real bottleneck            |
+| **No control character rejection**                       | 🟢 Low    | Unlikely attack vector for a local-only tool                              |
 
 ---
 
@@ -42,78 +42,119 @@
 
 ### Phase 1: Tiered Help System (CLI) 🔴
 
-**Goal:** Implement `--help=1/2/3/skill` across all commands.
+**Goal:** Implement `--help --verbose` and `--help=skill` across all commands.
 
-**Design:**
+**Design (updated to match spec v2):**
 
-ArgumentParser doesn't natively support `--help=N`. We have two options:
+The spec uses two help levels (not three) plus skill guidance on a separate axis:
 
-#### Option A: Custom `--help-level` flag (Recommended)
+- `reminders query --help` → Concise: command signature, one-line description, flags with brief types/defaults. ~10-20 lines. Sufficient for most agent use.
+- `reminders query --help --verbose` → Comprehensive (cumulative): everything from `--help` plus full parameter descriptions, examples, edge cases, environment variables, related commands. Equivalent of a documentation page.
+- `reminders query --help=skill` → Separate axis: strategic guidance, best practices, invariants, gotchas. Not API docs — behavioral guidance.
 
-Add a `--help-level <N>` or `--help-detail <N>` global option that, when provided, prints the appropriate help level and exits. Keep ArgumentParser's built-in `--help` as the level-1 default.
+Each help output ends with self-referencing pointers:
 
-- `reminders query --help` → Level 1 (ArgumentParser default): command signature, one-line description, option list
-- `reminders query --help-level 2` → Level 2: full parameter descriptions with types, defaults, 2-3 examples
-- `reminders query --help-level 3` → Level 3: full JSON schema for complex inputs, edge cases, all field names, related commands
-- `reminders query --help-level skill` → Strategic guidance: best practices, invariants, gotchas, common workflows
+```
+Use --help --verbose for detailed docs and examples.
+Use --help=skill for best practices and strategic guidance.
+Use `reminders schema <command>` to inspect input/output schemas.
+```
 
-Each level's output includes a footer: `Use --help-level 2/3/skill for more detail.`
+**Graceful degradation:** `--verbose` on `--help` is silently ignored if unsupported, making it safe for agents to try on any CLI.
 
-#### Option B: Override `--help` with custom levels
+**Implementation approach:**
 
-Intercept `--help` and support `--help=2` syntax. This is harder with ArgumentParser and might fight the framework.
+ArgumentParser intercepts `--help` before `run()` executes. To support `--help --verbose` and `--help=skill`, we need to handle these before ArgumentParser's built-in help fires.
 
-**Recommendation:** Option A. It's additive, doesn't fight ArgumentParser, and is clear.
+Options:
 
-**Implementation:**
+- **Option A:** Add `--verbose` as a global flag. Override ArgumentParser's help rendering to include verbose content and the self-referencing footer. Detect `--help=skill` via custom argument parsing (since `=` syntax isn't standard ArgumentParser).
+- **Option B:** Add custom `--docs` and `--skill` flags that print help and exit from within `run()`. Simpler but deviates from the spec's syntax.
+- **Option C:** Custom pre-parse of `ProcessInfo.arguments` to detect `--help --verbose` and `--help=skill` before ArgumentParser runs. Print custom help and exit(0). Most flexible, avoids fighting the framework.
 
-1. Add a `--help-level` global option to the root `Reminders` command (string, optional)
-2. Create a `HelpSystem` module in `AppleRemindersCore` that stores help text at each level for each command
-3. In each command's `run()`, check if `--help-level` is set; if so, print the appropriate help and exit
-4. Write help content for all 8 commands × 4 levels (but start with just the top 3 most-used commands: `query`, `create`, `update`)
+**Recommendation:** Option C. It gives us full control over help output without fighting ArgumentParser. We intercept early, print what we want, and exit. ArgumentParser's built-in `--help` continues to work as the concise level for cases we haven't customized yet.
 
-**Content strategy for help levels:**
+**Content to write:**
 
-| Level                | Content                                                                                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1 (default `--help`) | Already exists via ArgumentParser. Add footer referencing deeper levels.                                                                               |
-| 2                    | Parameter details with types, defaults, enum values. 2-3 concrete examples.                                                                            |
-| 3                    | Full JSON schema, all field names, edge cases, environment variables, related commands.                                                                |
-| skill                | Best practices: "Always query before updating." "Use `--detail minimal` to save tokens." "Use JMESPath to filter server-side." Invariants and gotchas. |
+Start with top commands: `query`, `create`, `update`, `delete`, `lists`. Then extend to all commands. For each:
 
-### Phase 2: MCP Progressive Disclosure 🔴
+- Concise help (replaces/augments ArgumentParser default)
+- Verbose help (cumulative — includes concise + detailed docs + examples)
+- Skill guidance (best practices for that command)
+
+Also write top-level `reminders --help=skill` with cross-cutting guidance.
+
+### Phase 2: Audit Logging 🔴
+
+**Goal:** Log every mutation with timestamp, action, result, and before-state. JSONL format.
+
+**This is the #2 priority in the retrofitting order** (right after JSON output, which we already have). Non-negotiable for agent safety.
+
+**What to log:**
+
+Every create, update, delete operation gets a JSONL entry:
+
+```json
+{
+  "timestamp": "2026-03-09T14:30:00-08:00",
+  "action": "update_reminder",
+  "args": {"id": "abc123", "title": "New title", "priority": "high"},
+  "result": "success",
+  "response": {"id": "abc123", "title": "New title", "priority": "high"},
+  "beforeState": {"id": "abc123", "title": "Old title", "priority": "none"},
+  "context": {"source": "cli", "sessionId": "sess_abc"}
+}
+```
+
+**Log location:** `~/.config/apple-reminders-tools/logs/` with one file per day (`2026-03-09.jsonl`).
+
+**CLI command:** `reminders audit` (or `reminders logs`) to list recent sessions and view what happened.
+
+**Shared core:** Both CLI and MCP surfaces write to the same audit log via a shared `AuditLogger` in `AppleRemindersCore`.
+
+**Before-state capture:** For updates, query the reminder's current state before applying changes. For deletes, capture the full reminder before deletion. For creates, before-state is null.
+
+**Retention:** Keep indefinitely during this alpha/beta phase. Add configurable retention later.
+
+### Phase 3: MCP Progressive Disclosure 🔴
 
 **Goal:** Slim down MCP tool descriptions. Add `help`, `schema`, and `guidance` meta-tools.
 
-**Current problem:** The MCP server dumps ~800 lines of tool descriptions at connect time. Every connection burns those tokens whether the agent needs them or not.
+**Current problem:** The MCP server dumps ~800 lines of tool descriptions at connect time.
 
 **Changes:**
 
-1. **Slim tool descriptions to one-liners.** Each tool gets a brief description (1-2 sentences max). Remove the multi-paragraph explanations, examples, and field lists from the tool descriptions.
+1. **Slim tool descriptions to 2-3 sentences.** Keep enough for the agent to know what the tool does and when to use it, but move examples, field lists, and detailed parameter docs to the help meta-tool.
 
-2. **Add `get_help` meta-tool:**
-
-   ```
-   get_help(tool_name: string, depth?: 1|2|3|"skill") → string
-   ```
-
-   Returns help text for the specified tool at the requested depth. Pulls from the same `HelpSystem` module as the CLI.
-
-3. **Add `get_schema` meta-tool:**
+2. **Add `help` meta-tool:**
 
    ```
-   get_schema(tool_name: string) → JSON
+   help(tool_name: string, verbose?: boolean) → string
    ```
 
-   Returns the full JSON input schema for a tool. This is what currently gets dumped in `inputSchema` — but now it's on-demand.
+   Returns help text for the specified tool. Default is concise; `verbose=true` gives comprehensive docs with examples.
 
-4. **Slim the `initialize` response instructions.** Currently 106+ lines. Replace with a brief overview + "call `get_help` for details on any tool."
+3. **Add `schema` meta-tool:**
 
-5. **Keep the `inputSchema` in tool listings** but make it minimal (required params only, no descriptions in the schema itself). The full schema with descriptions is available via `get_schema`.
+   ```
+   schema(tool_name: string) → JSON
+   ```
 
-**Open question:** How aggressively to slim the tool descriptions. The current descriptions are genuinely excellent and agents benefit from them. We could take a middle ground: keep 2-3 sentence descriptions (not one-liners) but move examples and field lists to the help meta-tool. This balances token efficiency with initial usability.
+   Returns the full JSON input schema for a tool.
 
-### Phase 3: `--dry-run` for Mutations 🟡
+4. **Add `guidance` meta-tool:**
+
+   ```
+   guidance(topic?: string) → string
+   ```
+
+   Returns strategic guidance (equivalent to `--help=skill`). Optional topic to scope to a specific area.
+
+5. **Slim the `initialize` response instructions.** Currently 106+ lines. Replace with brief overview + "call `help` for details on any tool, `guidance` for best practices."
+
+6. **Keep `inputSchema` in tool listings** — agents need the schema to construct valid calls. But remove lengthy `description` fields from individual properties within the schema. Those details are available via `help(tool, verbose=true)`.
+
+### Phase 4: `--dry-run` for Mutations 🟡
 
 **Goal:** Let agents preview what a mutation would do before executing it.
 
@@ -142,7 +183,7 @@ Add a `--dry-run` global flag. When set:
 
 **For MCP:** Add an optional `dryRun` boolean parameter to `create_reminders`, `update_reminders`, `delete_reminders`, and `create_list`.
 
-### Phase 4: Structured Error Envelope 🟡
+### Phase 5: Structured Error Envelope 🟡
 
 **Goal:** Consistent, machine-parseable error responses.
 
@@ -170,7 +211,7 @@ Add a `--dry-run` global flag. When set:
 
 **MCP:** Same error structure in the `content[0].text` field.
 
-### Phase 5: Bootstrap Skill File 🟡
+### Phase 6: Bootstrap Skill File 🟡
 
 **Goal:** Convert `skills/reminders/SKILL.md` from a full reference into a minimal bootstrap redirect.
 
@@ -190,11 +231,12 @@ allowed-tools: Bash(reminders *), Bash(${CLAUDE_PLUGIN_ROOT}/.build/release/remi
 
 `reminders` is a CLI for managing Apple Reminders. Before first use, run:
 
-    reminders --help-level skill
+    reminders --help=skill
 
 This returns best practices and strategic guidance for using the tool effectively.
 
-For API docs, use `reminders <command> --help` (brief) through `--help-level 3` (comprehensive).
+For API docs, use `reminders <command> --help` (concise) or `--help --verbose` (comprehensive).
+For input/output schemas, use `reminders schema <command>`.
 
 ### User preferences
 
@@ -203,50 +245,45 @@ For API docs, use `reminders <command> --help` (brief) through `--help-level 3` 
 - Always use `--all-lists` unless the user specifies a particular list.
 ```
 
-The full reference content currently in SKILL.md moves into the `--help-level 2/3/skill` system, where it's versioned with the tool itself.
+The full reference content currently in SKILL.md moves into the `--help --verbose` / `--help=skill` system, versioned with the tool.
 
-### Phase 6: Minor Hardening 🟢
+### Phase 7: Minor Hardening 🟢
 
-Lower priority items that round out the spec compliance:
+Lower priority items that round out spec compliance:
 
-1. **Self-referencing help footer** — Every `--help` output includes "Use `--help-level 2` for detailed docs, `--help-level 3` for schemas, `--help-level skill` for best practices."
-2. **Schema introspection CLI command** — `reminders schema <command>` outputs the JSON input schema for a command (same data the MCP server exposes).
-3. **Control character rejection** — Reject ASCII < 0x20 in reminder titles and notes.
-4. **TTY detection** — Auto-enable `--pretty` when stdout is a TTY (with `--output json` override).
+1. **Schema introspection CLI command** — `reminders schema <command>` outputs the JSON input schema for a command (same data the MCP server exposes).
+2. **Control character rejection** — Reject ASCII < 0x20 in reminder titles and notes.
+3. **TTY detection** — Auto-enable `--pretty` when stdout is a TTY (with `--output json` override).
 
 ---
 
 ## Implementation Order
 
-| Phase                               | Effort | Depends On                                    | Notes                                       |
-| ----------------------------------- | ------ | --------------------------------------------- | ------------------------------------------- |
-| Phase 1: Tiered Help                | Medium | Nothing                                       | Foundation for everything else              |
-| Phase 2: MCP Progressive Disclosure | Medium | Phase 1 (shares HelpSystem)                   | Biggest token savings                       |
-| Phase 5: Bootstrap Skill File       | Small  | Phase 1 (needs `--help-level skill` to exist) | Quick win once Phase 1 lands                |
-| Phase 3: Dry-run                    | Medium | Nothing                                       | Independent, high safety value              |
-| Phase 4: Structured Errors          | Medium | Nothing                                       | Independent, improves agent self-correction |
-| Phase 6: Minor Hardening            | Small  | Phases 1-2                                    | Polish                                      |
+| Phase                               | Effort | Depends On                  | Notes                                       |
+| ----------------------------------- | ------ | --------------------------- | ------------------------------------------- |
+| Phase 1: Tiered Help                | Medium | Nothing                     | Foundation for everything else              |
+| Phase 2: Audit Logging              | Medium | Nothing                     | #2 in retrofitting order; safety-critical   |
+| Phase 3: MCP Progressive Disclosure | Medium | Phase 1 (shares HelpSystem) | Biggest token savings                       |
+| Phase 6: Bootstrap Skill File       | Small  | Phase 1 (needs help=skill)  | Quick win once Phase 1 lands                |
+| Phase 4: Dry-run                    | Medium | Nothing                     | Independent, high safety value              |
+| Phase 5: Structured Errors          | Medium | Nothing                     | Independent, improves agent self-correction |
+| Phase 7: Minor Hardening            | Small  | Phases 1-3                  | Polish                                      |
 
-**Suggested order:** 1 → 2 → 5 → 3 → 4 → 6
+**Suggested order:** 1 → 2 → 3 → 6 → 4 → 5 → 7
 
-**MVP (minimum to claim "agent-friendly"):** Phases 1 + 2 + 5
+**MVP (minimum to claim "agent-friendly"):** Phases 1 + 2 + 3 + 6
 
 ---
 
-## Design Decisions to Discuss
+## Design Decisions (Resolved)
 
-1. **How aggressively to slim MCP descriptions?** The current descriptions are genuinely excellent. A middle ground (2-3 sentences + "call `get_help` for more") might be better than strict one-liners. What's your preference?
+1. **MCP description aggressiveness:** Keep 2-3 sentences per tool. Focus on adding progressive disclosure pattern rather than minimizing aggressively. Can tune later.
 
-2. **`--help-level` vs `--help=N` syntax?** ArgumentParser makes `--help=N` hard. `--help-level` is straightforward but slightly more verbose. Alternative: `--guide` or `--docs` as the flag name?
+2. **Help syntax:** Use `--help --verbose` (cumulative) and `--help=skill` (separate axis), per spec v2. Implement via pre-parsing `ProcessInfo.arguments` before ArgumentParser runs.
 
-3. **Where to store help content?** Options:
-   - Inline in Swift source (easy, but clutters code)
-   - Separate `.txt` or `.md` resource files (clean, but Swift Package Manager resource bundling has quirks)
-   - A `HelpContent.swift` file with static string constants (pragmatic middle ground)
+3. **Help content storage:** `HelpContent.swift` with static string constants per command. Pragmatic, keeps content close to code, easy to maintain.
 
-4. **Should `get_schema` return the full JSON Schema or a simplified version?** The full schema is already in the MCP tool definitions. A simplified version (just param names + types + required) might be more useful.
-
-5. **Scope of Phase 1:** Start with all 8 commands, or just the top 3 (query, create, update) and iterate?
+4. **Scope:** Start with top 3-4 commands (query, create, update, delete), then extend to all. Commit regularly as each command is done.
 
 ---
 
@@ -258,3 +295,29 @@ Lower priority items that round out the spec compliance:
 - Auth model stays as-is (EventKit permission)
 - Test mode stays as-is
 - JSON-to-stdout / logs-to-stderr separation stays as-is
+
+---
+
+## Progress
+
+- [ ] Phase 1: Tiered Help System
+  - [ ] Pre-parse argument interception for `--help --verbose` and `--help=skill`
+  - [ ] HelpContent.swift with content for query, create, update, delete
+  - [ ] Self-referencing footer on all help output
+  - [ ] Extend to remaining commands (lists, create-list, export, snapshot, mcp)
+- [ ] Phase 2: Audit Logging
+  - [ ] AuditLogger in AppleRemindersCore (JSONL, per-day files)
+  - [ ] Wire into RemindersManager for all mutations
+  - [ ] Before-state capture for updates and deletes
+  - [ ] `reminders audit` CLI command
+  - [ ] MCP surface writes to same log
+- [ ] Phase 3: MCP Progressive Disclosure
+  - [ ] Slim tool descriptions to 2-3 sentences
+  - [ ] Add `help` meta-tool
+  - [ ] Add `schema` meta-tool
+  - [ ] Add `guidance` meta-tool
+  - [ ] Slim `initialize` instructions
+- [ ] Phase 6: Bootstrap Skill File
+- [ ] Phase 4: Dry-run
+- [ ] Phase 5: Structured Errors
+- [ ] Phase 7: Minor Hardening
