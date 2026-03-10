@@ -159,11 +159,11 @@ public struct ExportResult: Codable {
     public let exportDate: String
     public let stats: ExportStats
     public let fileSizeBytes: Int
-    public let note: String
+    public let note: String?
 
     public init(
         success: Bool, path: String, exportDate: String,
-        stats: ExportStats, fileSizeBytes: Int, note: String
+        stats: ExportStats, fileSizeBytes: Int, note: String?
     ) {
         self.success = success
         self.path = path

@@ -60,8 +60,6 @@ public class SnapshotManager {
         // 6. Write each reminder as individual JSON file
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let isoFormatter = ISO8601DateFormatter()
-        isoFormatter.formatOptions = [.withInternetDateTime]
 
         for reminder in allReminders {
             let output = convertToSnapshotOutput(reminder, calendars: calendars, defaultCalendar: defaultCalendar)
