@@ -22,6 +22,9 @@ public class MCPServer {
         }
         self.remindersManager = RemindersManager(store: store)
 
+        // Set audit logger source to MCP
+        AuditLogger.shared.source = "mcp"
+
         // Snapshot support (disabled by default)
         self.snapshotEnabled = ProcessInfo.processInfo.environment["AR_MCP_SNAPSHOT_ENABLED"] == "1"
         if snapshotEnabled {

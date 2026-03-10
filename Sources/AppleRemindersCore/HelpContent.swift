@@ -21,6 +21,7 @@ public enum HelpContent {
       delete        Delete one or more reminders
       export        Export reminders to a JSON file
       snapshot      Git-backed snapshot of all reminders
+      audit         View audit log of mutation operations
       mcp           Start MCP server on stdio
 
     Global Options:
@@ -48,6 +49,7 @@ public enum HelpContent {
       delete        Delete one or more reminders
       export        Export reminders to a JSON file
       snapshot      Git-backed snapshot of all reminders
+      audit         View audit log of mutation operations
       mcp           Start MCP server on stdio
 
     Global Options:
@@ -678,12 +680,73 @@ public enum HelpContent {
     • Use test mode (AR_MCP_TEST_MODE=1) during development to prevent modifying real data.
     """
 
+    // MARK: - Audit
+
+    public static let auditConcise = """
+    reminders audit [options]
+
+    View audit log of mutation operations (create, update, delete).
+
+    Options:
+      --days <int>       Number of days to show (default: 7)
+      --files            Show log file paths and sizes
+
+    Use --help --verbose for detailed docs and examples.
+    Use --help=skill for best practices and strategic guidance.
+    """
+
+    public static let auditVerbose = """
+    reminders audit [options]
+
+    View the audit log of all mutation operations. Every create, update, and
+    delete operation is logged with timestamp, action, arguments, result,
+    and before-state (for updates and deletes).
+
+    Options:
+      --days <int>       Number of days to look back (default: 7)
+      --files            Show log file paths and sizes instead of entries
+
+    Log Format:
+      Logs are stored as JSONL (one JSON object per line) in:
+        ~/.config/apple-reminders-tools/logs/YYYY-MM-DD.jsonl
+
+    Each entry contains:
+      timestamp    — ISO 8601 timestamp
+      action       — The operation (create_reminder, update_reminder, etc.)
+      args         — Full arguments passed to the operation
+      result       — "success" or "failure"
+      response     — The operation's response (for creates and updates)
+      beforeState  — The resource state before mutation (for updates and deletes)
+      context      — Session ID and source (cli or mcp)
+
+    Examples:
+      reminders audit --pretty                    # Recent mutations
+      reminders audit --days 1 --pretty           # Today's mutations
+      reminders audit --files --pretty            # List log files
+
+    Piping with jq:
+      reminders audit | jq '.[] | select(.action == "delete_reminder")'
+      reminders audit | jq '.[] | select(.context.source == "mcp")'
+
+    Use --help=skill for best practices and strategic guidance.
+    """
+
+    public static let auditSkill = """
+    reminders audit — Strategic Guidance
+
+    • Check the audit log after agent sessions to verify what was changed.
+    • Use beforeState to understand what a reminder looked like before modification.
+    • Filter by context.source to separate CLI vs MCP mutations.
+    • Log files are kept indefinitely during alpha/beta. Plan to add retention later.
+    • Both CLI and MCP surfaces write to the same audit log.
+    """
+
     // MARK: - Lookup
 
     /// All command names that have custom help content.
     public static let supportedCommands: Set<String> = [
         "query", "create", "update", "delete", "lists",
-        "create-list", "export", "snapshot", "mcp",
+        "create-list", "export", "snapshot", "audit", "mcp",
     ]
 
     /// Get concise help for a command (or top-level if nil).
@@ -698,6 +761,7 @@ public enum HelpContent {
         case "create-list": return createListConcise
         case "export": return exportConcise
         case "snapshot": return snapshotConcise
+        case "audit": return auditConcise
         case "mcp": return mcpConcise
         default: return nil
         }
@@ -715,6 +779,7 @@ public enum HelpContent {
         case "create-list": return createListVerbose
         case "export": return exportVerbose
         case "snapshot": return snapshotVerbose
+        case "audit": return auditVerbose
         case "mcp": return mcpVerbose
         default: return nil
         }
@@ -732,6 +797,7 @@ public enum HelpContent {
         case "create-list": return createListSkill
         case "export": return exportSkill
         case "snapshot": return snapshotSkill
+        case "audit": return auditSkill
         case "mcp": return mcpSkill
         default: return nil
         }
