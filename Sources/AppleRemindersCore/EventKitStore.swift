@@ -311,9 +311,9 @@ public class EKReminderStore: ReminderStore {
     }
 
     /// Create a new reminder in the specified calendar
-    public func createReminder(in calendar: ReminderCalendar) -> Reminder {
+    public func createReminder(in calendar: ReminderCalendar) throws -> Reminder {
         guard let wrapper = calendar as? EKCalendarWrapper else {
-            fatalError("Invalid calendar type")
+            throw RemindersError("Invalid calendar type")
         }
         let reminder = EKReminder(eventStore: eventStore)
         reminder.calendar = wrapper.calendar

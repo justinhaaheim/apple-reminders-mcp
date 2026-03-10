@@ -159,7 +159,7 @@ public class MockReminderStore: ReminderStore {
     }
 
     /// Create a new reminder in the specified calendar
-    public func createReminder(in calendar: ReminderCalendar) -> Reminder {
+    public func createReminder(in calendar: ReminderCalendar) throws -> Reminder {
         let reminder = MockReminder(calendarId: calendar.id, store: self)
         return reminder
     }

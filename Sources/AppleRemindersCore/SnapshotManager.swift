@@ -135,9 +135,14 @@ public class SnapshotManager {
         )
     }
 
-    /// Show what changed since the last snapshot (git diff summary).
+    /// Show what changed in the last snapshot.
     public func getDiff() throws -> String {
-        return try runGit("diff", "--stat", "HEAD")
+        // Check if there's more than one commit
+        let count = Int(try runGit("rev-list", "--count", "HEAD").trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        if count < 2 {
+            return "Only one snapshot exists — no previous snapshot to compare against."
+        }
+        return try runGit("show", "--stat", "--format=%s%n", "HEAD")
     }
 
     // MARK: - Private Helpers
@@ -181,23 +186,26 @@ public class SnapshotManager {
         process.arguments = args
         process.currentDirectoryURL = URL(fileURLWithPath: repoPath)
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
 
         try process.run()
         process.waitUntilExit()
 
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        let output = String(data: data, encoding: .utf8) ?? ""
+        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let output = String(data: stdoutData, encoding: .utf8) ?? ""
+        let errorOutput = String(data: stderrData, encoding: .utf8) ?? ""
 
         if process.terminationStatus != 0 {
-            // git diff --stat returns exit 0 even with no changes;
             // git commit returns exit 1 when nothing to commit — handle gracefully
-            if args.first == "commit" && output.contains("nothing to commit") {
+            if args.first == "commit" && (output + errorOutput).contains("nothing to commit") {
                 return "nothing to commit"
             }
-            throw RemindersError("git \(args.joined(separator: " ")) failed: \(output)")
+            let details = errorOutput.isEmpty ? output : errorOutput
+            throw RemindersError("git \(args.joined(separator: " ")) failed: \(details)")
         }
 
         return output

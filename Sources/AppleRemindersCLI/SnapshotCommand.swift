@@ -27,11 +27,9 @@ struct SnapshotTakeCommand: AsyncParsableCommand {
     var repo: String?
 
     func run() async throws {
-        let manager = try await createManager(options: globals)
         let store = createStore(mock: globals.mock)
+        _ = try await store.requestAccess()
         let snapshotManager = SnapshotManager(repoPath: repo, store: store)
-
-        // Request access first (manager already did this, but snapshot needs its own store)
         let result = try await snapshotManager.takeSnapshot()
         try outputJSON(result, pretty: globals.pretty)
     }

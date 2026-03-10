@@ -492,7 +492,7 @@ public class RemindersManager {
         }
 
         // Create reminder via the protocol
-        let reminder = store.createReminder(in: calendar)
+        let reminder = try store.createReminder(in: calendar)
 
         var mutableReminder = reminder
         mutableReminder.title = input.title
@@ -909,7 +909,7 @@ public class RemindersManager {
             exportDate: exportDate,
             stats: stats,
             fileSizeBytes: jsonData.count,
-            note: "File is in temp directory. Move it to a permanent location to keep it."
+            note: path == nil ? "File is in temp directory. Move it to a permanent location to keep it." : nil
         )
     }
 }

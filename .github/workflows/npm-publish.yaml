@@ -21,8 +21,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
       - name: Build universal binary
-        run: ./scripts/build-universal.sh --check
+        run: bun scripts/build-universal.ts --check
 
       - name: Sync version from root package.json
         run: |
@@ -35,11 +44,6 @@ jobs:
           " > package.json.tmp
           mv package.json.tmp package.json
           echo "Publishing version $VERSION"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Publish to npm
         if: github.event_name == 'release' || inputs.dry_run == 'false'
