@@ -17,6 +17,7 @@ struct Reminders: AsyncParsableCommand {
             DeleteCommand.self,
             ExportCommand.self,
             SnapshotCommand.self,
+            AuditCommand.self,
             MCPCommand.self,
         ],
         defaultSubcommand: QueryCommand.self

@@ -129,11 +129,22 @@ public class RemindersManager {
         let calendar = try store.createCalendar(name: name)
 
         log("Created reminder list '\(name)' with ID: \(calendar.id)")
-        return ReminderListOutput(
+
+        let output = ReminderListOutput(
             id: calendar.id,
             name: calendar.name,
             isDefault: false
         )
+
+        // Audit log
+        AuditLogger.shared.logCreate(
+            action: "create_list",
+            args: ["name": name],
+            result: .success,
+            response: encodeToDict(output)
+        )
+
+        return output
     }
 
     // MARK: - Query Operations
@@ -546,7 +557,17 @@ public class RemindersManager {
         try store.saveReminder(mutableReminder)
         log("Created reminder '\(input.title)' in list '\(calendar.name)'")
 
-        return convertToOutput(mutableReminder)
+        let output = convertToOutput(mutableReminder)
+
+        // Audit log
+        AuditLogger.shared.logCreate(
+            action: "create_reminder",
+            args: encodeToDict(input) ?? ["title": input.title],
+            result: .success,
+            response: encodeToDict(output)
+        )
+
+        return output
     }
 
     // MARK: - Update Operations
@@ -571,6 +592,9 @@ public class RemindersManager {
         guard var reminder = store.getReminder(withId: input.id) else {
             throw RemindersError("No reminder found with ID: '\(input.id)'")
         }
+
+        // Capture before-state for audit logging
+        let beforeState = encodeToDict(convertToOutput(reminder))
 
         let calendarName = reminder.getCalendarName(from: store)
 
@@ -699,7 +723,18 @@ public class RemindersManager {
         try store.saveReminder(reminder)
         log("Updated reminder '\(reminder.title)'")
 
-        return convertToOutput(reminder)
+        let output = convertToOutput(reminder)
+
+        // Audit log
+        AuditLogger.shared.logUpdate(
+            action: "update_reminder",
+            args: encodeToDict(input) ?? ["id": input.id],
+            result: .success,
+            response: encodeToDict(output),
+            beforeState: beforeState
+        )
+
+        return output
     }
 
     // MARK: - Input Parsing Helpers
@@ -792,6 +827,9 @@ public class RemindersManager {
             throw RemindersError("No reminder found with ID: '\(id)'")
         }
 
+        // Capture before-state for audit logging
+        let beforeState = encodeToDict(convertToOutput(reminder))
+
         let calendarName = reminder.getCalendarName(from: store)
 
         // Test mode validation
@@ -804,6 +842,14 @@ public class RemindersManager {
 
         try store.deleteReminder(reminder)
         log("Deleted reminder '\(reminder.title)'")
+
+        // Audit log
+        AuditLogger.shared.logDelete(
+            action: "delete_reminder",
+            args: ["id": id],
+            result: .success,
+            beforeState: beforeState
+        )
     }
 
     // MARK: - Export Operations
@@ -911,5 +957,17 @@ public class RemindersManager {
             fileSizeBytes: jsonData.count,
             note: path == nil ? "File is in temp directory. Move it to a permanent location to keep it." : nil
         )
+    }
+
+    // MARK: - Audit Helpers
+
+    /// Encode a Codable value to a [String: Any] dictionary for audit logging.
+    private func encodeToDict<T: Encodable>(_ value: T) -> [String: Any]? {
+        guard let data = try? JSONEncoder().encode(value),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+        return dict
     }
 }
