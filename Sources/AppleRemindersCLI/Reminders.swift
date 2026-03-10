@@ -7,7 +7,7 @@ struct Reminders: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "reminders",
         abstract: "Apple Reminders CLI — query, create, update, and manage reminders",
-        version: "0.1.0",
+        version: appVersion,
         subcommands: [
             QueryCommand.self,
             ListsCommand.self,

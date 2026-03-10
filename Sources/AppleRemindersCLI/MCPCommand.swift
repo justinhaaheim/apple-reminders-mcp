@@ -15,7 +15,15 @@ struct MCPCommand: AsyncParsableCommand {
         """
     )
 
+    @OptionGroup var globals: GlobalOptions
+
     func run() async throws {
+        if globals.mock {
+            setenv(MockModeConfig.envVar, "1", 1)
+        }
+        if globals.testMode {
+            setenv(TestModeConfig.envVar, "1", 1)
+        }
         let server = MCPServer()
         await server.start()
     }

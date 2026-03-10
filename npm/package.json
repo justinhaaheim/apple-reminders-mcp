@@ -12,7 +12,7 @@
   ],
   "bin": {
     "apple-reminders-mcp": "./bin/reminders",
-    "reminders": "./bin/reminders"
+    "apple-reminders": "./bin/reminders"
   },
   "files": [
     "bin/",

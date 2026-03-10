@@ -350,38 +350,47 @@ public enum Priority: String, CaseIterable {
 
 // MARK: - Date Formatting
 
+private let iso8601WithTimezoneFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXX"
+    f.timeZone = TimeZone.current
+    return f
+}()
+
+private let dateOnlyFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.dateFormat = "yyyy-MM-dd"
+    f.timeZone = TimeZone.current
+    return f
+}()
+
+private let iso8601WithFractionalSeconds: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return f
+}()
+
+private let iso8601Standard: ISO8601DateFormatter = {
+    let f = ISO8601DateFormatter()
+    f.formatOptions = [.withInternetDateTime]
+    return f
+}()
+
 extension Date {
     public func toISO8601WithTimezone() -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXX"
-        formatter.timeZone = TimeZone.current
-        return formatter.string(from: self)
+        return iso8601WithTimezoneFormatter.string(from: self)
     }
 
     public static func fromISO8601(_ string: String) -> Date? {
-        // Try with timezone offset first
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXX"
-        if let date = formatter.date(from: string) {
+        if let date = iso8601WithTimezoneFormatter.date(from: string) {
             return date
         }
-
-        // Try ISO8601 standard format
-        let iso8601Formatter = ISO8601DateFormatter()
-        iso8601Formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = iso8601Formatter.date(from: string) {
+        if let date = iso8601WithFractionalSeconds.date(from: string) {
             return date
         }
-
-        iso8601Formatter.formatOptions = [.withInternetDateTime]
-        if let date = iso8601Formatter.date(from: string) {
+        if let date = iso8601Standard.date(from: string) {
             return date
         }
-
-        // Try date-only format
-        let dateOnly = DateFormatter()
-        dateOnly.dateFormat = "yyyy-MM-dd"
-        dateOnly.timeZone = TimeZone.current
-        return dateOnly.date(from: string)
+        return dateOnlyFormatter.date(from: string)
     }
 }

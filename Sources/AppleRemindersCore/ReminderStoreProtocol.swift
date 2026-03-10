@@ -9,7 +9,7 @@ public protocol ReminderStore {
     func getAllCalendars() -> [ReminderCalendar]
     func getDefaultCalendar() -> ReminderCalendar?
     func createCalendar(name: String) throws -> ReminderCalendar
-    func createReminder(in calendar: ReminderCalendar) -> Reminder
+    func createReminder(in calendar: ReminderCalendar) throws -> Reminder
     func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder]
     func getReminder(withId id: String) -> Reminder?
     func saveReminder(_ reminder: Reminder) throws
@@ -30,7 +30,7 @@ public protocol ReminderCalendar {
 }
 
 /// Protocol-agnostic reminder representation
-public protocol Reminder {
+public protocol Reminder: AnyObject {
     var id: String { get }
     var title: String { get set }
     var notes: String? { get set }
