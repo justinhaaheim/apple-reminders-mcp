@@ -107,29 +107,14 @@ public class MCPServer {
         switch request.method {
         case "initialize":
             let instructions = """
-            Apple Reminders MCP Server - Access Apple Reminders with 7 powerful tools.
+            Apple Reminders MCP Server — Manage Apple Reminders on macOS.
 
-            TOOLS:
-            • query_reminders - Search and filter reminders (text search, date range, JMESPath)
-            • get_lists - Get all reminder lists
-            • create_list - Create a new list
-            • create_reminders - Create reminders with alarms, recurrence, URLs
-            • update_reminders - Update reminders (including mark complete/incomplete)
-            • delete_reminders - Delete reminders
-            • export_reminders - Export reminders to JSON file (for backup)
+            Call help(tool_name) for documentation on any tool.
+            Call help(tool_name, verbose=true) for comprehensive docs with examples.
+            Call guidance() for best practices and strategic usage patterns.
+            Call schema(tool_name) to inspect input/output schemas.
 
-            QUICK START:
-            1. Call query_reminders with {} to see incomplete reminders from default list
-            2. Use get_lists to see all available lists
-            3. Specify list by name: {"list": {"name": "Work"}}
-            4. Specify list by ID: {"list": {"id": "x-apple-..."}}
-            5. Search by text: {"searchText": "meeting"}
-            6. Search all lists: {"list": {"all": true}}
-
-            PRIORITY: Use "none", "low", "medium", or "high" (not numbers)
-            DATES: ISO 8601 with timezone, e.g., "2024-01-15T10:00:00-05:00"
-            ALARMS: [{"type": "relative", "offset": 3600}] (1 hour before)
-            RECURRENCE: {"frequency": "weekly", "interval": 1}
+            Quick start: query_reminders({}) returns incomplete reminders from the default list.
             """
 
             return MCPResponse(
@@ -215,78 +200,7 @@ public class MCPServer {
             // query_reminders
             MCPResponse.Result.Tool(
                 name: "query_reminders",
-                description: """
-                Query reminders from Apple Reminders.
-
-                **Default behavior (no parameters needed):**
-                - Searches DEFAULT LIST only
-                - Returns INCOMPLETE reminders only
-                - Sorted by NEWEST CREATED first
-                - Limited to 50 results
-                - Uses "compact" output (most useful fields, nulls omitted)
-
-                **Parameters (all optional):**
-
-                list — Which list to search. Omit for default list.
-                  • {"name": "Work"} → by exact name (case-insensitive)
-                  • {"id": "x-apple-..."} → by exact ID
-                  • {"all": true} → all lists
-
-                status — "incomplete" (default), "completed", or "all"
-
-                searchText — Case-insensitive text search across title and notes
-
-                dateFrom / dateTo — Date range filter (ISO 8601). For incomplete reminders filters by dueDate, for completed by completionDate.
-
-                sortBy — "newest" (default), "oldest", "priority", "dueDate"
-
-                query — JMESPath expression for advanced filtering (overrides sortBy and outputDetail — always uses full fields as input)
-
-                outputDetail — Controls which fields are returned:
-                  • "minimal" — id, title only (plus listName if searching all lists, isCompleted if status is "all")
-                  • "compact" (default) — id, title, notes, dueDate, priority, createdDate, lastModifiedDate (plus listName/isCompleted when contextually useful). Null fields omitted.
-                  • "full" — All fields always included, null values shown explicitly
-
-                limit — Max results (default 50, max 200)
-
-                **Examples:**
-
-                Recent incomplete from default list:
-                  {}
-
-                From specific list:
-                  {"list": {"name": "Work"}}
-
-                All lists, completed:
-                  {"list": {"all": true}, "status": "completed"}
-
-                Search by text:
-                  {"searchText": "meeting"}
-
-                Due this week:
-                  {"dateFrom": "2024-01-15T00:00:00-05:00", "dateTo": "2024-01-21T23:59:59-05:00"}
-
-                Full detail for debugging:
-                  {"outputDetail": "full"}
-
-                Minimal for quick overview:
-                  {"outputDetail": "minimal"}
-
-                High priority only:
-                  {"query": "[?priority == 'high']"}
-
-                Created today or later (via JMESPath):
-                  {"query": "[?createdDate >= '2024-01-15']"}
-
-                Modified in the last week (via JMESPath):
-                  {"query": "[?lastModifiedDate >= '2024-01-08']"}
-
-                **Reminder fields available in JMESPath (always full):**
-                - id, title, notes, listId, listName, isCompleted
-                - priority (string: "none", "low", "medium", "high")
-                - dueDate, dueDateIncludesTime, completionDate, createdDate, lastModifiedDate
-                - url, alarms, recurrenceRules
-                """,
+                description: "Search and filter reminders. Returns incomplete reminders from the default list by default. Supports list selection, text search, date ranges, status filtering, and JMESPath queries. Use help(\"query_reminders\") for full parameter docs.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -349,16 +263,7 @@ public class MCPServer {
             // get_lists
             MCPResponse.Result.Tool(
                 name: "get_lists",
-                description: """
-                Get all available reminder lists.
-
-                Returns list names, IDs, and which one is the default. Call this if you need to know what lists exist before querying reminders.
-
-                **Parameters:** None
-
-                **Example:**
-                  {}
-                """,
+                description: "Get all available reminder lists with names, IDs, and default indicator. No parameters needed.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([:]),
@@ -369,18 +274,7 @@ public class MCPServer {
             // create_list
             MCPResponse.Result.Tool(
                 name: "create_list",
-                description: """
-                Create a new reminder list.
-
-                **Parameters:**
-
-                name (required) — Name for the new list
-
-                **Example:**
-
-                Create a "Groceries" list:
-                  {"name": "Groceries"}
-                """,
+                description: "Create a new reminder list. Requires a name parameter.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "required": .array([.string("name")]),
@@ -397,43 +291,7 @@ public class MCPServer {
             // create_reminders
             MCPResponse.Result.Tool(
                 name: "create_reminders",
-                description: """
-                Create one or more reminders.
-
-                **Parameters:**
-
-                reminders — Array of reminder objects to create. Each object:
-                  • title (required) — Reminder title
-                  • notes — Body text
-                  • list — Target list as {"name": "..."} or {"id": "..."}. Default list if omitted.
-                  • dueDate — ISO 8601 datetime (e.g., "2024-01-15T10:00:00-05:00")
-                  • dueDateIncludesTime — Whether the due date has a specific time (default true). Set false for all-day reminders.
-                  • priority — "none", "low", "medium", or "high"
-                  • url — URL to associate with the reminder
-                  • alarms — Array of alarm objects: {"type": "relative", "offset": 3600} or {"type": "absolute", "date": "..."}
-                  • recurrenceRule — Recurrence rule: {"frequency": "daily|weekly|monthly|yearly", "interval": 1, ...}
-
-                **Examples:**
-
-                Single reminder:
-                  {"reminders": [{"title": "Buy milk"}]}
-
-                With details:
-                  {"reminders": [{"title": "Call dentist", "list": {"name": "Personal"}, "dueDate": "2024-01-20T09:00:00-05:00", "priority": "high"}]}
-
-                With alarm (1 hour before):
-                  {"reminders": [{"title": "Meeting", "dueDate": "2024-01-20T14:00:00-05:00", "alarms": [{"type": "relative", "offset": 3600}]}]}
-
-                Weekly recurrence:
-                  {"reminders": [{"title": "Team standup", "dueDate": "2024-01-20T09:00:00-05:00", "recurrenceRule": {"frequency": "weekly", "interval": 1, "daysOfWeek": [2, 3, 4, 5, 6]}}]}
-
-                Batch create:
-                  {"reminders": [
-                    {"title": "Buy milk"},
-                    {"title": "Buy eggs"},
-                    {"title": "Buy bread", "priority": "low"}
-                  ]}
-                """,
+                description: "Create one or more reminders with optional notes, due date, priority, alarms, recurrence, and URL. Supports batch creation. Use help(\"create_reminders\") for parameter details and examples.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "required": .array([.string("reminders")]),
@@ -562,61 +420,7 @@ public class MCPServer {
             // update_reminders
             MCPResponse.Result.Tool(
                 name: "update_reminders",
-                description: """
-                Update one or more reminders. Only specified fields are changed.
-
-                **Parameters:**
-
-                reminders — Array of update objects. Each object:
-                  • id (required) — Reminder ID to update
-                  • title — New title
-                  • notes — New notes (null to clear)
-                  • list — Move to list as {"name": "..."} or {"id": "..."}
-                  • dueDate — New due date as ISO 8601 (null to clear)
-                  • dueDateIncludesTime — Whether due date has specific time (false = all-day)
-                  • priority — "none", "low", "medium", or "high"
-                  • completed — true to complete, false to uncomplete
-                  • completedDate — ISO 8601 completion date (null to uncomplete)
-                  • url — URL to associate (null to clear)
-                  • alarms — Array of alarm objects (null to clear all alarms)
-                  • recurrenceRule — Recurrence rule object (null to clear)
-
-                **Examples:**
-
-                Update title:
-                  {"reminders": [{"id": "...", "title": "Buy oat milk"}]}
-
-                Move to different list:
-                  {"reminders": [{"id": "...", "list": {"name": "Groceries"}}]}
-
-                Complete a reminder:
-                  {"reminders": [{"id": "...", "completed": true}]}
-
-                Uncomplete a reminder:
-                  {"reminders": [{"id": "...", "completed": false}]}
-
-                Complete with specific date:
-                  {"reminders": [{"id": "...", "completedDate": "2024-01-15T10:00:00-05:00"}]}
-
-                Clear due date:
-                  {"reminders": [{"id": "...", "dueDate": null}]}
-
-                Add alarm:
-                  {"reminders": [{"id": "...", "alarms": [{"type": "relative", "offset": 1800}]}]}
-
-                Set weekly recurrence:
-                  {"reminders": [{"id": "...", "recurrenceRule": {"frequency": "weekly"}}]}
-
-                Clear recurrence:
-                  {"reminders": [{"id": "...", "recurrenceRule": null}]}
-
-                Batch update (complete multiple):
-                  {"reminders": [
-                    {"id": "abc", "completed": true},
-                    {"id": "def", "completed": true},
-                    {"id": "ghi", "completed": true}
-                  ]}
-                """,
+                description: "Update one or more reminders. Only specified fields are changed; omitted fields are preserved. Supports marking complete/incomplete, moving between lists, and clearing fields with null. Use help(\"update_reminders\") for parameter details.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "required": .array([.string("reminders")]),
@@ -729,21 +533,7 @@ public class MCPServer {
             // delete_reminders
             MCPResponse.Result.Tool(
                 name: "delete_reminders",
-                description: """
-                Delete one or more reminders permanently.
-
-                **Parameters:**
-
-                ids — Array of reminder IDs to delete
-
-                **Examples:**
-
-                Single delete:
-                  {"ids": ["abc123"]}
-
-                Batch delete:
-                  {"ids": ["abc123", "def456", "ghi789"]}
-                """,
+                description: "Delete one or more reminders permanently by ID. This action cannot be undone.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "required": .array([.string("ids")]),
@@ -764,41 +554,7 @@ public class MCPServer {
             // export_reminders
             MCPResponse.Result.Tool(
                 name: "export_reminders",
-                description: """
-                Export reminders to a JSON file for backup or data portability.
-
-                Writes all reminder data to a file without consuming LLM context tokens.
-                Default location is system temp directory; move the file to keep it permanently.
-
-                **Parameters (all optional):**
-
-                path — Custom file path (default: temp directory with timestamp)
-                  • Supports ~ for home directory
-                  • Example: "~/Desktop/my-backup.json"
-
-                lists — Array of lists to export (default: all lists)
-                  • Each item: {"name": "..."} or {"id": "..."}
-                  • Example: [{"name": "Work"}, {"name": "Personal"}]
-
-                includeCompleted — Include completed reminders (default: true)
-
-                **Examples:**
-
-                Export everything to temp:
-                  {}
-
-                Export to Desktop:
-                  {"path": "~/Desktop/reminders-backup.json"}
-
-                Export only incomplete reminders:
-                  {"includeCompleted": false}
-
-                Export specific lists:
-                  {"lists": [{"name": "Work"}, {"name": "Shopping"}]}
-
-                **File format:**
-                JSON with exportVersion, exportDate, stats, lists[], and reminders[].
-                """,
+                description: "Export reminders to a JSON file for backup. Writes data to a file instead of returning it in context. Optional path, list filter, and includeCompleted parameters.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -826,7 +582,64 @@ public class MCPServer {
                     ]),
                     "additionalProperties": .bool(false)
                 ])
-            )
+            ),
+
+            // Meta-tools for progressive disclosure
+
+            // help
+            MCPResponse.Result.Tool(
+                name: "help",
+                description: "Get documentation for any tool. Returns concise help by default, or comprehensive docs with verbose=true.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "required": .array([.string("tool_name")]),
+                    "properties": .object([
+                        "tool_name": .object([
+                            "type": .string("string"),
+                            "description": .string("Name of the tool to get help for (e.g., \"query_reminders\")")
+                        ]),
+                        "verbose": .object([
+                            "type": .string("boolean"),
+                            "default": .bool(false),
+                            "description": .string("Set true for comprehensive docs with examples")
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
+            ),
+
+            // schema
+            MCPResponse.Result.Tool(
+                name: "schema",
+                description: "Get the full JSON input schema for any tool. Use when you need to construct complex payloads.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "required": .array([.string("tool_name")]),
+                    "properties": .object([
+                        "tool_name": .object([
+                            "type": .string("string"),
+                            "description": .string("Name of the tool to get schema for")
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
+            ),
+
+            // guidance
+            MCPResponse.Result.Tool(
+                name: "guidance",
+                description: "Get strategic guidance and best practices for using Apple Reminders tools effectively. Optional topic to scope the guidance.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "topic": .object([
+                            "type": .string("string"),
+                            "description": .string("Optional topic: a tool name or general area (e.g., \"query_reminders\", \"mutations\", \"querying\")")
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
+            ),
         ]
     }
 
@@ -1042,9 +855,86 @@ public class MCPServer {
 
             return try toJSON(result)
 
+        // Meta-tools for progressive disclosure
+
+        case "help":
+            guard let toolName = arguments["tool_name"]?.value as? String else {
+                throw MCPToolError("Missing required field: 'tool_name'")
+            }
+            let verbose = arguments["verbose"]?.value as? Bool ?? false
+            return getToolHelp(toolName: toolName, verbose: verbose)
+
+        case "schema":
+            guard let toolName = arguments["tool_name"]?.value as? String else {
+                throw MCPToolError("Missing required field: 'tool_name'")
+            }
+            return try getToolSchema(toolName: toolName)
+
+        case "guidance":
+            let topic = arguments["topic"]?.value as? String
+            return getGuidance(topic: topic)
+
         default:
             throw MCPToolError("Unknown tool: \(name)")
         }
+    }
+
+    // MARK: - Meta-tool Implementations
+
+    /// Map MCP tool names to CLI command names for help lookup.
+    private static let toolToCommandMap: [String: String] = [
+        "query_reminders": "query",
+        "get_lists": "lists",
+        "create_list": "create-list",
+        "create_reminders": "create",
+        "update_reminders": "update",
+        "delete_reminders": "delete",
+        "export_reminders": "export",
+    ]
+
+    private func getToolHelp(toolName: String, verbose: Bool) -> String {
+        // Map MCP tool name to CLI command name
+        let commandName = Self.toolToCommandMap[toolName] ?? toolName
+
+        if verbose {
+            if let content = HelpContent.verbose(for: commandName) {
+                return content
+            }
+        } else {
+            if let content = HelpContent.concise(for: commandName) {
+                return content
+            }
+        }
+
+        let validTools = Self.toolToCommandMap.keys.sorted().joined(separator: ", ")
+        return "No help available for '\(toolName)'. Valid tools: \(validTools)"
+    }
+
+    private func getToolSchema(toolName: String) throws -> String {
+        let tools = getTools()
+        guard let tool = tools.first(where: { $0.name == toolName }) else {
+            let validTools = tools.map { $0.name }.filter { $0 != "help" && $0 != "schema" && $0 != "guidance" }.sorted().joined(separator: ", ")
+            throw MCPToolError("Unknown tool: '\(toolName)'. Valid tools: \(validTools)")
+        }
+
+        // Serialize the inputSchema to JSON
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(tool.inputSchema)
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    private func getGuidance(topic: String?) -> String {
+        // If a specific tool is requested, return its skill guidance
+        if let topic = topic {
+            let commandName = Self.toolToCommandMap[topic] ?? topic
+            if let content = HelpContent.skill(for: commandName) {
+                return content
+            }
+        }
+
+        // Return top-level skill guidance
+        return HelpContent.skill(for: nil) ?? "No guidance available."
     }
 
     /// Parses a JSON value into a Clearable: NSNull → .clear, castable T → .value(T), absent key → nil
