@@ -62,7 +62,10 @@ Sources/
 │   ├── RemindersManager.swift   # RemindersManager class (business logic)
 │   ├── MCPServer.swift          # MCPServer class (protocol handling, tool definitions)
 │   ├── MCPTypes.swift           # MCPRequest, MCPResponse, JSONValue, AnyCodable
-│   └── SnapshotManager.swift    # Git-backed snapshot system
+│   ├── SnapshotManager.swift    # Git-backed snapshot system
+│   ├── HelpContent.swift        # Tiered help content for all commands
+│   ├── HelpSystem.swift         # Pre-parse interception for --help flags
+│   └── AuditLogger.swift        # JSONL audit logger for mutations
 ├── AppleRemindersMCP/           # Standalone MCP server executable
 │   └── main.swift               # Entry point (delegates to MCPServer)
 └── AppleRemindersCLI/           # CLI executable
@@ -75,6 +78,7 @@ Sources/
     ├── DeleteCommand.swift      # reminders delete
     ├── ExportCommand.swift      # reminders export
     ├── SnapshotCommand.swift    # reminders snapshot [take|status|diff]
+    ├── AuditCommand.swift       # reminders audit
     └── MCPCommand.swift         # reminders mcp
 ```
 
@@ -89,6 +93,9 @@ Sources/
 | `update_reminders` | Update reminders including mark complete/incomplete (batch) |
 | `delete_reminders` | Delete reminders (batch) |
 | `export_reminders` | Export reminders to JSON file for backup |
+| `help` | Get documentation for any tool (MCP meta-tool) |
+| `schema` | Get JSON input schema for any tool (MCP meta-tool) |
+| `guidance` | Get strategic best practices (MCP meta-tool) |
 
 ## CLI Usage
 
@@ -116,8 +123,18 @@ reminders export --path ~/backup.json --include-completed
 reminders snapshot
 reminders snapshot status
 
+# View audit log of mutations
+reminders audit --pretty
+reminders audit --days 1 --pretty
+reminders audit --files --pretty
+
 # Start MCP server
 reminders mcp
+
+# Help system (progressive disclosure)
+reminders --help                    # Concise overview
+reminders query --help --verbose    # Comprehensive docs with examples
+reminders --help=skill              # Strategic guidance and best practices
 ```
 
 All commands output JSON to stdout. Use `--pretty` for human-readable output. Use `--mock` for testing.
