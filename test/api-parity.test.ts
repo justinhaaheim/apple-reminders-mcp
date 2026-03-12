@@ -534,16 +534,24 @@ describe('API Parity features', () => {
 
       const queryTool = tools.find((t) => t.name === 'query_reminders');
       expect(queryTool).toBeDefined();
-      expect(queryTool!.description).toContain('searchText');
-      expect(queryTool!.description).toContain('dateFrom');
-      expect(queryTool!.description).toContain('outputDetail');
+      expect(queryTool!.description).toContain('text search');
+      expect(queryTool!.description).toContain('date range');
+      expect(queryTool!.description).toContain('JMESPath');
+
+      // Verify parameters exist in the schema (progressive disclosure moved details to help tool)
+      const querySchema = queryTool!.inputSchema as any;
+      expect(querySchema.properties).toHaveProperty('searchText');
+      expect(querySchema.properties).toHaveProperty('dateFrom');
+      expect(querySchema.properties).toHaveProperty('outputDetail');
 
       const createTool = tools.find((t) => t.name === 'create_reminders');
       expect(createTool).toBeDefined();
-      expect(createTool!.description).toContain('url');
-      expect(createTool!.description).toContain('alarms');
-      expect(createTool!.description).toContain('recurrenceRule');
-      expect(createTool!.description).toContain('dueDateIncludesTime');
+      const createItemProps = (createTool!.inputSchema as any).properties
+        .reminders.items.properties;
+      expect(createItemProps).toHaveProperty('url');
+      expect(createItemProps).toHaveProperty('alarms');
+      expect(createItemProps).toHaveProperty('recurrenceRule');
+      expect(createItemProps).toHaveProperty('dueDateIncludesTime');
     });
   });
 });
