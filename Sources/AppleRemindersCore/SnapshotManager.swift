@@ -7,12 +7,14 @@ import Foundation
 /// and commits the state to a local git repository.
 public class SnapshotManager {
     private let repoPath: String
-    private let store: ReminderStore
+    private let store: ReminderStore?
 
     /// Default snapshot repository location
     public static let defaultRepoPath = "~/.config/apple-reminders-data"
 
-    public init(repoPath: String? = nil, store: ReminderStore) {
+    /// Create a SnapshotManager with a store (required for takeSnapshot).
+    /// For getStatus() and getDiff(), the store is not needed.
+    public init(repoPath: String? = nil, store: ReminderStore? = nil) {
         let path = repoPath
             ?? ProcessInfo.processInfo.environment["AR_SNAPSHOT_REPO"]
             ?? Self.defaultRepoPath
@@ -25,6 +27,9 @@ public class SnapshotManager {
     /// Take a full snapshot of all reminders.
     /// Returns a summary of what changed.
     public func takeSnapshot() async throws -> SnapshotResult {
+        guard let store = store else {
+            throw RemindersError("SnapshotManager requires a ReminderStore to take snapshots")
+        }
         let startTime = Date()
 
         // 1. Ensure repo exists and is initialized
@@ -47,25 +52,36 @@ public class SnapshotManager {
             )
         }
 
-        // 5. Clear data/id/ directory (clean slate)
+        // 5. Write reminders to a temp directory, then atomically swap
         let dataDir = (repoPath as NSString).appendingPathComponent("data/id")
-        if FileManager.default.fileExists(atPath: dataDir) {
-            try FileManager.default.removeItem(atPath: dataDir)
-        }
+        let tempDir = (repoPath as NSString).appendingPathComponent("data/.id-temp-\(UUID().uuidString)")
+
         try FileManager.default.createDirectory(
-            atPath: dataDir,
+            atPath: tempDir,
             withIntermediateDirectories: true
         )
 
-        // 6. Write each reminder as individual JSON file
+        // 6. Write each reminder as individual JSON file (to temp dir)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
-        for reminder in allReminders {
-            let output = convertToSnapshotOutput(reminder, calendars: calendars, defaultCalendar: defaultCalendar)
-            let jsonData = try encoder.encode(output)
-            let filePath = (dataDir as NSString).appendingPathComponent("\(reminder.id).json")
-            try jsonData.write(to: URL(fileURLWithPath: filePath))
+        do {
+            for reminder in allReminders {
+                let output = convertToSnapshotOutput(reminder, calendars: calendars, defaultCalendar: defaultCalendar, store: store)
+                let jsonData = try encoder.encode(output)
+                let filePath = (tempDir as NSString).appendingPathComponent("\(reminder.id).json")
+                try jsonData.write(to: URL(fileURLWithPath: filePath))
+            }
+
+            // Atomically replace: remove old dir, move temp into place
+            if FileManager.default.fileExists(atPath: dataDir) {
+                try FileManager.default.removeItem(atPath: dataDir)
+            }
+            try FileManager.default.moveItem(atPath: tempDir, toPath: dataDir)
+        } catch {
+            // Clean up temp dir on failure
+            try? FileManager.default.removeItem(atPath: tempDir)
+            throw error
         }
 
         // 7. Write lists.json
@@ -157,6 +173,9 @@ public class SnapshotManager {
 
         if !FileManager.default.fileExists(atPath: gitDir) {
             try runGit("init")
+            // Configure local git user so commits work even without global config
+            try runGit("config", "user.email", "noreply@apple-reminders-tools.local")
+            try runGit("config", "user.name", "Apple Reminders Tools")
             log("Initialized snapshot repository at \(repoPath)")
 
             // Create .gitignore
@@ -228,7 +247,8 @@ public class SnapshotManager {
     private func convertToSnapshotOutput(
         _ reminder: Reminder,
         calendars: [ReminderCalendar],
-        defaultCalendar: ReminderCalendar?
+        defaultCalendar: ReminderCalendar?,
+        store: ReminderStore
     ) -> SnapshotReminderOutput {
         let listName = reminder.getCalendarName(from: store)
 

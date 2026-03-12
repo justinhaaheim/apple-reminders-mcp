@@ -47,8 +47,7 @@ struct SnapshotStatusCommand: AsyncParsableCommand {
     var repo: String?
 
     func run() async throws {
-        let store = createStore(mock: globals.mock)
-        let snapshotManager = SnapshotManager(repoPath: repo, store: store)
+        let snapshotManager = SnapshotManager(repoPath: repo)
         let status = try snapshotManager.getStatus()
         try outputJSON(status, pretty: globals.pretty)
     }
@@ -66,8 +65,7 @@ struct SnapshotDiffCommand: AsyncParsableCommand {
     var repo: String?
 
     func run() async throws {
-        let store = createStore(mock: globals.mock)
-        let snapshotManager = SnapshotManager(repoPath: repo, store: store)
+        let snapshotManager = SnapshotManager(repoPath: repo)
         let diff = try snapshotManager.getDiff()
         print(diff)
     }
