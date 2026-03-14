@@ -52,9 +52,11 @@ public class SnapshotManager {
             )
         }
 
-        // 5. Write reminders to a temp directory, then atomically swap
+        // 5. Write reminders and lists to a temp directory, then atomically swap
         let dataDir = (repoPath as NSString).appendingPathComponent("data/id")
         let tempDir = (repoPath as NSString).appendingPathComponent("data/.id-temp-\(UUID().uuidString)")
+        let listsPath = (repoPath as NSString).appendingPathComponent("lists.json")
+        let tempListsPath = (repoPath as NSString).appendingPathComponent(".lists-temp-\(UUID().uuidString).json")
 
         try FileManager.default.createDirectory(
             atPath: tempDir,
@@ -73,21 +75,35 @@ public class SnapshotManager {
                 try jsonData.write(to: URL(fileURLWithPath: filePath))
             }
 
-            // Atomically replace: remove old dir, move temp into place
+            // 7. Write lists.json to temp file first
+            let listsData = try encoder.encode(listOutputs)
+            try listsData.write(to: URL(fileURLWithPath: tempListsPath))
+
+            // Atomically replace data/id directory using replaceItemAt for crash safety.
+            // replaceItemAt handles the swap atomically on APFS/HFS+, avoiding the
+            // window where dataDir doesn't exist between remove + move.
+            let dataDirURL = URL(fileURLWithPath: dataDir)
+            let tempDirURL = URL(fileURLWithPath: tempDir)
             if FileManager.default.fileExists(atPath: dataDir) {
-                try FileManager.default.removeItem(atPath: dataDir)
+                _ = try FileManager.default.replaceItemAt(dataDirURL, withItemAt: tempDirURL)
+            } else {
+                try FileManager.default.moveItem(atPath: tempDir, toPath: dataDir)
             }
-            try FileManager.default.moveItem(atPath: tempDir, toPath: dataDir)
+
+            // Atomically replace lists.json
+            let listsURL = URL(fileURLWithPath: listsPath)
+            let tempListsURL = URL(fileURLWithPath: tempListsPath)
+            if FileManager.default.fileExists(atPath: listsPath) {
+                _ = try FileManager.default.replaceItemAt(listsURL, withItemAt: tempListsURL)
+            } else {
+                try FileManager.default.moveItem(atPath: tempListsPath, toPath: listsPath)
+            }
         } catch {
-            // Clean up temp dir on failure
+            // Clean up temp files on failure
             try? FileManager.default.removeItem(atPath: tempDir)
+            try? FileManager.default.removeItem(atPath: tempListsPath)
             throw error
         }
-
-        // 7. Write lists.json
-        let listsPath = (repoPath as NSString).appendingPathComponent("lists.json")
-        let listsData = try encoder.encode(listOutputs)
-        try listsData.write(to: URL(fileURLWithPath: listsPath))
 
         // 8. Git add + commit
         let timestamp = Date().toISO8601WithTimezone()
