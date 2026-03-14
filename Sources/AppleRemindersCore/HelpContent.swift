@@ -375,7 +375,8 @@ public enum HelpContent {
     public static let updateSkill = """
     reminders update — Strategic Guidance
 
-    • Always query first to get the reminder ID. IDs look like x-apple-reminder://...
+    • Always query first to get the reminder ID. Abbreviated ID prefixes are accepted
+      (e.g., '550e840' instead of the full UUID). If ambiguous, you'll be told to use more characters.
     • Only pass the fields you want to change. Omitted fields are preserved as-is.
     • Use --clear-notes / --clear-due-date / --clear-url to explicitly remove values.
       Don't pass empty strings — use the clear flags.

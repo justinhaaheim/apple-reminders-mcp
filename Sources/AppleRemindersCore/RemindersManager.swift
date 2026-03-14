@@ -147,6 +147,58 @@ public class RemindersManager {
         return output
     }
 
+    // MARK: - ID Resolution
+
+    /// Resolves a potentially abbreviated reminder ID to a full Reminder object.
+    /// Tries exact match first (fast path), then falls back to prefix matching
+    /// across all reminders (like git's abbreviated commit hashes).
+    public func resolveReminder(id: String) async throws -> Reminder {
+        // Fast path: try exact match first
+        if let reminder = store.getReminder(withId: id) {
+            return reminder
+        }
+
+        // Normalize input: uppercase, strip dashes
+        let normalized = id.uppercased().replacingOccurrences(of: "-", with: "")
+
+        // Fetch all reminders to search for prefix match
+        let allReminders = await store.fetchReminders(in: store.getAllCalendars(), status: .all)
+        let matches = allReminders.filter { reminder in
+            let normalizedStored = reminder.id.uppercased().replacingOccurrences(of: "-", with: "")
+            return normalizedStored.hasPrefix(normalized)
+        }
+
+        switch matches.count {
+        case 0:
+            throw RemindersError("No reminder found with ID: '\(id)'")
+        case 1:
+            return matches[0]
+        default:
+            let ids = matches.map { $0.id }.joined(separator: "\n  ")
+            throw RemindersError("Ambiguous ID prefix '\(id)' matches \(matches.count) reminders:\n  \(ids)")
+        }
+    }
+
+    /// Computes the shortest unique prefix for each ID in a set.
+    /// Returns a mapping from full ID to abbreviated ID (lowercase, no dashes).
+    /// Uses a minimum length of 7 characters (matching git convention).
+    public static func computeShortIds(for ids: [String], minLength: Int = 7) -> [String: String] {
+        let stripped = ids.map { $0.uppercased().replacingOccurrences(of: "-", with: "") }
+        var result: [String: String] = [:]
+
+        for (i, fullId) in ids.enumerated() {
+            var length = minLength
+            while length < stripped[i].count {
+                let prefix = String(stripped[i].prefix(length))
+                let conflicts = stripped.filter { $0.hasPrefix(prefix) }
+                if conflicts.count == 1 { break }
+                length += 1
+            }
+            result[fullId] = String(stripped[i].prefix(length)).lowercased()
+        }
+        return result
+    }
+
     // MARK: - Query Operations
 
     public func queryReminders(
@@ -325,8 +377,21 @@ public class RemindersManager {
         let omitListName = isSingleList && outputDetail != "full"
         let omitIsCompleted = (statusFilter == .incomplete || statusFilter == .completed) && outputDetail != "full"
 
+        // Compute short IDs for the result set
+        let allIds = reminders.map { $0.id }
+        let shortIdMap = Self.computeShortIds(for: allIds)
+
         return reminders.map { reminder in
             var dict = buildFullDict(reminder)
+
+            // Apply short IDs based on detail level
+            if outputDetail == "full" {
+                // Full detail: keep full id, add shortId
+                dict["shortId"] = shortIdMap[reminder.id] ?? reminder.id
+            } else {
+                // Compact/minimal: replace id with short form
+                dict["id"] = shortIdMap[reminder.id] ?? reminder.id
+            }
 
             // Filter to allowed fields if not "full"
             if let allowed = allowedFields {
@@ -572,13 +637,13 @@ public class RemindersManager {
 
     // MARK: - Update Operations
 
-    public func updateReminders(inputs: [UpdateReminderInput]) -> (updated: [ReminderOutput], failed: [(id: String, error: String)]) {
+    public func updateReminders(inputs: [UpdateReminderInput]) async -> (updated: [ReminderOutput], failed: [(id: String, error: String)]) {
         var updated: [ReminderOutput] = []
         var failed: [(id: String, error: String)] = []
 
         for input in inputs {
             do {
-                let output = try updateSingleReminder(input)
+                let output = try await updateSingleReminder(input)
                 updated.append(output)
             } catch {
                 failed.append((id: input.id, error: error.localizedDescription))
@@ -588,10 +653,8 @@ public class RemindersManager {
         return (updated, failed)
     }
 
-    private func updateSingleReminder(_ input: UpdateReminderInput) throws -> ReminderOutput {
-        guard var reminder = store.getReminder(withId: input.id) else {
-            throw RemindersError("No reminder found with ID: '\(input.id)'")
-        }
+    private func updateSingleReminder(_ input: UpdateReminderInput) async throws -> ReminderOutput {
+        var reminder = try await resolveReminder(id: input.id)
 
         // Capture before-state for audit logging
         let beforeState = encodeToDict(convertToOutput(reminder))
@@ -806,13 +869,13 @@ public class RemindersManager {
 
     // MARK: - Delete Operations
 
-    public func deleteReminders(ids: [String]) -> (deleted: [String], failed: [(id: String, error: String)]) {
+    public func deleteReminders(ids: [String]) async -> (deleted: [String], failed: [(id: String, error: String)]) {
         var deleted: [String] = []
         var failed: [(id: String, error: String)] = []
 
         for id in ids {
             do {
-                try deleteSingleReminder(id: id)
+                try await deleteSingleReminder(id: id)
                 deleted.append(id)
             } catch {
                 failed.append((id: id, error: error.localizedDescription))
@@ -822,10 +885,8 @@ public class RemindersManager {
         return (deleted, failed)
     }
 
-    private func deleteSingleReminder(id: String) throws {
-        guard let reminder = store.getReminder(withId: id) else {
-            throw RemindersError("No reminder found with ID: '\(id)'")
-        }
+    private func deleteSingleReminder(id: String) async throws {
+        let reminder = try await resolveReminder(id: id)
 
         // Capture before-state for audit logging
         let beforeState = encodeToDict(convertToOutput(reminder))

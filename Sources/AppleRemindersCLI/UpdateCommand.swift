@@ -108,7 +108,7 @@ struct UpdateCommand: AsyncParsableCommand {
             url: urlValue
         )
 
-        let result = manager.updateReminders(inputs: [input])
+        let result = await manager.updateReminders(inputs: [input])
 
         if !result.failed.isEmpty {
             for failure in result.failed {

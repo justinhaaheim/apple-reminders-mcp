@@ -20,7 +20,7 @@ struct DeleteCommand: AsyncParsableCommand {
         }
 
         let manager = try await createManager(options: globals)
-        let result = manager.deleteReminders(ids: ids)
+        let result = await manager.deleteReminders(ids: ids)
 
         var output: [String: Any] = [
             "deleted": result.deleted,
