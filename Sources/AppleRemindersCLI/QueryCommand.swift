@@ -28,8 +28,11 @@ struct QueryCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Sort by: newest, oldest, priority, dueDate")
     var sort: String?
 
-    @Option(name: .long, help: "Maximum number of results (default: 50, max: 200)")
+    @Option(name: .long, help: "Maximum number of results")
     var limit: Int?
+
+    @Option(name: .long, help: "Number of results to skip (for pagination)")
+    var offset: Int?
 
     @Option(name: .long, help: "Date range start (ISO 8601)")
     var from: String?
@@ -63,6 +66,7 @@ struct QueryCommand: AsyncParsableCommand {
             sortBy: sort,
             query: jmespath,
             limit: limit,
+            offset: offset,
             searchText: search,
             dateFrom: from,
             dateTo: to,

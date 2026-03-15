@@ -207,6 +207,7 @@ public class RemindersManager {
         sortBy: String?,
         query: String?,
         limit: Int?,
+        offset: Int?,
         searchText: String?,
         dateFrom: String?,
         dateTo: String?,
@@ -298,12 +299,17 @@ public class RemindersManager {
         if let jmesQuery = query, !jmesQuery.isEmpty {
             do {
                 let result = try applyJMESPath(reminderOutputs, query: jmesQuery)
-                // Apply limit after JMESPath
-                let maxResults = min(limit ?? 50, 200)
+                // Apply offset and limit after JMESPath
                 if let arrayResult = result as? [Any] {
-                    let limited = Array(arrayResult.prefix(maxResults))
-                    log("JMESPath returned \(arrayResult.count) items, limited to \(limited.count)")
-                    return limited
+                    var sliced = arrayResult
+                    if let offset = offset, offset > 0 {
+                        sliced = Array(sliced.dropFirst(offset))
+                    }
+                    if let limit = limit, limit > 0 {
+                        sliced = Array(sliced.prefix(limit))
+                    }
+                    log("JMESPath returned \(arrayResult.count) items, returning \(sliced.count)")
+                    return sliced
                 }
                 return result
             } catch {
@@ -315,10 +321,12 @@ public class RemindersManager {
         let sortOrder = sortBy ?? "newest"
         reminderOutputs = applySorting(reminderOutputs, sortBy: sortOrder)
 
-        // 5. Apply limit
-        let maxResults = min(limit ?? 50, 200)
-        if reminderOutputs.count > maxResults {
-            reminderOutputs = Array(reminderOutputs.prefix(maxResults))
+        // 5. Apply offset and limit
+        if let offset = offset, offset > 0 {
+            reminderOutputs = Array(reminderOutputs.dropFirst(offset))
+        }
+        if let limit = limit, limit > 0 {
+            reminderOutputs = Array(reminderOutputs.prefix(limit))
         }
 
         let totalTime = Date().timeIntervalSince(startTime)

@@ -150,7 +150,8 @@ public enum HelpContent {
       --status <string>     incomplete (default), completed, or all
       --search <string>     Text search in titles and notes
       --sort <string>       newest (default), oldest, priority, dueDate
-      --limit <int>         Max results (default: 50, max: 200)
+      --limit <int>         Max results (returns all if omitted)
+      --offset <int>        Skip N results (for pagination)
       --from <date>         Date range start (ISO 8601 or YYYY-MM-DD)
       --to <date>           Date range end (ISO 8601 or YYYY-MM-DD)
       --jmespath <expr>     JMESPath query expression
@@ -173,7 +174,8 @@ public enum HelpContent {
       --status <string>     incomplete (default), completed, or all
       --search <string>     Text search in titles and notes
       --sort <string>       newest (default), oldest, priority, dueDate
-      --limit <int>         Max results (default: 50, max: 200)
+      --limit <int>         Max results (returns all if omitted)
+      --offset <int>        Skip N results (for pagination)
       --from <date>         Date range start (ISO 8601 or YYYY-MM-DD)
       --to <date>           Date range end (ISO 8601 or YYYY-MM-DD)
       --jmespath <expr>     JMESPath query expression
@@ -181,7 +183,7 @@ public enum HelpContent {
 
     Default Behavior (no options):
       Returns incomplete reminders from the default list, sorted by newest
-      created first, limited to 50 results, using compact output detail.
+      created first, using compact output detail.
 
     Detail Levels:
       minimal   id, title only (plus listName if --all-lists, isCompleted if --status all)
@@ -205,6 +207,7 @@ public enum HelpContent {
       reminders query --all-lists --status all --detail full   # Everything
       reminders query --list "Work" --search "standup"         # Search within a list
       reminders query --sort dueDate --limit 10                # Upcoming due dates
+      reminders query --sort dueDate --limit 10 --offset 10    # Next page
       reminders query --status completed --from "2026-03-01"   # Recently completed
       reminders query --all-lists --jmespath "[?priority=='high'].title"
 
@@ -225,7 +228,7 @@ public enum HelpContent {
     • Default query (no args) is often sufficient — it returns incomplete reminders
       from the default list. Don't add flags unless you need to narrow or expand.
     • For completed reminders, date filtering uses completionDate, not dueDate.
-    • --limit defaults to 50. If you expect many results, increase it or paginate.
+    • All results are returned by default. Use --limit and --offset for pagination.
     """
 
     // MARK: - Create

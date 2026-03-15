@@ -132,6 +132,76 @@ describe('Query operations', () => {
       expect((result as Array<unknown>).length).toBe(2);
     });
 
+    test('returns all results when no limit specified', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      // Should return all reminders in the test list (at least 3 were created in setup)
+      expect((result as Array<unknown>).length).toBeGreaterThanOrEqual(3);
+    });
+
+    test('respects offset parameter', async () => {
+      // Get all results first
+      const allResults = await client.callTool('query_reminders', {
+        list: {name: testListName},
+      });
+      expect(Array.isArray(allResults)).toBe(true);
+      const allReminders = allResults as Array<{id: string}>;
+      const totalCount = allReminders.length;
+
+      // Get results with offset
+      const offsetResult = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        offset: 1,
+      });
+      expect(Array.isArray(offsetResult)).toBe(true);
+      const offsetReminders = offsetResult as Array<{id: string}>;
+      expect(offsetReminders.length).toBe(totalCount - 1);
+
+      // The first result with offset should match the second result without offset
+      expect(offsetReminders[0].id).toBe(allReminders[1].id);
+    });
+
+    test('respects offset and limit together for pagination', async () => {
+      // Get all results first
+      const allResults = await client.callTool('query_reminders', {
+        list: {name: testListName},
+      });
+      expect(Array.isArray(allResults)).toBe(true);
+      const allReminders = allResults as Array<{id: string}>;
+
+      // Get page 1 (first 2 results)
+      const page1 = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 2,
+        offset: 0,
+      });
+      expect(Array.isArray(page1)).toBe(true);
+      const page1Reminders = page1 as Array<{id: string}>;
+      expect(page1Reminders.length).toBe(2);
+
+      // Get page 2 (next 2 results)
+      const page2 = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        limit: 2,
+        offset: 2,
+      });
+      expect(Array.isArray(page2)).toBe(true);
+      const page2Reminders = page2 as Array<{id: string}>;
+
+      // Page 1 and page 2 should have different reminders
+      const page1Ids = new Set(page1Reminders.map((r) => r.id));
+      for (const r of page2Reminders) {
+        expect(page1Ids.has(r.id)).toBe(false);
+      }
+
+      // Combined pages should match the all results
+      expect(page1Reminders[0].id).toBe(allReminders[0].id);
+      expect(page1Reminders[1].id).toBe(allReminders[1].id);
+    });
+
     test('filters completed reminders', async () => {
       // First, complete one reminder
       const queryResult = await client.callTool('query_reminders', {

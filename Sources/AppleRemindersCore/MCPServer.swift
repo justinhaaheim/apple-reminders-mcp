@@ -251,9 +251,12 @@ public class MCPServer {
                         "limit": .object([
                             "type": .string("integer"),
                             "minimum": .int(1),
-                            "maximum": .int(200),
-                            "default": .int(50),
-                            "description": .string("Maximum results to return")
+                            "description": .string("Maximum results to return. If omitted, all matching results are returned.")
+                        ]),
+                        "offset": .object([
+                            "type": .string("integer"),
+                            "minimum": .int(0),
+                            "description": .string("Number of results to skip (for pagination). Applied after sorting, before limit.")
                         ])
                     ]),
                     "additionalProperties": .bool(false)
@@ -664,6 +667,7 @@ public class MCPServer {
             let sortBy = arguments["sortBy"]?.value as? String
             let query = arguments["query"]?.value as? String
             let limit = arguments["limit"]?.value as? Int
+            let offset = arguments["offset"]?.value as? Int
             let searchText = arguments["searchText"]?.value as? String
             let dateFrom = arguments["dateFrom"]?.value as? String
             let dateTo = arguments["dateTo"]?.value as? String
@@ -675,6 +679,7 @@ public class MCPServer {
                 sortBy: sortBy,
                 query: query,
                 limit: limit,
+                offset: offset,
                 searchText: searchText,
                 dateFrom: dateFrom,
                 dateTo: dateTo,
