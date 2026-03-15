@@ -175,11 +175,11 @@ public class AuditLogger {
             // Append to file
             if FileManager.default.fileExists(atPath: fileURL.path) {
                 let fileHandle = try FileHandle(forWritingTo: fileURL)
+                defer { fileHandle.closeFile() }
                 fileHandle.seekToEndOfFile()
                 if let data = jsonString.data(using: .utf8) {
                     fileHandle.write(data)
                 }
-                fileHandle.closeFile()
             } else {
                 try jsonString.write(to: fileURL, atomically: true, encoding: .utf8)
             }

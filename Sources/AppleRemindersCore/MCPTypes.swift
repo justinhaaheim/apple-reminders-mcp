@@ -192,30 +192,16 @@ struct AnyCodable: Codable {
     }
 }
 
-// MARK: - Validation Error
-
-struct MCPToolError: Error, LocalizedError {
-    let message: String
-
-    init(_ message: String) {
-        self.message = message
-    }
-
-    var errorDescription: String? {
-        return message
-    }
-}
-
 // MARK: - AnyEncodable Helper
 
-struct AnyEncodable: Encodable {
+public struct AnyEncodable: Encodable {
     private let encodable: Encodable
 
-    init(_ encodable: Encodable) {
+    public init(_ encodable: Encodable) {
         self.encodable = encodable
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         try encodable.encode(to: encoder)
     }
 }

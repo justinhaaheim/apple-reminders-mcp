@@ -79,18 +79,18 @@ public class MCPServer {
     private func handleRequest(_ line: String) async {
         guard let data = line.data(using: .utf8) else { return }
 
-        var requestId: MCPRequest.RequestID?
-        if let partialRequest = try? JSONDecoder().decode(MCPRequest.self, from: data) {
-            requestId = partialRequest.id
-        }
-
         do {
             let request = try JSONDecoder().decode(MCPRequest.self, from: data)
-            let response = try await processRequest(request)
-            sendResponse(response)
+            do {
+                let response = try await processRequest(request)
+                sendResponse(response)
+            } catch {
+                logError("Error processing request: \(error)")
+                sendErrorResponse(id: request.id, code: -32603, message: error.localizedDescription)
+            }
         } catch {
-            logError("Error processing request: \(error)")
-            sendErrorResponse(id: requestId ?? .int(-1), code: -32603, message: error.localizedDescription)
+            logError("Error decoding request: \(error)")
+            sendErrorResponse(id: .int(-1), code: -32700, message: "Parse error: \(error.localizedDescription)")
         }
     }
 
@@ -128,7 +128,7 @@ public class MCPServer {
                     ),
                     serverInfo: MCPResponse.Result.ServerInfo(
                         name: "apple-reminders",
-                        version: "2.0.0"
+                        version: appVersion
                     ),
                     instructions: instructions,
                     isError: nil
@@ -154,7 +154,7 @@ public class MCPServer {
         case "tools/call":
             guard let params = request.params,
                   let toolName = params.name else {
-                throw MCPToolError("Missing tool name")
+                throw RemindersError("Missing tool name")
             }
 
             do {
@@ -191,7 +191,7 @@ public class MCPServer {
             }
 
         default:
-            throw MCPToolError("Unknown method: \(request.method)")
+            throw RemindersError("Unknown method: \(request.method)")
         }
     }
 
@@ -651,7 +651,7 @@ public class MCPServer {
 
         case "create_list":
             guard let listName = arguments["name"]?.value as? String else {
-                throw MCPToolError("Missing required field: 'name'")
+                throw RemindersError("Missing required field: 'name'")
             }
             let createdList = try remindersManager.createList(name: listName)
             await autoSnapshot(reason: "create_list")
@@ -685,13 +685,13 @@ public class MCPServer {
 
         case "create_reminders":
             guard let remindersArray = arguments["reminders"]?.value as? [[String: Any]] else {
-                throw MCPToolError("Missing required field: 'reminders'")
+                throw RemindersError("Missing required field: 'reminders'")
             }
 
             var inputs: [CreateReminderInput] = []
             for (index, dict) in remindersArray.enumerated() {
                 guard let title = dict["title"] as? String else {
-                    throw MCPToolError("Missing required field 'title' in reminder at index \(index)")
+                    throw RemindersError("Missing required field 'title' in reminder at index \(index)")
                 }
                 // Parse alarm inputs
                 var alarmInputs: [AlarmInput]? = nil
@@ -749,13 +749,13 @@ public class MCPServer {
 
         case "update_reminders":
             guard let remindersArray = arguments["reminders"]?.value as? [[String: Any]] else {
-                throw MCPToolError("Missing required field: 'reminders'")
+                throw RemindersError("Missing required field: 'reminders'")
             }
 
             var inputs: [UpdateReminderInput] = []
             for (index, dict) in remindersArray.enumerated() {
                 guard let id = dict["id"] as? String else {
-                    throw MCPToolError("Missing required field 'id' in reminder at index \(index)")
+                    throw RemindersError("Missing required field 'id' in reminder at index \(index)")
                 }
                 // Parse alarm inputs if present
                 var alarmsClearable: Clearable<[AlarmInput]>? = nil
@@ -824,7 +824,7 @@ public class MCPServer {
 
         case "delete_reminders":
             guard let ids = arguments["ids"]?.value as? [String] else {
-                throw MCPToolError("Missing required field: 'ids'")
+                throw RemindersError("Missing required field: 'ids'")
             }
 
             let (deleted, failed) = remindersManager.deleteReminders(ids: ids)
@@ -859,14 +859,14 @@ public class MCPServer {
 
         case "help":
             guard let toolName = arguments["tool_name"]?.value as? String else {
-                throw MCPToolError("Missing required field: 'tool_name'")
+                throw RemindersError("Missing required field: 'tool_name'")
             }
             let verbose = arguments["verbose"]?.value as? Bool ?? false
             return getToolHelp(toolName: toolName, verbose: verbose)
 
         case "schema":
             guard let toolName = arguments["tool_name"]?.value as? String else {
-                throw MCPToolError("Missing required field: 'tool_name'")
+                throw RemindersError("Missing required field: 'tool_name'")
             }
             return try getToolSchema(toolName: toolName)
 
@@ -875,7 +875,7 @@ public class MCPServer {
             return getGuidance(topic: topic)
 
         default:
-            throw MCPToolError("Unknown tool: \(name)")
+            throw RemindersError("Unknown tool: \(name)")
         }
     }
 
@@ -914,7 +914,7 @@ public class MCPServer {
         let tools = getTools()
         guard let tool = tools.first(where: { $0.name == toolName }) else {
             let validTools = tools.map { $0.name }.filter { $0 != "help" && $0 != "schema" && $0 != "guidance" }.sorted().joined(separator: ", ")
-            throw MCPToolError("Unknown tool: '\(toolName)'. Valid tools: \(validTools)")
+            throw RemindersError("Unknown tool: '\(toolName)'. Valid tools: \(validTools)")
         }
 
         // Serialize the inputSchema to JSON
@@ -1001,14 +1001,14 @@ public class MCPServer {
             encoder.outputFormatting = .prettyPrinted
             let data = try encoder.encode(AnyEncodable(encodable))
             guard let string = String(data: data, encoding: .utf8) else {
-                throw MCPToolError("Failed to convert to JSON string")
+                throw RemindersError("Failed to convert to JSON string")
             }
             return string
         }
 
         let data = try JSONSerialization.data(withJSONObject: object, options: .prettyPrinted)
         guard let string = String(data: data, encoding: .utf8) else {
-            throw MCPToolError("Failed to convert to JSON string")
+            throw RemindersError("Failed to convert to JSON string")
         }
         return string
     }

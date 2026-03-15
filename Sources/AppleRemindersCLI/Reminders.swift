@@ -102,16 +102,3 @@ func outputJSON(_ value: Any, pretty: Bool) throws {
     }
 }
 
-// MARK: - AnyEncodable wrapper for CLI
-
-private struct AnyEncodable: Encodable {
-    private let encodable: Encodable
-
-    init(_ encodable: Encodable) {
-        self.encodable = encodable
-    }
-
-    func encode(to encoder: Encoder) throws {
-        try encodable.encode(to: encoder)
-    }
-}

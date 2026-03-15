@@ -176,7 +176,7 @@ public struct ExportResult: Codable {
 
 // MARK: - Input Types
 
-public struct ListSelector {
+public struct ListSelector: Encodable {
     public let name: String?
     public let id: String?
     public let all: Bool?
@@ -211,7 +211,19 @@ public enum Clearable<T> {
     case clear
 }
 
-public struct AlarmInput {
+extension Clearable: Encodable where T: Encodable {
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .value(let val):
+            try container.encode(val)
+        case .clear:
+            try container.encodeNil()
+        }
+    }
+}
+
+public struct AlarmInput: Encodable {
     public let type: String          // "absolute" or "relative"
     public let date: String?         // ISO 8601 for absolute alarms
     public let offset: Int?          // seconds before due date for relative alarms
@@ -223,7 +235,7 @@ public struct AlarmInput {
     }
 }
 
-public struct RecurrenceRuleInput {
+public struct RecurrenceRuleInput: Encodable {
     public let frequency: String     // "daily", "weekly", "monthly", "yearly"
     public let interval: Int?        // default 1
     public let daysOfWeek: [Int]?
@@ -250,7 +262,7 @@ public struct RecurrenceRuleInput {
     }
 }
 
-public struct CreateReminderInput {
+public struct CreateReminderInput: Encodable {
     public let title: String
     public let notes: String?
     public let list: ListSelector?
@@ -279,7 +291,7 @@ public struct CreateReminderInput {
     }
 }
 
-public struct UpdateReminderInput {
+public struct UpdateReminderInput: Encodable {
     public let id: String
     public let title: String?
     public let notes: Clearable<String>?
