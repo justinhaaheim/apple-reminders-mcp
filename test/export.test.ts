@@ -4,7 +4,7 @@
  */
 
 import {describe, test, expect, beforeAll, afterAll} from 'bun:test';
-import {MCPClient} from './mcp-client';
+import {MCPClient, extractReminders} from './mcp-client';
 
 describe('export_reminders', () => {
   let client: MCPClient;
@@ -37,7 +37,7 @@ describe('export_reminders', () => {
       list: {name: testListName},
       query: "[?title == 'Export Test 1']",
     });
-    const reminders = queryResult as Array<{id: string}>;
+    const reminders = extractReminders<{id: string}>(queryResult);
     await client.callTool('update_reminders', {
       reminders: [{id: reminders[0].id, completed: true}],
     });

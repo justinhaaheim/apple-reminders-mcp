@@ -248,12 +248,14 @@ public class MCPServer {
                             "default": .string("compact"),
                             "description": .string("Controls which fields are returned. 'minimal': id, title. 'compact' (default): most useful fields, nulls omitted. 'full': all fields, nulls shown. Ignored when 'query' (JMESPath) is provided. listName and isCompleted are contextually omitted in minimal/compact when implied by query params.")
                         ]),
-                        "limit": .object([
+                        "perPage": .object([
                             "type": .string("integer"),
                             "minimum": .int(1),
-                            "maximum": .int(200),
-                            "default": .int(50),
-                            "description": .string("Maximum results to return")
+                            "description": .string("Results per page. Omit to return all (auto-paginates at 200).")
+                        ]),
+                        "cursor": .object([
+                            "type": .string("string"),
+                            "description": .string("Opaque cursor from previous response's pageInfo.endCursor for next page.")
                         ])
                     ]),
                     "additionalProperties": .bool(false)
@@ -663,7 +665,8 @@ public class MCPServer {
             let status = arguments["status"]?.value as? String
             let sortBy = arguments["sortBy"]?.value as? String
             let query = arguments["query"]?.value as? String
-            let limit = arguments["limit"]?.value as? Int
+            let perPage = arguments["perPage"]?.value as? Int
+            let cursor = arguments["cursor"]?.value as? String
             let searchText = arguments["searchText"]?.value as? String
             let dateFrom = arguments["dateFrom"]?.value as? String
             let dateTo = arguments["dateTo"]?.value as? String
@@ -674,7 +677,8 @@ public class MCPServer {
                 status: status,
                 sortBy: sortBy,
                 query: query,
-                limit: limit,
+                perPage: perPage,
+                cursor: cursor,
                 searchText: searchText,
                 dateFrom: dateFrom,
                 dateTo: dateTo,

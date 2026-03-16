@@ -6,7 +6,7 @@
  */
 
 import {describe, test, expect, beforeAll, afterAll} from 'bun:test';
-import {MCPClient} from './mcp-client';
+import {MCPClient, extractReminders} from './mcp-client';
 
 describe('CRUD operations (isolated to test list)', () => {
   let client: MCPClient;
@@ -71,8 +71,7 @@ describe('CRUD operations (isolated to test list)', () => {
       status: 'incomplete',
     });
 
-    expect(Array.isArray(result)).toBe(true);
-    const reminders = result as Array<{id: string; title: string}>;
+    const reminders = extractReminders<{id: string; title: string}>(result);
     expect(reminders.length).toBeGreaterThan(0);
   });
 

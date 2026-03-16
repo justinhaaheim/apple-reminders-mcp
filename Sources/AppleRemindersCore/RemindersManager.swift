@@ -206,7 +206,8 @@ public class RemindersManager {
         status: String?,
         sortBy: String?,
         query: String?,
-        limit: Int?,
+        perPage: Int?,
+        cursor: String?,
         searchText: String?,
         dateFrom: String?,
         dateTo: String?,
@@ -295,15 +296,13 @@ public class RemindersManager {
         var reminderOutputs = filteredReminders.map { convertToOutput($0) }
 
         // 3. Apply JMESPath if provided — always uses full fields, outputDetail is ignored
+        //    When JMESPath is used, return full result with no pagination (users can use JMESPath slicing)
         if let jmesQuery = query, !jmesQuery.isEmpty {
             do {
                 let result = try applyJMESPath(reminderOutputs, query: jmesQuery)
-                // Apply limit after JMESPath
-                let maxResults = min(limit ?? 50, 200)
                 if let arrayResult = result as? [Any] {
-                    let limited = Array(arrayResult.prefix(maxResults))
-                    log("JMESPath returned \(arrayResult.count) items, limited to \(limited.count)")
-                    return limited
+                    log("JMESPath returned \(arrayResult.count) items")
+                    return arrayResult
                 }
                 return result
             } catch {
@@ -315,19 +314,58 @@ public class RemindersManager {
         let sortOrder = sortBy ?? "newest"
         reminderOutputs = applySorting(reminderOutputs, sortBy: sortOrder)
 
-        // 5. Apply limit
-        let maxResults = min(limit ?? 50, 200)
-        if reminderOutputs.count > maxResults {
-            reminderOutputs = Array(reminderOutputs.prefix(maxResults))
+        // 5. Pagination
+        let totalCount = reminderOutputs.count
+        let autoPageSize = 200
+
+        // Decode cursor to get offset
+        let offset: Int
+        if let cursorString = cursor {
+            offset = try decodeCursor(cursorString)
+        } else {
+            offset = 0
         }
 
+        // Determine page size
+        let pageSize: Int
+        if let pp = perPage {
+            pageSize = pp
+        } else if totalCount > autoPageSize {
+            pageSize = autoPageSize
+        } else {
+            pageSize = totalCount
+        }
+
+        // Slice results
+        let sliceStart = min(offset, totalCount)
+        let sliceEnd = min(offset + pageSize, totalCount)
+        let pageReminders = Array(reminderOutputs[sliceStart..<sliceEnd])
+
+        let hasNextPage = sliceEnd < totalCount
+        let hasPreviousPage = offset > 0
+        let endCursor: String? = hasNextPage ? encodeCursor(offset: sliceEnd) : nil
+
+        let pageInfo = PageInfo(
+            hasNextPage: hasNextPage,
+            hasPreviousPage: hasPreviousPage,
+            endCursor: endCursor
+        )
+
         let totalTime = Date().timeIntervalSince(startTime)
-        log("Total query took \(Int(totalTime * 1000))ms, returning \(reminderOutputs.count) reminders")
+        log("Total query took \(Int(totalTime * 1000))ms, returning \(pageReminders.count) of \(totalCount) reminders")
 
         // 6. Apply outputDetail field filtering
         let detail = outputDetail ?? "compact"
         let isSingleList = list == nil || list?.all != true
-        return formatReminders(reminderOutputs, outputDetail: detail, isSingleList: isSingleList, statusFilter: reminderStatus)
+        let formattedReminders = formatReminders(pageReminders, outputDetail: detail, isSingleList: isSingleList, statusFilter: reminderStatus)
+
+        // 7. Build wrapper response
+        let response: [String: Any] = [
+            "reminders": formattedReminders,
+            "totalCount": totalCount,
+            "pageInfo": pageInfo.toDict(),
+        ]
+        return response
     }
 
     private func applyJMESPath(_ reminders: [ReminderOutput], query: String) throws -> Any {

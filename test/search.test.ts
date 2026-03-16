@@ -6,7 +6,7 @@
  */
 
 import {describe, test, expect, beforeAll, afterAll} from 'bun:test';
-import {MCPClient} from './mcp-client';
+import {MCPClient, extractReminders} from './mcp-client';
 
 describe('Query operations', () => {
   let client: MCPClient;
@@ -56,6 +56,7 @@ describe('Query operations', () => {
         query: "[?contains(title, 'Buy')]",
       });
 
+      // JMESPath returns raw array
       expect(Array.isArray(result)).toBe(true);
       const reminders = result as Array<{title: string}>;
       expect(reminders.length).toBe(2); // "Buy groceries" and "Buy birthday gift"
@@ -71,6 +72,7 @@ describe('Query operations', () => {
         query: "[?contains(notes || '', 'quarterly')]",
       });
 
+      // JMESPath returns raw array
       expect(Array.isArray(result)).toBe(true);
       const reminders = result as Array<{title: string}>;
       expect(reminders.length).toBe(1);
@@ -83,8 +85,7 @@ describe('Query operations', () => {
         outputDetail: 'full',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<{listName: string}>;
+      const reminders = extractReminders<{listName: string}>(result);
       expect(reminders.length).toBeGreaterThanOrEqual(4);
 
       // All results should be from our test list
@@ -99,6 +100,7 @@ describe('Query operations', () => {
         query: "[?priority == 'high']",
       });
 
+      // JMESPath returns raw array
       expect(Array.isArray(result)).toBe(true);
       const reminders = result as Array<{title: string; priority: string}>;
       expect(reminders.length).toBe(1);
@@ -112,6 +114,7 @@ describe('Query operations', () => {
         query: "[?priority != 'none']",
       });
 
+      // JMESPath returns raw array
       expect(Array.isArray(result)).toBe(true);
       const reminders = result as Array<{priority: string}>;
       // Should have "Finish report" (high) and "Buy birthday gift" (medium)
@@ -122,23 +125,24 @@ describe('Query operations', () => {
       }
     });
 
-    test('respects limit parameter', async () => {
+    test('respects perPage parameter', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        limit: 2,
+        perPage: 2,
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      expect((result as Array<unknown>).length).toBe(2);
+      const reminders = extractReminders(result);
+      expect(reminders.length).toBe(2);
     });
 
     test('filters completed reminders', async () => {
-      // First, complete one reminder
+      // First, complete one reminder using JMESPath to find it
       const queryResult = await client.callTool('query_reminders', {
         list: {name: testListName},
         query: "[?contains(title, 'dentist')]",
       });
 
+      // JMESPath returns raw array
       expect(Array.isArray(queryResult)).toBe(true);
       const found = queryResult as Array<{id: string}>;
       const reminderId = found[0].id;
@@ -154,8 +158,7 @@ describe('Query operations', () => {
         status: 'completed',
       });
 
-      expect(Array.isArray(completedResult)).toBe(true);
-      const completed = completedResult as Array<{title: string}>;
+      const completed = extractReminders<{title: string}>(completedResult);
       expect(completed.length).toBeGreaterThanOrEqual(1);
 
       const completedTitles = completed.map((r) => r.title);
@@ -168,6 +171,7 @@ describe('Query operations', () => {
         query: "[?contains(title, 'xyznonexistent123')]",
       });
 
+      // JMESPath returns raw array
       expect(Array.isArray(result)).toBe(true);
       expect((result as Array<unknown>).length).toBe(0);
     });
@@ -175,12 +179,14 @@ describe('Query operations', () => {
     test('includes listId and listName in results with full detail', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        limit: 1,
+        perPage: 1,
         outputDetail: 'full',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<{listId: string; listName: string}>;
+      const reminders = extractReminders<{
+        listId: string;
+        listName: string;
+      }>(result);
       expect(reminders[0].listId).toBeDefined();
       expect(reminders[0].listName).toBe(testListName);
     });
@@ -188,12 +194,11 @@ describe('Query operations', () => {
     test('compact detail omits listName for single-list queries', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        limit: 1,
+        perPage: 1,
         outputDetail: 'compact',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<Record<string, unknown>>;
+      const reminders = extractReminders<Record<string, unknown>>(result);
       // listName should be omitted since we queried a single list
       expect(reminders[0].listName).toBeUndefined();
       // But title, id, priority should still be present
@@ -204,12 +209,11 @@ describe('Query operations', () => {
     test('compact detail omits isCompleted for status-specific queries', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        limit: 1,
+        perPage: 1,
         status: 'incomplete',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<Record<string, unknown>>;
+      const reminders = extractReminders<Record<string, unknown>>(result);
       // isCompleted should be omitted since we queried incomplete
       expect(reminders[0].isCompleted).toBeUndefined();
     });
@@ -228,8 +232,7 @@ describe('Query operations', () => {
         outputDetail: 'compact',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<Record<string, unknown>>;
+      const reminders = extractReminders<Record<string, unknown>>(result);
       expect(reminders.length).toBeGreaterThanOrEqual(1);
       // dueDate should be omitted (not present) since it's null and compact strips nulls
       expect(reminders[0].dueDate).toBeUndefined();
@@ -242,8 +245,7 @@ describe('Query operations', () => {
         outputDetail: 'full',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<Record<string, unknown>>;
+      const reminders = extractReminders<Record<string, unknown>>(result);
       expect(reminders.length).toBeGreaterThanOrEqual(1);
       // dueDate should be present and null in full mode
       expect('dueDate' in reminders[0]).toBe(true);
@@ -253,12 +255,11 @@ describe('Query operations', () => {
     test('minimal detail returns only id and title', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        limit: 1,
+        perPage: 1,
         outputDetail: 'minimal',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<Record<string, unknown>>;
+      const reminders = extractReminders<Record<string, unknown>>(result);
       expect(reminders[0].id).toBeDefined();
       expect(reminders[0].title).toBeDefined();
       // These should NOT be present in minimal
@@ -270,13 +271,12 @@ describe('Query operations', () => {
     test('compact includes isCompleted when status is "all"', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        limit: 1,
+        perPage: 1,
         status: 'all',
         outputDetail: 'compact',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<Record<string, unknown>>;
+      const reminders = extractReminders<Record<string, unknown>>(result);
       // isCompleted should be present since status is "all" (value isn't implied)
       expect(reminders[0].isCompleted).toBeDefined();
       expect(typeof reminders[0].isCompleted).toBe('boolean');
@@ -285,12 +285,11 @@ describe('Query operations', () => {
     test('compact includes listName when searching all lists', async () => {
       const result = await client.callTool('query_reminders', {
         list: {all: true},
-        limit: 1,
+        perPage: 1,
         outputDetail: 'compact',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<Record<string, unknown>>;
+      const reminders = extractReminders<Record<string, unknown>>(result);
       // listName should be present since we searched all lists
       expect(reminders[0].listName).toBeDefined();
       expect(typeof reminders[0].listName).toBe('string');
@@ -305,6 +304,7 @@ describe('Query operations', () => {
           '[*].{id: id, list: listName, created: createdDate, modified: lastModifiedDate}',
       });
 
+      // JMESPath returns raw array
       expect(Array.isArray(result)).toBe(true);
       const reminders = result as Array<Record<string, unknown>>;
       expect(reminders.length).toBeGreaterThan(0);
@@ -318,12 +318,11 @@ describe('Query operations', () => {
     test('field names use createdDate and lastModifiedDate', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        limit: 1,
+        perPage: 1,
         outputDetail: 'full',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<Record<string, unknown>>;
+      const reminders = extractReminders<Record<string, unknown>>(result);
       // New field names should be present
       expect(reminders[0].createdDate).toBeDefined();
       expect(reminders[0].lastModifiedDate).toBeDefined();
@@ -336,29 +335,24 @@ describe('Query operations', () => {
       // Query without specifying outputDetail
       const defaultResult = await client.callTool('query_reminders', {
         list: {name: testListName},
-        limit: 1,
+        perPage: 1,
       });
 
       // Query with explicit compact
       const compactResult = await client.callTool('query_reminders', {
         list: {name: testListName},
-        limit: 1,
+        perPage: 1,
         outputDetail: 'compact',
       });
 
-      expect(Array.isArray(defaultResult)).toBe(true);
-      expect(Array.isArray(compactResult)).toBe(true);
-
-      const defaultReminder = (
-        defaultResult as Array<Record<string, unknown>>
-      )[0];
-      const compactReminder = (
-        compactResult as Array<Record<string, unknown>>
-      )[0];
+      const defaultReminders =
+        extractReminders<Record<string, unknown>>(defaultResult);
+      const compactReminders =
+        extractReminders<Record<string, unknown>>(compactResult);
 
       // Both should have the same set of keys
-      const defaultKeys = Object.keys(defaultReminder).sort();
-      const compactKeys = Object.keys(compactReminder).sort();
+      const defaultKeys = Object.keys(defaultReminders[0]).sort();
+      const compactKeys = Object.keys(compactReminders[0]).sort();
       expect(defaultKeys).toEqual(compactKeys);
     });
 
@@ -383,8 +377,7 @@ describe('Query operations', () => {
         outputDetail: 'full',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<Record<string, unknown>>;
+      const reminders = extractReminders<Record<string, unknown>>(result);
       expect(reminders.length).toBeGreaterThanOrEqual(1);
 
       const reminder = reminders[0];
@@ -421,8 +414,7 @@ describe('Query operations', () => {
         status: 'incomplete',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<{priority: string}>;
+      const reminders = extractReminders<{priority: string}>(result);
 
       // High priority should come first
       if (reminders.length > 0 && reminders[0].priority !== 'none') {
@@ -447,6 +439,7 @@ describe('Query operations', () => {
         query: '[*].{name: title, due: dueDate}',
       });
 
+      // JMESPath returns raw array
       expect(Array.isArray(result)).toBe(true);
       const projected = result as Array<{name: string; due: string | null}>;
       expect(projected.length).toBeGreaterThan(0);
@@ -457,6 +450,32 @@ describe('Query operations', () => {
         // due may be null for reminders without due date
         expect('due' in item).toBe(true);
       }
+    });
+
+    test('response includes pagination metadata', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+      });
+
+      // Verify wrapper structure
+      const wrapper = result as {
+        reminders: unknown[];
+        totalCount: number;
+        pageInfo: {
+          hasNextPage: boolean;
+          hasPreviousPage: boolean;
+          endCursor: string | null;
+        };
+      };
+      expect(wrapper.reminders).toBeDefined();
+      expect(Array.isArray(wrapper.reminders)).toBe(true);
+      expect(typeof wrapper.totalCount).toBe('number');
+      expect(wrapper.totalCount).toBeGreaterThanOrEqual(4);
+      expect(wrapper.pageInfo).toBeDefined();
+      expect(typeof wrapper.pageInfo.hasNextPage).toBe('boolean');
+      expect(typeof wrapper.pageInfo.hasPreviousPage).toBe('boolean');
+      // First page has no previous
+      expect(wrapper.pageInfo.hasPreviousPage).toBe(false);
     });
   });
 
