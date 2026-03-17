@@ -434,7 +434,7 @@ public class MCPServer {
                                 "properties": .object([
                                     "id": .object([
                                         "type": .string("string"),
-                                        "description": .string("Reminder ID to update")
+                                        "description": .string("Reminder ID to update (full or abbreviated prefix)")
                                     ]),
                                     "title": .object([
                                         "type": .string("string"),
@@ -544,7 +544,7 @@ public class MCPServer {
                             "items": .object([
                                 "type": .string("string")
                             ]),
-                            "description": .string("Array of reminder IDs to delete")
+                            "description": .string("Array of reminder IDs to delete (full or abbreviated prefixes)")
                         ])
                     ]),
                     "additionalProperties": .bool(false)
@@ -808,7 +808,7 @@ public class MCPServer {
                 ))
             }
 
-            let (updated, failed) = remindersManager.updateReminders(inputs: inputs)
+            let (updated, failed) = await remindersManager.updateReminders(inputs: inputs)
 
             if !updated.isEmpty {
                 await autoSnapshot(reason: "update_reminders")
@@ -827,7 +827,7 @@ public class MCPServer {
                 throw RemindersError("Missing required field: 'ids'")
             }
 
-            let (deleted, failed) = remindersManager.deleteReminders(ids: ids)
+            let (deleted, failed) = await remindersManager.deleteReminders(ids: ids)
 
             if !deleted.isEmpty {
                 await autoSnapshot(reason: "delete_reminders")
