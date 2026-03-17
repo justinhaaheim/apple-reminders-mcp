@@ -90,7 +90,7 @@ public enum HelpContent {
       reminders                                             # Incomplete reminders from default list
       reminders query --all-lists --status all --detail full # Everything, full detail
       reminders query --list "Work" --search "standup"       # Search within a list
-      reminders query --sort dueDate --limit 10              # Upcoming due dates
+      reminders query --sort dueDate --per-page 10              # Upcoming due dates
       reminders create "Buy milk" --list "Shopping"          # Create a reminder
       reminders update <id> --complete                       # Mark done
       reminders delete <id1> <id2>                           # Batch delete
@@ -150,7 +150,8 @@ public enum HelpContent {
       --status <string>     incomplete (default), completed, or all
       --search <string>     Text search in titles and notes
       --sort <string>       newest (default), oldest, priority, dueDate
-      --limit <int>         Max results (default: 50, max: 200)
+      --per-page <int>      Results per page (auto-paginates at 200 when omitted)
+      --cursor <string>     Opaque cursor from previous response's pageInfo.endCursor
       --from <date>         Date range start (ISO 8601 or YYYY-MM-DD)
       --to <date>           Date range end (ISO 8601 or YYYY-MM-DD)
       --jmespath <expr>     JMESPath query expression
@@ -173,7 +174,8 @@ public enum HelpContent {
       --status <string>     incomplete (default), completed, or all
       --search <string>     Text search in titles and notes
       --sort <string>       newest (default), oldest, priority, dueDate
-      --limit <int>         Max results (default: 50, max: 200)
+      --per-page <int>      Results per page (auto-paginates at 200 when omitted)
+      --cursor <string>     Opaque cursor from previous response's pageInfo.endCursor
       --from <date>         Date range start (ISO 8601 or YYYY-MM-DD)
       --to <date>           Date range end (ISO 8601 or YYYY-MM-DD)
       --jmespath <expr>     JMESPath query expression
@@ -181,7 +183,7 @@ public enum HelpContent {
 
     Default Behavior (no options):
       Returns incomplete reminders from the default list, sorted by newest
-      created first, limited to 50 results, using compact output detail.
+      created first, using compact output detail. Auto-paginates at 200 results.
 
     Detail Levels:
       minimal   id, title only (plus listName if --all-lists, isCompleted if --status all)
@@ -204,13 +206,13 @@ public enum HelpContent {
       reminders query                                          # Incomplete from default list
       reminders query --all-lists --status all --detail full   # Everything
       reminders query --list "Work" --search "standup"         # Search within a list
-      reminders query --sort dueDate --limit 10                # Upcoming due dates
+      reminders query --sort dueDate --per-page 10                # Upcoming due dates
       reminders query --status completed --from "2026-03-01"   # Recently completed
       reminders query --all-lists --jmespath "[?priority=='high'].title"
 
     Piping with jq:
-      reminders query --list "Work" | jq -r '.[].id'
-      reminders query --all-lists --sort dueDate | jq -r '.[] | [.title, .dueDate // "none"] | @tsv'
+      reminders query --list "Work" | jq -r '.reminders[].id'
+      reminders query --all-lists --sort dueDate | jq -r '.reminders[] | [.title, .dueDate // "none"] | @tsv'
 
     Use --help=skill for best practices and strategic guidance.
     """
@@ -225,7 +227,7 @@ public enum HelpContent {
     • Default query (no args) is often sufficient — it returns incomplete reminders
       from the default list. Don't add flags unless you need to narrow or expand.
     • For completed reminders, date filtering uses completionDate, not dueDate.
-    • --limit defaults to 50. If you expect many results, increase it or paginate.
+    • Results auto-paginate at 200. Use --per-page to control page size, --cursor for next page.
     """
 
     // MARK: - Create
@@ -425,7 +427,7 @@ public enum HelpContent {
     Batch Pattern:
       # Delete all completed reminders from a list
       reminders query --list "Work" --status completed --detail minimal | \\
-        jq -r '.[].id' | xargs reminders delete
+        jq -r '.reminders[].id' | xargs reminders delete
 
     Use --help=skill for best practices and strategic guidance.
     """

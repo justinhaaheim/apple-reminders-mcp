@@ -16,7 +16,7 @@ plugin skill (with frontmatter), see [`skills/reminders/SKILL.md`](skills/remind
 reminders query                                          # Incomplete reminders from default list
 reminders query --list "Work" --search "standup"         # Search within a list
 reminders query --all-lists --status all --detail full   # Everything, full detail
-reminders query --sort dueDate --limit 10                # Upcoming due dates
+reminders query --sort dueDate --per-page 10              # Upcoming due dates
 
 # Lists
 reminders lists                                          # All reminder lists
@@ -149,11 +149,11 @@ for id in id1 id2 id3; do reminders update "$id" --complete; done
 
 ```bash
 # Get IDs of all incomplete Work reminders
-reminders query --list "Work" --detail minimal | jq -r '.[].id'
+reminders query --list "Work" --detail minimal | jq -r '.reminders[].id'
 
 # Pretty table of upcoming due dates
 reminders query --all-lists --sort dueDate --detail compact | \
-  jq -r '.[] | [.title, .dueDate // "no date", .priority] | @tsv'
+  jq -r '.reminders[] | [.title, .dueDate // "no date", .priority] | @tsv'
 ```
 
 ### Backup Workflow

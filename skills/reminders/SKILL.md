@@ -26,4 +26,4 @@ For subcommand help, use `reminders <command> --help` or `--help --verbose`.
 - Use `--detail compact` (default) for queries unless more detail is needed.
 - When searching, prefer `--search` over `--jmespath` for simple text matches.
 - To find a reminder's ID for update/delete, query first then extract the `id` field.
-- Pipe to `jq` for advanced formatting: `reminders query --list "Work" | jq '.[].title'`
+- Pipe to `jq` for advanced formatting: `reminders query --list "Work" | jq '.reminders[].title'`

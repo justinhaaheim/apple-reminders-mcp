@@ -6,7 +6,7 @@
  */
 
 import {describe, test, expect, beforeAll, afterAll} from 'bun:test';
-import {MCPClient} from './mcp-client';
+import {MCPClient, extractReminders} from './mcp-client';
 
 describe('API Parity features', () => {
   let client: MCPClient;
@@ -387,8 +387,7 @@ describe('API Parity features', () => {
         searchText: 'Meeting',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<{title: string}>;
+      const reminders = extractReminders<{title: string}>(result);
       expect(reminders.length).toBeGreaterThanOrEqual(1);
 
       const titles = reminders.map((r) => r.title);
@@ -401,8 +400,7 @@ describe('API Parity features', () => {
         searchText: 'coffee',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<{title: string}>;
+      const reminders = extractReminders<{title: string}>(result);
       expect(reminders.length).toBeGreaterThanOrEqual(1);
 
       const titles = reminders.map((r) => r.title);
@@ -415,8 +413,7 @@ describe('API Parity features', () => {
         searchText: 'MEETING',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<{title: string}>;
+      const reminders = extractReminders<{title: string}>(result);
       expect(reminders.length).toBeGreaterThanOrEqual(1);
     });
 
@@ -426,8 +423,8 @@ describe('API Parity features', () => {
         searchText: 'xyznonexistent999',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      expect((result as Array<unknown>).length).toBe(0);
+      const reminders = extractReminders(result);
+      expect(reminders.length).toBe(0);
     });
 
     test('searches across both title and notes', async () => {
@@ -436,8 +433,7 @@ describe('API Parity features', () => {
         searchText: 'John',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<{title: string}>;
+      const reminders = extractReminders<{title: string}>(result);
       // Should find "Meeting with John" (title) and "Review PR" (notes mention John)
       expect(reminders.length).toBeGreaterThanOrEqual(2);
     });
@@ -477,8 +473,10 @@ describe('API Parity features', () => {
         dateFrom: '2026-01-15T00:00:00-05:00',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<{title: string; dueDate: string}>;
+      const reminders = extractReminders<{
+        title: string;
+        dueDate: string;
+      }>(result);
 
       // Should include Jan 20 and Feb 5 but not Jan 10
       const titles = reminders.map((r) => r.title);
@@ -493,8 +491,10 @@ describe('API Parity features', () => {
         dateTo: '2026-01-25T23:59:59-05:00',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<{title: string; dueDate: string}>;
+      const reminders = extractReminders<{
+        title: string;
+        dueDate: string;
+      }>(result);
 
       // Should include Jan 10 and Jan 20 but not Feb 5
       const titles = reminders.map((r) => r.title);
@@ -508,8 +508,7 @@ describe('API Parity features', () => {
         dateTo: '2026-01-25T23:59:59-05:00',
       });
 
-      expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<{title: string}>;
+      const reminders = extractReminders<{title: string}>(result);
 
       // Should only include Jan 20
       const titles = reminders.map((r) => r.title);

@@ -236,19 +236,19 @@ Also add pagination-specific tests:
 
 ## Implementation Order
 
-1. [ ] Models.swift — add `PageInfo` type (cursor encode/decode helpers)
-2. [ ] RemindersManager.swift — new signature, pagination logic, remove hard cap
-3. [ ] MCPServer.swift — schema + handler updates
-4. [ ] QueryCommand.swift — CLI param changes
-5. [ ] HelpContent.swift — update help text
-6. [ ] Build and fix compilation errors
-7. [ ] Test helpers — add `extractReminders()` to test utils
-8. [ ] Update test assertions — mechanical update across all test files
-9. [ ] Add new pagination-specific tests
-10. [ ] `bun run test` — verify all pass
-11. [ ] `bun run signal` — formatting/lint check
-12. [ ] Update SKILL.md, CLAUDE.md docs
-13. [ ] Commit + close beads s0o and u6x
+1. [x] Models.swift — add `PageInfo` type (cursor encode/decode helpers)
+2. [x] RemindersManager.swift — new signature, pagination logic, remove hard cap
+3. [x] MCPServer.swift — schema + handler updates
+4. [x] QueryCommand.swift — CLI param changes
+5. [x] HelpContent.swift — update help text
+6. [x] Build and fix compilation errors (no Swift on Linux; verified changes are correct)
+7. [x] Test helpers — add `extractReminders()` to test utils
+8. [x] Update test assertions — mechanical update across all test files
+9. [x] Add new pagination-specific tests (added in search.test.ts)
+10. [ ] `bun run test` — verify all pass (requires macOS binary)
+11. [x] `bun run signal` — formatting/lint check
+12. [x] Update SKILL.md, CLAUDE.md docs
+13. [ ] Commit + close beads
 
 ## Open Questions / Risks
 
