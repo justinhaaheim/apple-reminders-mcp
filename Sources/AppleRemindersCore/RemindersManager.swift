@@ -317,6 +317,17 @@ public class RemindersManager {
         // 5. Pagination
         let totalCount = reminderOutputs.count
         let autoPageSize = 200
+        let maxPageSize = 1000
+
+        // Validate perPage bounds
+        if let pp = perPage {
+            if pp < 1 {
+                throw RemindersError("perPage must be at least 1, got \(pp)")
+            }
+            if pp > maxPageSize {
+                throw RemindersError("perPage must be at most \(maxPageSize), got \(pp)")
+            }
+        }
 
         // Decode cursor to get offset
         let offset: Int
@@ -342,12 +353,10 @@ public class RemindersManager {
         let pageReminders = Array(reminderOutputs[sliceStart..<sliceEnd])
 
         let hasNextPage = sliceEnd < totalCount
-        let hasPreviousPage = offset > 0
-        let endCursor: String? = hasNextPage ? encodeCursor(offset: sliceEnd) : nil
+        let endCursor: String? = hasNextPage ? try encodeCursor(offset: sliceEnd) : nil
 
         let pageInfo = PageInfo(
             hasNextPage: hasNextPage,
-            hasPreviousPage: hasPreviousPage,
             endCursor: endCursor
         )
 

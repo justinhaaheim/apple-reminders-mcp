@@ -1,115 +1,33 @@
 // Bun Snapshot v1, https://bun.sh/docs/test/snapshots
 
 exports[`MCP schema snapshots initialize response instructions text 1`] = `
-"Apple Reminders MCP Server - Access Apple Reminders with 7 powerful tools.
+"Apple Reminders MCP Server — Manage Apple Reminders on macOS.
 
-TOOLS:
-• query_reminders - Search and filter reminders (text search, date range, JMESPath)
-• get_lists - Get all reminder lists
-• create_list - Create a new list
-• create_reminders - Create reminders with alarms, recurrence, URLs
-• update_reminders - Update reminders (including mark complete/incomplete)
-• delete_reminders - Delete reminders
-• export_reminders - Export reminders to JSON file (for backup)
+Call help(tool_name) for documentation on any tool.
+Call help(tool_name, verbose=true) for comprehensive docs with examples.
+Call guidance() for best practices and strategic usage patterns.
+Call schema(tool_name) to inspect input/output schemas.
 
-QUICK START:
-1. Call query_reminders with {} to see incomplete reminders from default list
-2. Use get_lists to see all available lists
-3. Specify list by name: {"list": {"name": "Work"}}
-4. Specify list by ID: {"list": {"id": "x-apple-..."}}
-5. Search by text: {"searchText": "meeting"}
-6. Search all lists: {"list": {"all": true}}
-
-PRIORITY: Use "none", "low", "medium", or "high" (not numbers)
-DATES: ISO 8601 with timezone, e.g., "2024-01-15T10:00:00-05:00"
-ALARMS: [{"type": "relative", "offset": 3600}] (1 hour before)
-RECURRENCE: {"frequency": "weekly", "interval": 1}"
+Quick start: query_reminders({}) returns incomplete reminders from the default list."
 `;
 
 exports[`MCP schema snapshots initialize response server info 1`] = `
 {
   "name": "apple-reminders",
-  "version": "2.0.0",
+  "version": "0.1.0",
 }
 `;
 
 exports[`MCP schema snapshots tool schemas query_reminders 1`] = `
 {
-  "description": 
-"Query reminders from Apple Reminders.
-
-**Default behavior (no parameters needed):**
-- Searches DEFAULT LIST only
-- Returns INCOMPLETE reminders only
-- Sorted by NEWEST CREATED first
-- Limited to 50 results
-- Uses "compact" output (most useful fields, nulls omitted)
-
-**Parameters (all optional):**
-
-list — Which list to search. Omit for default list.
-  • {"name": "Work"} → by exact name (case-insensitive)
-  • {"id": "x-apple-..."} → by exact ID
-  • {"all": true} → all lists
-
-status — "incomplete" (default), "completed", or "all"
-
-searchText — Case-insensitive text search across title and notes
-
-dateFrom / dateTo — Date range filter (ISO 8601). For incomplete reminders filters by dueDate, for completed by completionDate.
-
-sortBy — "newest" (default), "oldest", "priority", "dueDate"
-
-query — JMESPath expression for advanced filtering (overrides sortBy and outputDetail — always uses full fields as input)
-
-outputDetail — Controls which fields are returned:
-  • "minimal" — id, title only (plus listName if searching all lists, isCompleted if status is "all")
-  • "compact" (default) — id, title, notes, dueDate, priority, createdDate, lastModifiedDate (plus listName/isCompleted when contextually useful). Null fields omitted.
-  • "full" — All fields always included, null values shown explicitly
-
-limit — Max results (default 50, max 200)
-
-**Examples:**
-
-Recent incomplete from default list:
-  {}
-
-From specific list:
-  {"list": {"name": "Work"}}
-
-All lists, completed:
-  {"list": {"all": true}, "status": "completed"}
-
-Search by text:
-  {"searchText": "meeting"}
-
-Due this week:
-  {"dateFrom": "2024-01-15T00:00:00-05:00", "dateTo": "2024-01-21T23:59:59-05:00"}
-
-Full detail for debugging:
-  {"outputDetail": "full"}
-
-Minimal for quick overview:
-  {"outputDetail": "minimal"}
-
-High priority only:
-  {"query": "[?priority == 'high']"}
-
-Created today or later (via JMESPath):
-  {"query": "[?createdDate >= '2024-01-15']"}
-
-Modified in the last week (via JMESPath):
-  {"query": "[?lastModifiedDate >= '2024-01-08']"}
-
-**Reminder fields available in JMESPath (always full):**
-- id, title, notes, listId, listName, isCompleted
-- priority (string: "none", "low", "medium", "high")
-- dueDate, dueDateIncludesTime, completionDate, createdDate, lastModifiedDate
-- url, alarms, recurrenceRules"
-,
+  "description": "Search and filter reminders. Returns incomplete reminders from the default list by default. Supports list selection, text search, date ranges, status filtering, and JMESPath queries. Use help("query_reminders") for full parameter docs.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
+      "cursor": {
+        "description": "Opaque cursor from previous response's pageInfo.endCursor for next page.",
+        "type": "string",
+      },
       "dateFrom": {
         "description": "Start of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.",
         "type": "string",
@@ -117,13 +35,6 @@ Modified in the last week (via JMESPath):
       "dateTo": {
         "description": "End of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.",
         "type": "string",
-      },
-      "limit": {
-        "default": 50,
-        "description": "Maximum results to return",
-        "maximum": 200,
-        "minimum": 1,
-        "type": "integer",
       },
       "list": {
         "additionalProperties": false,
@@ -153,6 +64,12 @@ Modified in the last week (via JMESPath):
           "full",
         ],
         "type": "string",
+      },
+      "perPage": {
+        "description": "Results per page (1-1000). Omit to return all (auto-paginates at 200).",
+        "maximum": 1000,
+        "minimum": 1,
+        "type": "integer",
       },
       "query": {
         "description": "JMESPath expression for advanced filtering/projection. Applied after list, status, searchText, and date filters. When provided, outputDetail is ignored (always uses full fields as input).",
@@ -192,16 +109,7 @@ Modified in the last week (via JMESPath):
 
 exports[`MCP schema snapshots tool schemas get_lists 1`] = `
 {
-  "description": 
-"Get all available reminder lists.
-
-Returns list names, IDs, and which one is the default. Call this if you need to know what lists exist before querying reminders.
-
-**Parameters:** None
-
-**Example:**
-  {}"
-,
+  "description": "Get all available reminder lists with names, IDs, and default indicator. No parameters needed.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {},
@@ -213,18 +121,7 @@ Returns list names, IDs, and which one is the default. Call this if you need to 
 
 exports[`MCP schema snapshots tool schemas create_list 1`] = `
 {
-  "description": 
-"Create a new reminder list.
-
-**Parameters:**
-
-name (required) — Name for the new list
-
-**Example:**
-
-Create a "Groceries" list:
-  {"name": "Groceries"}"
-,
+  "description": "Create a new reminder list. Requires a name parameter.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -244,43 +141,7 @@ Create a "Groceries" list:
 
 exports[`MCP schema snapshots tool schemas create_reminders 1`] = `
 {
-  "description": 
-"Create one or more reminders.
-
-**Parameters:**
-
-reminders — Array of reminder objects to create. Each object:
-  • title (required) — Reminder title
-  • notes — Body text
-  • list — Target list as {"name": "..."} or {"id": "..."}. Default list if omitted.
-  • dueDate — ISO 8601 datetime (e.g., "2024-01-15T10:00:00-05:00")
-  • dueDateIncludesTime — Whether the due date has a specific time (default true). Set false for all-day reminders.
-  • priority — "none", "low", "medium", or "high"
-  • url — URL to associate with the reminder
-  • alarms — Array of alarm objects: {"type": "relative", "offset": 3600} or {"type": "absolute", "date": "..."}
-  • recurrenceRule — Recurrence rule: {"frequency": "daily|weekly|monthly|yearly", "interval": 1, ...}
-
-**Examples:**
-
-Single reminder:
-  {"reminders": [{"title": "Buy milk"}]}
-
-With details:
-  {"reminders": [{"title": "Call dentist", "list": {"name": "Personal"}, "dueDate": "2024-01-20T09:00:00-05:00", "priority": "high"}]}
-
-With alarm (1 hour before):
-  {"reminders": [{"title": "Meeting", "dueDate": "2024-01-20T14:00:00-05:00", "alarms": [{"type": "relative", "offset": 3600}]}]}
-
-Weekly recurrence:
-  {"reminders": [{"title": "Team standup", "dueDate": "2024-01-20T09:00:00-05:00", "recurrenceRule": {"frequency": "weekly", "interval": 1, "daysOfWeek": [2, 3, 4, 5, 6]}}]}
-
-Batch create:
-  {"reminders": [
-    {"title": "Buy milk"},
-    {"title": "Buy eggs"},
-    {"title": "Buy bread", "priority": "low"}
-  ]}"
-,
+  "description": "Create one or more reminders with optional notes, due date, priority, alarms, recurrence, and URL. Supports batch creation. Use help("create_reminders") for parameter details and examples.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -447,61 +308,7 @@ Batch create:
 
 exports[`MCP schema snapshots tool schemas update_reminders 1`] = `
 {
-  "description": 
-"Update one or more reminders. Only specified fields are changed.
-
-**Parameters:**
-
-reminders — Array of update objects. Each object:
-  • id (required) — Reminder ID to update
-  • title — New title
-  • notes — New notes (null to clear)
-  • list — Move to list as {"name": "..."} or {"id": "..."}
-  • dueDate — New due date as ISO 8601 (null to clear)
-  • dueDateIncludesTime — Whether due date has specific time (false = all-day)
-  • priority — "none", "low", "medium", or "high"
-  • completed — true to complete, false to uncomplete
-  • completedDate — ISO 8601 completion date (null to uncomplete)
-  • url — URL to associate (null to clear)
-  • alarms — Array of alarm objects (null to clear all alarms)
-  • recurrenceRule — Recurrence rule object (null to clear)
-
-**Examples:**
-
-Update title:
-  {"reminders": [{"id": "...", "title": "Buy oat milk"}]}
-
-Move to different list:
-  {"reminders": [{"id": "...", "list": {"name": "Groceries"}}]}
-
-Complete a reminder:
-  {"reminders": [{"id": "...", "completed": true}]}
-
-Uncomplete a reminder:
-  {"reminders": [{"id": "...", "completed": false}]}
-
-Complete with specific date:
-  {"reminders": [{"id": "...", "completedDate": "2024-01-15T10:00:00-05:00"}]}
-
-Clear due date:
-  {"reminders": [{"id": "...", "dueDate": null}]}
-
-Add alarm:
-  {"reminders": [{"id": "...", "alarms": [{"type": "relative", "offset": 1800}]}]}
-
-Set weekly recurrence:
-  {"reminders": [{"id": "...", "recurrenceRule": {"frequency": "weekly"}}]}
-
-Clear recurrence:
-  {"reminders": [{"id": "...", "recurrenceRule": null}]}
-
-Batch update (complete multiple):
-  {"reminders": [
-    {"id": "abc", "completed": true},
-    {"id": "def", "completed": true},
-    {"id": "ghi", "completed": true}
-  ]}"
-,
+  "description": "Update one or more reminders. Only specified fields are changed; omitted fields are preserved. Supports marking complete/incomplete, moving between lists, and clearing fields with null. Use help("update_reminders") for parameter details.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -555,7 +362,7 @@ Batch update (complete multiple):
               "type": "boolean",
             },
             "id": {
-              "description": "Reminder ID to update",
+              "description": "Reminder ID to update (full or abbreviated prefix)",
               "type": "string",
             },
             "list": {
@@ -666,26 +473,12 @@ Batch update (complete multiple):
 
 exports[`MCP schema snapshots tool schemas delete_reminders 1`] = `
 {
-  "description": 
-"Delete one or more reminders permanently.
-
-**Parameters:**
-
-ids — Array of reminder IDs to delete
-
-**Examples:**
-
-Single delete:
-  {"ids": ["abc123"]}
-
-Batch delete:
-  {"ids": ["abc123", "def456", "ghi789"]}"
-,
+  "description": "Delete one or more reminders permanently by ID. This action cannot be undone.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
       "ids": {
-        "description": "Array of reminder IDs to delete",
+        "description": "Array of reminder IDs to delete (full or abbreviated prefixes)",
         "items": {
           "type": "string",
         },
@@ -704,41 +497,7 @@ Batch delete:
 
 exports[`MCP schema snapshots tool schemas export_reminders 1`] = `
 {
-  "description": 
-"Export reminders to a JSON file for backup or data portability.
-
-Writes all reminder data to a file without consuming LLM context tokens.
-Default location is system temp directory; move the file to keep it permanently.
-
-**Parameters (all optional):**
-
-path — Custom file path (default: temp directory with timestamp)
-  • Supports ~ for home directory
-  • Example: "~/Desktop/my-backup.json"
-
-lists — Array of lists to export (default: all lists)
-  • Each item: {"name": "..."} or {"id": "..."}
-  • Example: [{"name": "Work"}, {"name": "Personal"}]
-
-includeCompleted — Include completed reminders (default: true)
-
-**Examples:**
-
-Export everything to temp:
-  {}
-
-Export to Desktop:
-  {"path": "~/Desktop/reminders-backup.json"}
-
-Export only incomplete reminders:
-  {"includeCompleted": false}
-
-Export specific lists:
-  {"lists": [{"name": "Work"}, {"name": "Shopping"}]}
-
-**File format:**
-JSON with exportVersion, exportDate, stats, lists[], and reminders[]."
-,
+  "description": "Export reminders to a JSON file for backup. Writes data to a file instead of returning it in context. Optional path, list filter, and includeCompleted parameters.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -783,7 +542,10 @@ exports[`MCP schema snapshots tool schemas tool count has not changed 1`] = `
   "delete_reminders",
   "export_reminders",
   "get_lists",
+  "guidance",
+  "help",
   "query_reminders",
+  "schema",
   "update_reminders",
 ]
 `;

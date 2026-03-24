@@ -332,19 +332,16 @@ public struct UpdateReminderInput: Encodable {
 
 public struct PageInfo: Codable {
     public let hasNextPage: Bool
-    public let hasPreviousPage: Bool
     public let endCursor: String?
 
-    public init(hasNextPage: Bool, hasPreviousPage: Bool, endCursor: String?) {
+    public init(hasNextPage: Bool, endCursor: String?) {
         self.hasNextPage = hasNextPage
-        self.hasPreviousPage = hasPreviousPage
         self.endCursor = endCursor
     }
 
     public func toDict() -> [String: Any] {
         var dict: [String: Any] = [
             "hasNextPage": hasNextPage,
-            "hasPreviousPage": hasPreviousPage,
         ]
         if let endCursor = endCursor {
             dict["endCursor"] = endCursor
@@ -382,9 +379,9 @@ public func decodeCursor(_ cursor: String) throws -> Int {
     return offset
 }
 
-public func encodeCursor(offset: Int) -> String {
+public func encodeCursor(offset: Int) throws -> String {
     let json: [String: Any] = ["offset": offset]
-    let data = try! JSONSerialization.data(withJSONObject: json)
+    let data = try JSONSerialization.data(withJSONObject: json)
     return data.base64EncodedString()
 }
 

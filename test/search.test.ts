@@ -463,7 +463,6 @@ describe('Query operations', () => {
         totalCount: number;
         pageInfo: {
           hasNextPage: boolean;
-          hasPreviousPage: boolean;
           endCursor: string | null;
         };
       };
@@ -473,9 +472,45 @@ describe('Query operations', () => {
       expect(wrapper.totalCount).toBeGreaterThanOrEqual(4);
       expect(wrapper.pageInfo).toBeDefined();
       expect(typeof wrapper.pageInfo.hasNextPage).toBe('boolean');
-      expect(typeof wrapper.pageInfo.hasPreviousPage).toBe('boolean');
-      // First page has no previous
-      expect(wrapper.pageInfo.hasPreviousPage).toBe(false);
+    });
+
+    test('cursor-based page traversal returns all results without overlap', async () => {
+      // Page 1: get first 2 results
+      const page1 = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        perPage: 2,
+      });
+
+      const wrapper1 = page1 as {
+        reminders: Array<{id: string; title: string}>;
+        totalCount: number;
+        pageInfo: {hasNextPage: boolean; endCursor: string | null};
+      };
+      expect(wrapper1.reminders.length).toBe(2);
+      expect(wrapper1.totalCount).toBeGreaterThanOrEqual(4);
+      expect(wrapper1.pageInfo.hasNextPage).toBe(true);
+      expect(wrapper1.pageInfo.endCursor).not.toBeNull();
+
+      // Page 2: use endCursor to get next 2
+      const page2 = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        perPage: 2,
+        cursor: wrapper1.pageInfo.endCursor,
+      });
+
+      const wrapper2 = page2 as {
+        reminders: Array<{id: string; title: string}>;
+        totalCount: number;
+        pageInfo: {hasNextPage: boolean; endCursor: string | null};
+      };
+      expect(wrapper2.reminders.length).toBeGreaterThanOrEqual(1);
+      expect(wrapper2.totalCount).toBe(wrapper1.totalCount);
+
+      // Verify no overlap between pages
+      const page1Ids = new Set(wrapper1.reminders.map((r) => r.id));
+      for (const r of wrapper2.reminders) {
+        expect(page1Ids.has(r.id)).toBe(false);
+      }
     });
   });
 

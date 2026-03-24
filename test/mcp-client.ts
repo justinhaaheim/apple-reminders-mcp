@@ -32,7 +32,7 @@ export function extractReminders<T = Record<string, unknown>>(
   }
   // Fallback for JMESPath results that aren't wrapped
   if (Array.isArray(result)) return result as T[];
-  return [result] as T[];
+  return [];
 }
 
 interface MCPRequest {

@@ -251,7 +251,8 @@ public class MCPServer {
                         "perPage": .object([
                             "type": .string("integer"),
                             "minimum": .int(1),
-                            "description": .string("Results per page. Omit to return all (auto-paginates at 200).")
+                            "maximum": .int(1000),
+                            "description": .string("Results per page (1-1000). Omit to return all (auto-paginates at 200).")
                         ]),
                         "cursor": .object([
                             "type": .string("string"),
