@@ -46,7 +46,28 @@ struct QueryCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Output detail level: minimal, compact, full")
     var detail: String?
 
+    private static let validStatuses = ["incomplete", "completed", "all"]
+    private static let validSorts = ["newest", "oldest", "priority", "dueDate"]
+    private static let validDetails = ["minimal", "compact", "full"]
+
     func run() async throws {
+        // Validate enum-like options
+        if let status = status, !Self.validStatuses.contains(status) {
+            throw ValidationError("Invalid --status '\(status)'. Must be one of: \(Self.validStatuses.joined(separator: ", "))")
+        }
+        if let sort = sort, !Self.validSorts.contains(sort) {
+            throw ValidationError("Invalid --sort '\(sort)'. Must be one of: \(Self.validSorts.joined(separator: ", "))")
+        }
+        if let detail = detail, !Self.validDetails.contains(detail) {
+            throw ValidationError("Invalid --detail '\(detail)'. Must be one of: \(Self.validDetails.joined(separator: ", "))")
+        }
+
+        // Validate list selector mutual exclusivity
+        let listOptionCount = [list != nil, listId != nil, allLists].filter { $0 }.count
+        if listOptionCount > 1 {
+            throw ValidationError("Specify only one of --list, --list-id, or --all-lists")
+        }
+
         let manager = try await createManager(options: globals)
 
         let listSelector: ListSelector?

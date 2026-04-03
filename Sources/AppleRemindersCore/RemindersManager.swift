@@ -604,6 +604,12 @@ public class RemindersManager {
     }
 
     private func createSingleReminder(_ input: CreateReminderInput) throws -> ReminderOutput {
+        // Validate non-empty title
+        let trimmedTitle = input.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedTitle.isEmpty {
+            throw RemindersError("Reminder title cannot be empty")
+        }
+
         let calendar = try resolveListForCreate(input.list)
 
         // Test mode validation
