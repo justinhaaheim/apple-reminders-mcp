@@ -75,6 +75,8 @@ interface MCPClientOptions {
   mockMode?: boolean;
   /** Use test mode (restricts writes to test lists). Default: true for real mode */
   testMode?: boolean;
+  /** Path to a JSON file for pre-populating the mock store (mock mode only) */
+  mockSeedPath?: string;
 }
 
 export class MCPClient {
@@ -104,7 +106,7 @@ export class MCPClient {
    * For real EventKit testing, use: MCPClient.create({mockMode: false})
    */
   static async create(options: MCPClientOptions = {}): Promise<MCPClient> {
-    const {mockMode = true, testMode} = options;
+    const {mockMode = true, testMode, mockSeedPath} = options;
 
     // For real mode, default to test mode enabled for safety
     const useTestMode = testMode ?? !mockMode;
@@ -117,6 +119,7 @@ export class MCPClient {
         ...process.env,
         AR_MCP_MOCK_MODE: mockMode ? '1' : undefined,
         AR_MCP_TEST_MODE: useTestMode ? '1' : undefined,
+        AR_MCP_MOCK_SEED: mockSeedPath ?? undefined,
       },
     });
 
