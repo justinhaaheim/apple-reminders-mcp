@@ -2,9 +2,8 @@
  * Tests to verify that test mode restrictions work correctly.
  * These tests verify that the server blocks operations on non-test lists.
  *
- * Uses mock mode WITH test mode enabled, plus seed data to pre-populate
- * the mock store with reminders in non-test lists. This allows us to test
- * that the test-mode guard actually fires (not just "not found" errors).
+ * Uses _seed_mock_data to inject reminders into non-test lists so we can
+ * verify that the test-mode guard actually fires (not just "not found" errors).
  */
 
 import {describe, test, expect, beforeAll, afterAll} from 'bun:test';
@@ -17,34 +16,26 @@ describe('Test mode restrictions', () => {
     client = await MCPClient.create({
       mockMode: true,
       testMode: true,
-      mockSeed: {
-        lists: [
-          {id: 'seed-list-default', name: 'Reminders', isDefault: true},
-          {id: 'seed-list-work', name: 'Work', isDefault: false},
-        ],
-        reminders: [
-          {
-            id: 'seed-rem-001',
-            title: 'Seeded Reminder A',
-            listId: 'seed-list-default',
-            listName: 'Reminders',
-            isCompleted: false,
-            priority: 'none',
-            createdDate: '2026-01-01T00:00:00Z',
-            lastModifiedDate: '2026-01-01T00:00:00Z',
-          },
-          {
-            id: 'seed-rem-002',
-            title: 'Seeded Reminder B',
-            listId: 'seed-list-work',
-            listName: 'Work',
-            isCompleted: false,
-            priority: 'high',
-            createdDate: '2026-01-01T00:00:00Z',
-            lastModifiedDate: '2026-01-01T00:00:00Z',
-          },
-        ],
-      },
+    });
+
+    // Inject reminders into non-test lists via the mock store API
+    await client.callTool('_seed_mock_data', {
+      lists: [
+        {id: 'seed-list-default', name: 'Reminders', isDefault: true},
+        {id: 'seed-list-work', name: 'Work', isDefault: false},
+      ],
+      reminders: [
+        {
+          id: 'seed-rem-001',
+          title: 'Seeded Reminder A',
+          listId: 'seed-list-default',
+        },
+        {
+          id: 'seed-rem-002',
+          title: 'Seeded Reminder B',
+          listId: 'seed-list-work',
+        },
+      ],
     });
   });
 
