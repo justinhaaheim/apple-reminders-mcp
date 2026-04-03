@@ -91,22 +91,37 @@ public class MockReminderStore: ReminderStore {
         calendars.append(defaultCalendar)
         defaultCalendarId = defaultCalendar.id
 
-        // Load seed data if AR_MCP_MOCK_SEED is set
-        if let seedPath = ProcessInfo.processInfo.environment["AR_MCP_MOCK_SEED"] {
-            let expandedPath = NSString(string: seedPath).expandingTildeInPath
-            loadSeedData(from: expandedPath)
+        // Load seed data if AR_MCP_MOCK_SEED is set (inline JSON or file path)
+        if let seedValue = ProcessInfo.processInfo.environment["AR_MCP_MOCK_SEED"] {
+            loadSeedData(seedValue)
         }
     }
 
-    /// Load seed data from a JSON file to pre-populate the mock store.
+    /// Load seed data to pre-populate the mock store.
+    /// Accepts either inline JSON (starts with '{') or a file path.
     /// The JSON format is: { "lists": [...], "reminders": [...] }
     /// where lists match ReminderListOutput and reminders match ReminderOutput.
-    /// Lists and reminders from the seed file are added to the store,
-    /// and the first list marked isDefault replaces the built-in default.
-    private func loadSeedData(from path: String) {
-        guard let data = FileManager.default.contents(atPath: path) else {
-            logError("Mock seed file not found: \(path)")
-            return
+    private func loadSeedData(_ seedValue: String) {
+        let data: Data
+        let source: String
+
+        if seedValue.trimmingCharacters(in: .whitespaces).hasPrefix("{") {
+            // Inline JSON
+            guard let jsonData = seedValue.data(using: .utf8) else {
+                logError("Mock seed: invalid UTF-8 in inline JSON")
+                return
+            }
+            data = jsonData
+            source = "inline JSON"
+        } else {
+            // File path
+            let expandedPath = NSString(string: seedValue).expandingTildeInPath
+            guard let fileData = FileManager.default.contents(atPath: expandedPath) else {
+                logError("Mock seed file not found: \(expandedPath)")
+                return
+            }
+            data = fileData
+            source = expandedPath
         }
 
         do {
@@ -159,7 +174,7 @@ public class MockReminderStore: ReminderStore {
                 reminders.append(reminder)
             }
 
-            log("Loaded mock seed data: \(seed.lists.count) lists, \(seed.reminders.count) reminders from \(path)")
+            log("Loaded mock seed data: \(seed.lists.count) lists, \(seed.reminders.count) reminders from \(source)")
         } catch {
             logError("Failed to parse mock seed file: \(error.localizedDescription)")
         }

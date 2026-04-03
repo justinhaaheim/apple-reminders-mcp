@@ -2,85 +2,54 @@
  * Tests to verify that test mode restrictions work correctly.
  * These tests verify that the server blocks operations on non-test lists.
  *
- * Uses mock mode WITH test mode enabled, plus a seed file to pre-populate
+ * Uses mock mode WITH test mode enabled, plus seed data to pre-populate
  * the mock store with reminders in non-test lists. This allows us to test
  * that the test-mode guard actually fires (not just "not found" errors).
  */
 
 import {describe, test, expect, beforeAll, afterAll} from 'bun:test';
 import {MCPClient} from './mcp-client';
-import {writeFileSync, unlinkSync} from 'fs';
-import {tmpdir} from 'os';
-import {join} from 'path';
-
-// Seed data: reminders in a non-test list that test mode should protect
-const SEED_DATA = {
-  lists: [
-    {id: 'seed-list-default', name: 'Reminders', isDefault: true},
-    {id: 'seed-list-work', name: 'Work', isDefault: false},
-  ],
-  reminders: [
-    {
-      id: 'seed-rem-001',
-      title: 'Seeded Reminder A',
-      notes: 'In default list',
-      listId: 'seed-list-default',
-      listName: 'Reminders',
-      isCompleted: false,
-      priority: 'none',
-      dueDate: null,
-      dueDateIncludesTime: null,
-      completionDate: null,
-      createdDate: '2026-01-01T00:00:00Z',
-      lastModifiedDate: '2026-01-01T00:00:00Z',
-      url: null,
-      alarms: null,
-      recurrenceRules: null,
-    },
-    {
-      id: 'seed-rem-002',
-      title: 'Seeded Reminder B',
-      notes: null,
-      listId: 'seed-list-work',
-      listName: 'Work',
-      isCompleted: false,
-      priority: 'high',
-      dueDate: null,
-      dueDateIncludesTime: null,
-      completionDate: null,
-      createdDate: '2026-01-01T00:00:00Z',
-      lastModifiedDate: '2026-01-01T00:00:00Z',
-      url: null,
-      alarms: null,
-      recurrenceRules: null,
-    },
-  ],
-};
-
-const SEED_FILE_PATH = join(tmpdir(), 'test-mode-seed.json');
 
 describe('Test mode restrictions', () => {
   let client: MCPClient;
 
   beforeAll(async () => {
-    // Write seed file
-    writeFileSync(SEED_FILE_PATH, JSON.stringify(SEED_DATA));
-
-    // Use mock mode + test mode + seed data
     client = await MCPClient.create({
       mockMode: true,
       testMode: true,
-      mockSeedPath: SEED_FILE_PATH,
+      mockSeed: {
+        lists: [
+          {id: 'seed-list-default', name: 'Reminders', isDefault: true},
+          {id: 'seed-list-work', name: 'Work', isDefault: false},
+        ],
+        reminders: [
+          {
+            id: 'seed-rem-001',
+            title: 'Seeded Reminder A',
+            listId: 'seed-list-default',
+            listName: 'Reminders',
+            isCompleted: false,
+            priority: 'none',
+            createdDate: '2026-01-01T00:00:00Z',
+            lastModifiedDate: '2026-01-01T00:00:00Z',
+          },
+          {
+            id: 'seed-rem-002',
+            title: 'Seeded Reminder B',
+            listId: 'seed-list-work',
+            listName: 'Work',
+            isCompleted: false,
+            priority: 'high',
+            createdDate: '2026-01-01T00:00:00Z',
+            lastModifiedDate: '2026-01-01T00:00:00Z',
+          },
+        ],
+      },
     });
   });
 
   afterAll(async () => {
     await client.cleanup();
-    try {
-      unlinkSync(SEED_FILE_PATH);
-    } catch {
-      // ignore
-    }
   });
 
   test('blocks creating a list without test prefix', async () => {
