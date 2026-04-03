@@ -533,8 +533,8 @@ describe('API Parity features', () => {
 
       const queryTool = tools.find((t) => t.name === 'query_reminders');
       expect(queryTool).toBeDefined();
-      expect(queryTool!.description).toContain('searchText');
-      expect(queryTool!.description).toContain('dateFrom');
+      expect(queryTool!.description).toContain('text search');
+      expect(queryTool!.description).toContain('date ranges');
       expect(queryTool!.description).toContain('JMESPath');
 
       // Verify parameters exist in the schema (progressive disclosure moved details to help tool)

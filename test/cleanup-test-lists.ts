@@ -12,6 +12,10 @@ import * as readline from 'node:readline';
 
 const TEST_LIST_PREFIX = '[AR-MCP TEST]';
 
+function escapeAppleScript(str: string): string {
+  return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 async function prompt(question: string): Promise<string> {
   const rl = readline.createInterface({
     input: process.stdin,
@@ -31,7 +35,7 @@ async function findTestLists(): Promise<string[]> {
     tell application "Reminders"
       set testLists to {}
       repeat with aList in lists
-        if name of aList starts with "${TEST_LIST_PREFIX}" then
+        if name of aList starts with "${escapeAppleScript(TEST_LIST_PREFIX)}" then
           set end of testLists to name of aList
         end if
       end repeat
@@ -54,7 +58,7 @@ async function deleteLists(listNames: string[]): Promise<void> {
     const appleScript = `
       tell application "Reminders"
         try
-          delete (first list whose name is "${listName}")
+          delete (first list whose name is "${escapeAppleScript(listName)}")
           return "OK"
         on error errMsg
           return "ERROR: " & errMsg

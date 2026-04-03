@@ -85,19 +85,35 @@ describe('Test mode restrictions', () => {
     });
   });
 
-  test('blocks updating a reminder in non-test list', async () => {
-    // This test relies on there being at least one reminder in a non-test list.
-    // We'll try to update with a fake ID - the error will be "Reminder not found"
-    // which is fine, but if the reminder existed in a real list, test mode would block it.
+  test('blocks updating a reminder to move it to non-test list', async () => {
+    // Create a reminder in a test list (allowed)
+    const prefix = MCPClient.getTestListPrefix();
+    const testListName = `${prefix} - Update Guard Test`;
 
-    const result = await client.callTool('update_reminders', {
-      reminders: [{id: 'fake-reminder-id-12345', title: 'Should Not Work'}],
+    await client.callTool('create_list', {name: testListName});
+
+    const createResult = await client.callTool('create_reminders', {
+      reminders: [{title: 'Guard Test Reminder', list: {name: testListName}}],
     });
 
-    // Either returns {updated:[], failed:[...]} or error
+    const reminders = createResult as Array<{id: string}>;
+    expect(reminders.length).toBe(1);
+    const reminderId = reminders[0].id;
+
+    // Now try to move it to the default (non-test) list — should be blocked
+    const result = await client.callTool('update_reminders', {
+      reminders: [{id: reminderId, list: {name: 'Reminders'}}],
+    });
+
     const hasError =
       result._isError ||
       (result.failed && (result.failed as Array<unknown>).length > 0);
     expect(hasError).toBe(true);
+
+    // Verify the error is specifically about test mode
+    if (result.failed) {
+      const failedItems = result.failed as Array<{error: string}>;
+      expect(failedItems[0].error).toContain('TEST MODE');
+    }
   });
 });

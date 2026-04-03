@@ -90,7 +90,7 @@ public class MCPServer {
             }
         } catch {
             logError("Error decoding request: \(error)")
-            sendErrorResponse(id: .int(-1), code: -32700, message: "Parse error: \(error.localizedDescription)")
+            sendErrorResponse(id: .null, code: -32700, message: "Parse error: \(error.localizedDescription)")
         }
     }
 

@@ -50,6 +50,11 @@ struct UpdateCommand: AsyncParsableCommand {
     var clearUrl: Bool = false
 
     func run() async throws {
+        // Validate mutually exclusive flags
+        if complete && incomplete {
+            throw ValidationError("Cannot specify both --complete and --incomplete")
+        }
+
         let manager = try await createManager(options: globals)
 
         let notesValue: Clearable<String>?
