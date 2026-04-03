@@ -70,34 +70,11 @@ interface ToolResult {
   [key: string]: unknown;
 }
 
-interface MockSeedData {
-  lists: Array<{id: string; name: string; isDefault: boolean}>;
-  reminders: Array<{
-    id: string;
-    title: string;
-    notes?: string | null;
-    listId: string;
-    listName: string;
-    isCompleted: boolean;
-    priority: string;
-    dueDate?: string | null;
-    dueDateIncludesTime?: boolean | null;
-    completionDate?: string | null;
-    createdDate: string;
-    lastModifiedDate: string;
-    url?: string | null;
-    alarms?: unknown[] | null;
-    recurrenceRules?: unknown[] | null;
-  }>;
-}
-
 interface MCPClientOptions {
   /** Use mock mode (in-memory storage). Default: true */
   mockMode?: boolean;
   /** Use test mode (restricts writes to test lists). Default: true for real mode */
   testMode?: boolean;
-  /** Seed data to pre-populate the mock store (mock mode only). Passed as inline JSON via env var. */
-  mockSeed?: MockSeedData;
 }
 
 export class MCPClient {
@@ -127,7 +104,7 @@ export class MCPClient {
    * For real EventKit testing, use: MCPClient.create({mockMode: false})
    */
   static async create(options: MCPClientOptions = {}): Promise<MCPClient> {
-    const {mockMode = true, testMode, mockSeed} = options;
+    const {mockMode = true, testMode} = options;
 
     // For real mode, default to test mode enabled for safety
     const useTestMode = testMode ?? !mockMode;
@@ -140,7 +117,6 @@ export class MCPClient {
         ...process.env,
         AR_MCP_MOCK_MODE: mockMode ? '1' : undefined,
         AR_MCP_TEST_MODE: useTestMode ? '1' : undefined,
-        AR_MCP_MOCK_SEED: mockSeed ? JSON.stringify(mockSeed) : undefined,
       },
     });
 
