@@ -31,3 +31,6 @@ LICENSE.txt
 
 # npm package binaries (built by CI)
 npm/bin/reminders
+
+# Beads / Dolt files (added by bd init)
+.beads-credential-key
