@@ -90,6 +90,79 @@ public class MockReminderStore: ReminderStore {
         let defaultCalendar = MockCalendar(name: "Reminders")
         calendars.append(defaultCalendar)
         defaultCalendarId = defaultCalendar.id
+
+        // Load seed data if AR_MCP_MOCK_SEED is set
+        if let seedPath = ProcessInfo.processInfo.environment["AR_MCP_MOCK_SEED"] {
+            let expandedPath = NSString(string: seedPath).expandingTildeInPath
+            loadSeedData(from: expandedPath)
+        }
+    }
+
+    /// Load seed data from a JSON file to pre-populate the mock store.
+    /// The JSON format is: { "lists": [...], "reminders": [...] }
+    /// where lists match ReminderListOutput and reminders match ReminderOutput.
+    /// Lists and reminders from the seed file are added to the store,
+    /// and the first list marked isDefault replaces the built-in default.
+    private func loadSeedData(from path: String) {
+        guard let data = FileManager.default.contents(atPath: path) else {
+            logError("Mock seed file not found: \(path)")
+            return
+        }
+
+        do {
+            let seed = try JSONDecoder().decode(MockSeedData.self, from: data)
+
+            // Add seed lists (replace default if seed specifies one)
+            for seedList in seed.lists {
+                if let existingIndex = calendars.firstIndex(where: { $0.id == seedList.id }) {
+                    calendars[existingIndex] = MockCalendar(id: seedList.id, name: seedList.name)
+                } else {
+                    calendars.append(MockCalendar(id: seedList.id, name: seedList.name))
+                }
+                if seedList.isDefault {
+                    defaultCalendarId = seedList.id
+                }
+            }
+
+            // Add seed reminders
+            for seedReminder in seed.reminders {
+                let reminder = MockReminder(
+                    id: seedReminder.id,
+                    title: seedReminder.title,
+                    calendarId: seedReminder.listId,
+                    store: self
+                )
+                reminder.notes = seedReminder.notes
+                reminder.priority = Priority.fromString(seedReminder.priority)?.internalValue ?? 0
+
+                if let urlString = seedReminder.url, let url = URL(string: urlString) {
+                    reminder.url = url
+                }
+
+                if seedReminder.isCompleted {
+                    if let completionDateStr = seedReminder.completionDate,
+                       let completionDate = Date.fromISO8601(completionDateStr) {
+                        reminder.completionDate = completionDate
+                    } else {
+                        reminder.completionDate = Date()
+                    }
+                }
+
+                if let dueDateStr = seedReminder.dueDate,
+                   let dueDate = Date.fromISO8601(dueDateStr) {
+                    reminder.dueDateComponents = Calendar.current.dateComponents(
+                        [.year, .month, .day, .hour, .minute],
+                        from: dueDate
+                    )
+                }
+
+                reminders.append(reminder)
+            }
+
+            log("Loaded mock seed data: \(seed.lists.count) lists, \(seed.reminders.count) reminders from \(path)")
+        } catch {
+            logError("Failed to parse mock seed file: \(error.localizedDescription)")
+        }
     }
 
     public func requestAccess() async throws -> Bool {
@@ -163,4 +236,12 @@ public class MockReminderStore: ReminderStore {
         let reminder = MockReminder(calendarId: calendar.id, store: self)
         return reminder
     }
+}
+
+// MARK: - Mock Seed Data
+
+/// JSON structure for pre-populating the mock store via AR_MCP_MOCK_SEED.
+struct MockSeedData: Codable {
+    let lists: [ReminderListOutput]
+    let reminders: [ReminderOutput]
 }
