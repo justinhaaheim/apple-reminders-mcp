@@ -9,7 +9,6 @@
       "Bash(ls:*)",
       "Bash(mkdir:*)",
       "Bash(unzip:*)",
-
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git fetch:*)",
@@ -17,20 +16,16 @@
       "Bash(git rebase:*)",
       "Bash(git show:*)",
       "Bash(git status:*)",
-
       "Bash(bun install:*)",
       "Bash(bun list:*)",
       "Bash(bun run:*)",
       "Bash(bun add:*)",
       "Bash(bun remove:*)",
       "Bash(bun pm:*)",
-
       "Bash(npx eslint:*)",
       "Bash(npx prettier:*)",
       "Bash(npx tsc:*)",
-
       "mcp__ide__getDiagnostics",
-
       "WebSearch",
       "WebFetch(domain:github.com)"
     ],
@@ -38,9 +33,9 @@
     "defaultMode": "acceptEdits"
   },
   "sandbox": {
-    "enabled": true
+    "enabled": true,
+    "excludedCommands": ["br"]
   },
-
   "hooks": {
     "SessionStart": [
       {
