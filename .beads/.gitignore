@@ -17,6 +17,8 @@ last-touched
 # Sync state (local-only, per-machine)
 .sync.lock
 sync_base.jsonl
+.local_version
+.br_recovery/
 
 # Merge artifacts (temporary files from 3-way merge)
 beads.base.jsonl
