@@ -7,3 +7,5 @@ default_type: task
 sync:
   auto_import: true
   auto_flush: true
+
+sync.remote: "git+http://local_proxy@127.0.0.1:44680/git/justinhaaheim/apple-reminders-mcp"

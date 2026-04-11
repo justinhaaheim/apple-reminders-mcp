@@ -1,4 +1,7 @@
 {
-  "database": "beads.db",
-  "jsonl_export": "issues.jsonl"
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "apple_reminders_mcp",
+  "project_id": "d3132159-2933-448e-9a7a-97f7bb007f17"
 }
