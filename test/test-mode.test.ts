@@ -1,9 +1,12 @@
 /**
- * Tests to verify that test mode restrictions work correctly.
- * These tests verify that the server blocks operations on non-test lists.
+ * Tests to verify that test mode restrictions work correctly at the MCP
+ * protocol layer.
  *
- * Uses _seed_mock_data to inject reminders into non-test lists so we can
- * verify that the test-mode guard actually fires (not just "not found" errors).
+ * The deep test-mode guard coverage lives in the Swift unit tests
+ * (Tests/AppleRemindersCoreTests/TestModeGuardTests.swift), which exercise
+ * RemindersManager directly with MockReminderStore. These TypeScript tests
+ * only verify the end-to-end happy paths and a few error paths that don't
+ * require pre-seeding the mock store with reminders in non-test lists.
  */
 
 import {describe, test, expect, beforeAll, afterAll} from 'bun:test';
@@ -16,26 +19,6 @@ describe('Test mode restrictions', () => {
     client = await MCPClient.create({
       mockMode: true,
       testMode: true,
-    });
-
-    // Inject reminders into non-test lists via the mock store API
-    await client.callTool('_seed_mock_data', {
-      lists: [
-        {id: 'seed-list-default', name: 'Reminders', isDefault: true},
-        {id: 'seed-list-work', name: 'Work', isDefault: false},
-      ],
-      reminders: [
-        {
-          id: 'seed-rem-001',
-          title: 'Seeded Reminder A',
-          listId: 'seed-list-default',
-        },
-        {
-          id: 'seed-rem-002',
-          title: 'Seeded Reminder B',
-          listId: 'seed-list-work',
-        },
-      ],
     });
   });
 
@@ -53,18 +36,22 @@ describe('Test mode restrictions', () => {
     expect(result.error).toContain('[AR-MCP TEST]');
   });
 
-  test('blocks creating a reminder in non-test list', async () => {
-    // Try to create a reminder in the default list (without specifying a list)
-    // Since test mode blocks writes to non-test lists, this should fail
+  test('blocks creating a reminder in the default (non-test) list', async () => {
+    // In mock mode, the default list is "Reminders" — not test-prefixed.
+    // Omitting `list` should route to the default and hit the test-mode guard.
     const result = await client.callTool('create_reminders', {
       reminders: [{title: 'Should Not Be Created'}],
     });
 
-    // Either returns {created:[], failed:[...]} or error
     const hasError =
       result._isError ||
       (result.failed && (result.failed as Array<unknown>).length > 0);
     expect(hasError).toBe(true);
+
+    if (result.failed) {
+      const failedItems = result.failed as Array<{error: string}>;
+      expect(failedItems[0].error).toContain('TEST MODE');
+    }
   });
 
   test('allows creating a list with test prefix', async () => {
@@ -77,64 +64,35 @@ describe('Test mode restrictions', () => {
     expect(result.id).toBeDefined();
   });
 
-  test('allows creating a reminder in test list', async () => {
-    // First create a test list
+  test('allows full CRUD lifecycle inside a test-prefixed list', async () => {
     const prefix = MCPClient.getTestListPrefix();
-    const listName = `${prefix} - For Reminder Test`;
+    const listName = `${prefix} - CRUD Lifecycle`;
 
-    await client.callTool('create_list', {
-      name: listName,
-    });
+    // 1. Create the list
+    const listResult = await client.callTool('create_list', {name: listName});
+    expect(listResult._isError).toBeUndefined();
+    expect(listResult.id).toBeDefined();
 
-    // Now create a reminder in it
-    const result = await client.callTool('create_reminders', {
+    // 2. Create a reminder in it
+    const createResult = await client.callTool('create_reminders', {
       reminders: [{title: 'Allowed Reminder', list: {name: listName}}],
     });
+    expect(Array.isArray(createResult)).toBe(true);
+    const created = createResult as Array<{id: string}>;
+    expect(created.length).toBe(1);
+    const reminderId = created[0].id;
+    expect(reminderId).toBeDefined();
 
-    expect(Array.isArray(result)).toBe(true);
-    const reminders = result as Array<{id: string}>;
-    expect(reminders.length).toBe(1);
-    expect(reminders[0].id).toBeDefined();
-
-    // Clean up
-    await client.callTool('delete_reminders', {
-      ids: [reminders[0].id],
+    // 3. Update it
+    const updateResult = await client.callTool('update_reminders', {
+      reminders: [{id: reminderId, title: 'Updated Reminder'}],
     });
-  });
+    expect(updateResult._isError).toBeUndefined();
 
-  test('blocks updating a reminder in non-test list', async () => {
-    // Use the seeded reminder in the "Reminders" (non-test) list
-    const result = await client.callTool('update_reminders', {
-      reminders: [{id: 'seed-rem-001', title: 'Should Not Work'}],
+    // 4. Delete it
+    const deleteResult = await client.callTool('delete_reminders', {
+      ids: [reminderId],
     });
-
-    const hasError =
-      result._isError ||
-      (result.failed && (result.failed as Array<unknown>).length > 0);
-    expect(hasError).toBe(true);
-
-    // Verify the error is specifically about test mode, not "not found"
-    if (result.failed) {
-      const failedItems = result.failed as Array<{error: string}>;
-      expect(failedItems[0].error).toContain('TEST MODE');
-    }
-  });
-
-  test('blocks deleting a reminder in non-test list', async () => {
-    // Use the seeded reminder in the "Work" (non-test) list
-    const result = await client.callTool('delete_reminders', {
-      ids: ['seed-rem-002'],
-    });
-
-    const hasError =
-      result._isError ||
-      (result.failed && (result.failed as Array<unknown>).length > 0);
-    expect(hasError).toBe(true);
-
-    // Verify the error is specifically about test mode, not "not found"
-    if (result.failed) {
-      const failedItems = result.failed as Array<{error: string}>;
-      expect(failedItems[0].error).toContain('TEST MODE');
-    }
+    expect(deleteResult._isError).toBeUndefined();
   });
 });

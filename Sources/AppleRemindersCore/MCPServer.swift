@@ -4,7 +4,6 @@ import Foundation
 
 public class MCPServer {
     private let remindersManager: RemindersManager
-    private let store: ReminderStore
     private let snapshotManager: SnapshotManager?
     private let snapshotEnabled: Bool
 
@@ -21,7 +20,6 @@ public class MCPServer {
             store = MockReminderStore()
             #endif
         }
-        self.store = store
         self.remindersManager = RemindersManager(store: store)
 
         // Set audit logger source to MCP
@@ -880,13 +878,6 @@ public class MCPServer {
         case "guidance":
             let topic = arguments["topic"]?.value as? String
             return getGuidance(topic: topic)
-
-        case "_seed_mock_data":
-            guard let mockStore = store as? MockReminderStore else {
-                throw RemindersError("_seed_mock_data is only available in mock mode")
-            }
-            try mockStore.seedData(from: arguments)
-            return try toJSON(["seeded": true])
 
         default:
             throw RemindersError("Unknown tool: \(name)")

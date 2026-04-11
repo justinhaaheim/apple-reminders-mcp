@@ -45,5 +45,10 @@ let package = Package(
             ],
             path: "Sources/AppleRemindersCLI"
         ),
+        .testTarget(
+            name: "AppleRemindersCoreTests",
+            dependencies: ["AppleRemindersCore"],
+            path: "Tests/AppleRemindersCoreTests"
+        ),
     ]
 )
