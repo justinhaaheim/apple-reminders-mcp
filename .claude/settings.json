@@ -25,6 +25,7 @@
       "Bash(npx eslint:*)",
       "Bash(npx prettier:*)",
       "Bash(npx tsc:*)",
+      "Bash(bunx github:justinhaaheim/justin-sdk*)",
       "mcp__ide__getDiagnostics",
       "WebSearch",
       "WebFetch(domain:github.com)"
@@ -34,7 +35,9 @@
   },
   "sandbox": {
     "enabled": true,
-    "excludedCommands": ["br"]
+    "excludedCommands": [
+      "br"
+    ]
   },
   "hooks": {
     "SessionStart": [
@@ -44,6 +47,14 @@
           {
             "type": "command",
             "command": ".claude/hooks/session-start.sh"
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun run \"$CLAUDE_PROJECT_DIR/scripts/setup-env.ts\""
           }
         ]
       }

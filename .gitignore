@@ -34,3 +34,10 @@ npm/bin/reminders
 
 # Beads / Dolt files (added by bd init)
 .beads-credential-key
+
+# Temporary / scratch files
+tmp/
+
+# Dynamic version artifacts (local-only)
+dynamic-version.local.json
+dynamic-version.local.d.ts
