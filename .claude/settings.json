@@ -35,9 +35,7 @@
   },
   "sandbox": {
     "enabled": true,
-    "excludedCommands": [
-      "br"
-    ]
+    "excludedCommands": ["br"]
   },
   "hooks": {
     "SessionStart": [

@@ -1,6 +1,5 @@
 # Agent Instructions
 
-
 ## Dependency Direction (IMPORTANT)
 
 `br dep add <issue> <depends-on>` means `<issue>` is **blocked by** `<depends-on>`.
