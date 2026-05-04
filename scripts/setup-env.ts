@@ -3,38 +3,50 @@
  * setup-env.ts — Ensure development tools are installed and available.
  *
  * Behavior differs by environment:
- *   - Remote (CLAUDE_CODE_REMOTE=true): Installs Swift for Linux,
- *     installs beads (bd), runs `bun install`, and adds tools to PATH.
- *   - Local: Validates that required tools are available and prints
- *     actionable errors if they're not. Does not install anything.
+ *   - Remote (CLAUDE_CODE_REMOTE=true): Bootstraps mise + PATH, runs any
+ *     project-specific `setup-env:*` scripts declared in package.json, then
+ *     delegates to `doctor --fix --yes` for SDK-component tool installation.
+ *     The --yes flag pre-approves system-level installs (mise, br, etc.).
+ *   - Local: Runs `doctor --quiet` to validate the environment. Never
+ *     auto-installs anything — approvals must be explicit via --yes.
  *
- * This script is referenced by the SessionStart hook in .claude/settings.json.
+ * Project-specific setup hook:
+ *   Any package.json script whose name starts with `setup-env:` is treated
+ *   as a project-specific setup step. They run between the mise/PATH
+ *   bootstrap and `doctor --fix`, in alphabetical order. Use numeric
+ *   prefixes (`setup-env:10-swift`, `setup-env:20-foo`) if you need strict
+ *   ordering. Each sub-script is responsible for its own idempotence and
+ *   failure handling — setup-env.ts logs + continues on sub-script failure.
+ *
+ * This script is designed to be copied into any project at scripts/setup-env.ts
+ * and referenced by a SessionStart hook in .claude/settings.json.
+ *
+ * PREREQUISITE: bun must be installed. In Dockerfiles, add either:
+ *   RUN npm i -g bun
+ *   RUN curl -fsSL https://bun.sh/install | bash
+ *
  * It is idempotent and safe to re-run.
  */
 
 import {execSync} from 'child_process';
-import {appendFileSync, existsSync} from 'fs';
+import {appendFileSync, existsSync, readFileSync} from 'fs';
 import {resolve} from 'path';
 
 const HOME = process.env.HOME ?? '/root';
 const PROJECT_ROOT = resolve(import.meta.dirname, '..');
+const MISE_BIN = resolve(HOME, '.local/bin/mise');
+const MISE_SHIMS_DIR = resolve(HOME, '.local/share/mise/shims');
 const IS_REMOTE = process.env.CLAUDE_CODE_REMOTE === 'true';
-
-// Swift installation paths
-const SWIFT_VERSION = '6.1';
-const SWIFT_RELEASE = `swift-${SWIFT_VERSION}-RELEASE`;
-const SWIFT_INSTALL_DIR = resolve(HOME, '.local/swift');
 
 function run(
   cmd: string,
-  options?: {cwd?: string; ignoreError?: boolean; timeout?: number},
+  options?: {cwd?: string; ignoreError?: boolean},
 ): string {
   try {
     return execSync(cmd, {
       cwd: options?.cwd ?? PROJECT_ROOT,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: options?.timeout ?? 120_000,
     }).trim();
   } catch (error) {
     if (options?.ignoreError) return '';
@@ -47,129 +59,52 @@ function log(msg: string): void {
 }
 
 function warn(msg: string): void {
-  console.warn(`[setup-env] WARNING: ${msg}`);
+  console.warn(`[setup-env] ⚠ ${msg}`);
 }
 
-function commandExists(cmd: string): boolean {
+// ---------------------------------------------------------------------------
+// Project-specific setup-env:* sub-script discovery
+// ---------------------------------------------------------------------------
+
+function discoverProjectSetupScripts(): string[] {
+  const pkgPath = resolve(PROJECT_ROOT, 'package.json');
+  if (!existsSync(pkgPath)) return [];
+
+  let pkg: {scripts?: Record<string, string>};
   try {
-    execSync(`command -v ${cmd}`, {stdio: 'pipe'});
-    return true;
-  } catch {
-    return false;
+    pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
+      scripts?: Record<string, string>;
+    };
+  } catch (error) {
+    warn(`Failed to parse package.json: ${String(error)}`);
+    return [];
   }
+
+  const scripts = pkg.scripts ?? {};
+  return Object.keys(scripts)
+    .filter((name) => name.startsWith('setup-env:'))
+    .sort();
 }
 
-// ---------------------------------------------------------------------------
-// Swift installation (remote only)
-// ---------------------------------------------------------------------------
+function runProjectSetupScripts(): void {
+  const subScripts = discoverProjectSetupScripts();
+  if (subScripts.length === 0) return;
 
-function getSwiftBinDir(): string {
-  // Check common install locations
-  const candidates = [
-    resolve(SWIFT_INSTALL_DIR, 'usr/bin'),
-    `/tmp/${SWIFT_RELEASE}-ubuntu24.04/usr/bin`,
-  ];
-  for (const dir of candidates) {
-    if (existsSync(resolve(dir, 'swift'))) {
-      return dir;
+  log(
+    `Running ${subScripts.length} project setup script(s): ${subScripts.join(', ')}`,
+  );
+  for (const name of subScripts) {
+    log(`→ ${name}`);
+    try {
+      execSync(`bun run ${name}`, {
+        cwd: PROJECT_ROOT,
+        encoding: 'utf-8',
+        stdio: 'inherit',
+      });
+    } catch {
+      warn(`${name} failed — continuing.`);
     }
   }
-  return resolve(SWIFT_INSTALL_DIR, 'usr/bin');
-}
-
-function installSwift(): void {
-  // Check if swift is already available
-  if (commandExists('swift')) {
-    const version = run('swift --version', {ignoreError: true});
-    if (version) {
-      log(`Swift already installed: ${version.split('\n')[0]}`);
-      return;
-    }
-  }
-
-  // Check if we already downloaded it
-  const swiftBinDir = getSwiftBinDir();
-  if (existsSync(resolve(swiftBinDir, 'swift'))) {
-    log(`Swift already downloaded at ${swiftBinDir}`);
-    addToPath(swiftBinDir);
-    return;
-  }
-
-  log(`Installing Swift ${SWIFT_VERSION} for Linux...`);
-
-  // Detect architecture
-  const arch = run('uname -m');
-  const archSuffix = arch === 'aarch64' ? '-aarch64' : '';
-
-  // Detect Ubuntu version
-  const osRelease = run('cat /etc/os-release', {ignoreError: true});
-  let ubuntuVersion = '24.04';
-  let ubuntuCodename = 'ubuntu2404';
-  if (osRelease.includes('22.04')) {
-    ubuntuVersion = '22.04';
-    ubuntuCodename = 'ubuntu2204';
-  }
-
-  const tarball = `${SWIFT_RELEASE}-ubuntu${ubuntuVersion}${archSuffix}.tar.gz`;
-  const url = `https://download.swift.org/swift-${SWIFT_VERSION}-release/${ubuntuCodename}${archSuffix}/${SWIFT_RELEASE}/${tarball}`;
-  const tmpTarball = `/tmp/${tarball}`;
-
-  // Download
-  log(`Downloading from ${url}...`);
-  run(`curl -sL "${url}" -o "${tmpTarball}"`, {timeout: 600_000});
-
-  // Extract to install dir
-  log('Extracting...');
-  run(`mkdir -p "${SWIFT_INSTALL_DIR}"`);
-  run(
-    `tar xzf "${tmpTarball}" --strip-components=1 -C "${SWIFT_INSTALL_DIR}"`,
-    {timeout: 300_000},
-  );
-
-  // Clean up tarball
-  run(`rm -f "${tmpTarball}"`, {ignoreError: true});
-
-  // Add to PATH
-  const binDir = resolve(SWIFT_INSTALL_DIR, 'usr/bin');
-  addToPath(binDir);
-
-  // Verify
-  const version = run(`"${resolve(binDir, 'swift')}" --version`, {
-    ignoreError: true,
-  });
-  if (version) {
-    log(`Swift installed: ${version.split('\n')[0]}`);
-  } else {
-    warn('Swift installation may have failed — swift --version returned empty');
-  }
-}
-
-function addToPath(dir: string): void {
-  const envFile = process.env.CLAUDE_ENV_FILE;
-  if (envFile) {
-    appendFileSync(envFile, `export PATH="${dir}:$PATH"\n`);
-  } else {
-    warn(
-      'CLAUDE_ENV_FILE not set. Swift may not be on PATH for subsequent commands.',
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Beads initialization (remote only)
-// ---------------------------------------------------------------------------
-
-function installBeads(): void {
-  if (commandExists('bd')) {
-    log('bd (beads) already installed.');
-    return;
-  }
-
-  log('Installing bd (beads issue tracker)...');
-  run(
-    'curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash',
-    {ignoreError: true, timeout: 60_000},
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -179,17 +114,50 @@ function installBeads(): void {
 function setupRemote(): void {
   log('Remote environment detected. Installing tools...');
 
-  // 1. Install node dependencies
+  // Phase 1: Bootstrap — things that must happen before doctor can run
+
+  // 1a. Install node dependencies (needed for SDK / doctor to be available)
   log('Installing node dependencies...');
   run('bun install', {ignoreError: true});
 
-  // 2. Install Swift
-  installSwift();
+  // 1b. Install mise if not present
+  if (!existsSync(MISE_BIN)) {
+    log('Installing mise...');
+    run('curl -fsSL https://mise.run | sh', {ignoreError: true});
+  }
 
-  // 3. Install beads
-  installBeads();
+  // 1c. Ensure mise shims + ~/.local/bin are on PATH
+  const envFile = process.env.CLAUDE_ENV_FILE;
+  if (envFile) {
+    if (existsSync(MISE_BIN)) {
+      log('Adding mise shims to PATH...');
+      appendFileSync(envFile, `export PATH="${MISE_SHIMS_DIR}:$PATH"\n`);
+    }
+    const localBin = resolve(HOME, '.local/bin');
+    appendFileSync(envFile, `export PATH="${localBin}:$PATH"\n`);
+  } else {
+    warn(
+      'CLAUDE_ENV_FILE not set. Tool binaries may not be on PATH for subsequent commands.',
+    );
+  }
 
-  log('Remote setup complete.');
+  // Phase 1.5: Project-specific setup-env:* scripts
+  runProjectSetupScripts();
+
+  // Phase 2: Delegate to doctor --fix --yes for SDK component tools.
+  // --yes pre-approves system-level installs (mise, br). Safe in
+  // remote/sandbox environments; on local dev, approvals are explicit.
+  log('Running doctor --fix --yes...');
+  try {
+    execSync('bun run doctor:fix -- --yes', {
+      cwd: PROJECT_ROOT,
+      encoding: 'utf-8',
+      stdio: 'inherit',
+    });
+    log('Remote setup complete.');
+  } catch {
+    warn('doctor --fix --yes reported failures. Check output above.');
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -197,24 +165,14 @@ function setupRemote(): void {
 // ---------------------------------------------------------------------------
 
 function validateLocal(): void {
-  let hasErrors = false;
-
-  // Check Swift
-  if (!commandExists('swift')) {
-    warn(
-      'Swift is not installed. Install from https://www.swift.org/install/ or via Xcode.',
-    );
-    hasErrors = true;
-  }
-
-  // Check bun
-  if (!commandExists('bun')) {
-    warn('Bun is not installed. Install from https://bun.sh/');
-    hasErrors = true;
-  }
-
-  if (!hasErrors) {
-    log('Local environment OK.');
+  try {
+    execSync('bun run doctor -- --quiet', {
+      cwd: PROJECT_ROOT,
+      encoding: 'utf-8',
+      stdio: 'inherit',
+    });
+  } catch {
+    // doctor prints its own output — no need to duplicate
   }
 }
 
