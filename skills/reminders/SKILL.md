@@ -19,11 +19,30 @@ This returns the tool author's guidance on best practices and strategic usage pa
 For API documentation, use `reminders --help` (concise) or `--help --verbose` (comprehensive).
 For subcommand help, use `reminders <command> --help` or `--help --verbose`.
 
+### Query convention
+
+Structured CLI flags filter at fetch time. The JMESPath positional `[QUERY]`
+argument filters and projects on the result. Order on the command line never
+changes the result — flags always run first.
+
+```bash
+# Identical results:
+reminders query --list "Work" "[?priority == 'high']" --pretty
+reminders query "[?priority == 'high']" --list "Work" --pretty
+```
+
+Foundation reference: see `docs/query-reference.md` (recipes, JMESPath
+fundamentals, project-specific extensions).
+
 ### User preferences
 
 - Always use `--pretty` when showing output to the user.
 - Default to `--all-lists` unless the user specifies a particular list.
 - Use `--detail compact` (default) for queries unless more detail is needed.
-- When searching, prefer `--search` over `--jmespath` for simple text matches.
+- When searching, prefer `--search` over JMESPath for simple text matches.
+  For case-insensitive JMESPath matching, use `lower()` / `upper()`:
+  `reminders query "[?contains(lower(title), 'meeting')]"`.
+- For date ranges, use the per-field flags: `--created-from` / `--created-to`,
+  `--modified-from` / `--modified-to`, `--due-from` / `--due-to`.
 - To find a reminder's ID for update/delete, query first then extract the `id` field.
 - Pipe to `jq` for advanced formatting: `reminders query --list "Work" | jq '.reminders[].title'`

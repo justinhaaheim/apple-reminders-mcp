@@ -86,7 +86,7 @@ Sources/
 
 | Tool | Description |
 |------|-------------|
-| `query_reminders` | Search and filter reminders with JMESPath support |
+| `query_reminders` | Search and filter reminders. Convention: structured params (list, status, searchText, per-field date ranges) filter at fetch time; the JMESPath `query` filters/projects on the result. See [`docs/query-reference.md`](docs/query-reference.md). |
 | `get_lists` | Get all reminder lists |
 | `create_list` | Create a new list |
 | `create_reminders` | Create one or more reminders (batch) |
@@ -99,9 +99,27 @@ Sources/
 
 ## CLI Usage
 
+**Query convention**: structured CLI flags (`--list`, `--status`, `--search`,
+`--created-from/-to`, `--modified-from/-to`, `--due-from/-to`, `--sort`,
+`--per-page`) filter at fetch time; the positional `[QUERY]` JMESPath
+expression filters and projects on the result. Order on the command line
+never changes results — flags always run first. Foundation reference:
+[`docs/query-reference.md`](docs/query-reference.md).
+
 ```bash
 # Query reminders (default command)
 reminders query --list "Work" --search "meeting" --status incomplete
+
+# JMESPath as positional argument
+reminders query --all-lists "[?priority == 'high']" --pretty
+
+# Per-field date ranges
+reminders query --due-from 2026-03-07 --due-to 2026-03-14 --sort dueDate
+reminders query --created-from 2026-04-30 --status all
+reminders query --modified-from 2026-05-01 --pretty
+
+# Case-insensitive matching via project-specific lower() / upper() functions
+reminders query "[?contains(lower(title), 'meeting')]" --pretty
 
 # List all reminder lists
 reminders lists

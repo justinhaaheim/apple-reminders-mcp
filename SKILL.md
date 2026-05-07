@@ -9,6 +9,17 @@ plugin skill (with frontmatter), see [`skills/reminders/SKILL.md`](skills/remind
 > **Binary**: `reminders` (built from this repo)
 > **Output**: All commands output JSON to stdout. Logs go to stderr.
 
+## Query convention
+
+Structured CLI flags (`--list`, `--status`, `--search`, `--created-from/-to`,
+`--modified-from/-to`, `--due-from/-to`, `--sort`, `--per-page`) filter at
+fetch time. The positional `[QUERY]` JMESPath expression filters and
+projects on the result. Order on the command line never changes results —
+flags always run first.
+
+For the full picture (recipes, JMESPath fundamentals, project-specific
+`lower()` / `upper()` extensions), see [`docs/query-reference.md`](docs/query-reference.md).
+
 ## Quick Reference
 
 ```bash
@@ -89,7 +100,8 @@ Control how much data is returned:
 
 All dates use ISO 8601 with timezone: `2026-03-07T09:00:00-08:00`
 
-Date-only format also works for `--from`/`--to`: `2026-03-07`
+Date-only format also works for the per-field date flags
+(`--created-from`/`-to`, `--modified-from`/`-to`, `--due-from`/`-to`): `2026-03-07`
 
 ### Clearable Fields
 
@@ -101,15 +113,23 @@ On update, some fields can be cleared (set to null) with `--clear-*` flags:
 
 ### JMESPath Queries
 
-Advanced filtering with `--jmespath`:
+JMESPath is the positional `[QUERY]` argument:
 
 ```bash
 # Get just titles of high-priority reminders
-reminders query --all-lists --detail full --jmespath "[?priority=='high'].title"
+reminders query --all-lists "[?priority=='high'].title"
 
 # Count by list
-reminders query --all-lists --jmespath "length([?listName=='Work'])"
+reminders query --all-lists "length([?listName=='Work'])"
+
+# Case-insensitive (project extension):
+reminders query "[?contains(lower(title), 'meeting')]"
 ```
+
+`--sort`, `--detail`, and pagination are bypassed when JMESPath is supplied
+— sort with `sort_by(@, &field)`, slice with `[N:M]`. See
+[`docs/query-reference.md`](docs/query-reference.md) for fundamentals,
+recipes, and the `lower()` / `upper()` extensions.
 
 ## Global Options
 
@@ -128,10 +148,10 @@ All commands support:
 
 ```bash
 # What's due today or overdue?
-reminders query --all-lists --status incomplete --from "$(date -I)" --sort dueDate --pretty
+reminders query --all-lists --status incomplete --due-from "$(date -I)" --sort dueDate --pretty
 
-# What did I complete recently?
-reminders query --all-lists --status completed --from "$(date -v-7d -I)" --sort newest --pretty
+# What did I complete recently? (no --completed-from flag — use JMESPath for completionDate)
+reminders query --all-lists --status completed --modified-from "$(date -v-7d -I)" --sort newest --pretty
 ```
 
 ### Task Management
