@@ -474,6 +474,127 @@ describe('Query operations', () => {
       expect(typeof wrapper.pageInfo.hasNextPage).toBe('boolean');
     });
 
+    test('lower() JMESPath function enables case-insensitive match', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        query: "[?contains(lower(title), 'buy')]",
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{title: string}>;
+      // "Buy groceries" and "Buy birthday gift" — capital B, lower() makes match work
+      expect(reminders.length).toBeGreaterThanOrEqual(2);
+      const titles = reminders.map((r) => r.title);
+      expect(titles).toContain('Buy groceries');
+      expect(titles).toContain('Buy birthday gift');
+    });
+
+    test('upper() JMESPath function works on string input', async () => {
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        query: "upper('hello')",
+      });
+
+      // Single-string expression returns the upper-cased string
+      expect(result).toBe('HELLO');
+    });
+
+    test('createdFrom filters by createdDate >= bound', async () => {
+      // Sentinel reminder created now
+      const sentinel = `Created-Bound Sentinel ${Date.now()}`;
+      await client.callTool('create_reminders', {
+        reminders: [{title: sentinel, list: {name: testListName}}],
+      });
+
+      // Use a future date — should exclude everything
+      const future = new Date(Date.now() + 7 * 24 * 3600 * 1000)
+        .toISOString()
+        .slice(0, 10);
+
+      const futureResult = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        createdFrom: future,
+      });
+      const futureReminders = extractReminders<{title: string}>(futureResult);
+      expect(futureReminders.find((r) => r.title === sentinel)).toBeUndefined();
+
+      // Use a past date — should include the sentinel
+      const past = '2020-01-01';
+      const pastResult = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        createdFrom: past,
+      });
+      const pastReminders = extractReminders<{title: string}>(pastResult);
+      expect(pastReminders.find((r) => r.title === sentinel)).toBeDefined();
+    });
+
+    test('modifiedFrom filters by lastModifiedDate >= bound', async () => {
+      const sentinel = `Modified-Bound Sentinel ${Date.now()}`;
+      await client.callTool('create_reminders', {
+        reminders: [{title: sentinel, list: {name: testListName}}],
+      });
+
+      const future = new Date(Date.now() + 7 * 24 * 3600 * 1000)
+        .toISOString()
+        .slice(0, 10);
+
+      const futureResult = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        modifiedFrom: future,
+      });
+      const futureReminders = extractReminders<{title: string}>(futureResult);
+      expect(futureReminders.find((r) => r.title === sentinel)).toBeUndefined();
+
+      const pastResult = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        modifiedFrom: '2020-01-01',
+      });
+      const pastReminders = extractReminders<{title: string}>(pastResult);
+      expect(pastReminders.find((r) => r.title === sentinel)).toBeDefined();
+    });
+
+    test('dueFrom and dueTo filter by dueDate', async () => {
+      // status: 'all' because an earlier test ("filters completed reminders")
+      // may have marked 'Call dentist' complete.
+      const result = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        status: 'all',
+        dueFrom: '2026-01-15',
+        dueTo: '2026-01-31',
+      });
+
+      const reminders = extractReminders<{title: string; dueDate: string}>(
+        result,
+      );
+      const titles = reminders.map((r) => r.title);
+      // Setup creates "Call dentist" (Jan 20) and "Finish report" (Jan 25)
+      expect(titles).toContain('Call dentist');
+      expect(titles).toContain('Finish report');
+    });
+
+    test('CLI flag order is irrelevant — convention guarantees flags run first', async () => {
+      // These are MCP calls; the equivalent on the CLI is reordering flags vs
+      // the positional JMESPath. Here we verify the same result whether the
+      // structured flags filter narrows widely or not — the convention says
+      // result is order-independent.
+
+      const flagsThenJmes = await client.callTool('query_reminders', {
+        list: {name: testListName},
+        query: "[?priority == 'high']",
+      });
+      const jmesThenFlags = await client.callTool('query_reminders', {
+        query: "[?priority == 'high']",
+        list: {name: testListName},
+      });
+
+      expect(Array.isArray(flagsThenJmes)).toBe(true);
+      expect(Array.isArray(jmesThenFlags)).toBe(true);
+
+      const a = (flagsThenJmes as Array<{id: string}>).map((r) => r.id).sort();
+      const b = (jmesThenFlags as Array<{id: string}>).map((r) => r.id).sort();
+      expect(a).toEqual(b);
+    });
+
     test('cursor-based page traversal returns all results without overlap', async () => {
       // Page 1: get first 2 results
       const page1 = await client.callTool('query_reminders', {

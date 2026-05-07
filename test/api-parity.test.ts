@@ -1,6 +1,6 @@
 /**
  * API Parity tests for features added to match the Claude iOS Reminders API.
- * Tests: url, dueDateIncludesTime, alarms, recurrence, searchText, dateFrom/dateTo.
+ * Tests: url, dueDateIncludesTime, alarms, recurrence, searchText, per-field date ranges.
  *
  * All operations are isolated to a unique test list using mock mode.
  */

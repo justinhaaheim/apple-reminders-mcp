@@ -20,20 +20,28 @@ exports[`MCP schema snapshots initialize response server info 1`] = `
 
 exports[`MCP schema snapshots tool schemas query_reminders 1`] = `
 {
-  "description": "Search and filter reminders. Returns incomplete reminders from the default list by default. Supports list selection, text search, date ranges, status filtering, and JMESPath queries. Use help("query_reminders") for full parameter docs.",
+  "description": "Search and filter reminders. Returns incomplete reminders from the default list by default. Convention: structured params (list, status, searchText, per-field date ranges) filter at fetch time; the 'query' JMESPath expression filters/projects on the result. See docs/query-reference.md and help("query_reminders") for full parameter docs.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
+      "createdFrom": {
+        "description": "Filter by createdDate >= this ISO 8601 date (or YYYY-MM-DD).",
+        "type": "string",
+      },
+      "createdTo": {
+        "description": "Filter by createdDate <= this ISO 8601 date (or YYYY-MM-DD).",
+        "type": "string",
+      },
       "cursor": {
         "description": "Opaque cursor from previous response's pageInfo.endCursor for next page.",
         "type": "string",
       },
-      "dateFrom": {
-        "description": "Start of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.",
+      "dueFrom": {
+        "description": "Filter by dueDate >= this ISO 8601 date (or YYYY-MM-DD).",
         "type": "string",
       },
-      "dateTo": {
-        "description": "End of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.",
+      "dueTo": {
+        "description": "Filter by dueDate <= this ISO 8601 date (or YYYY-MM-DD).",
         "type": "string",
       },
       "list": {
@@ -55,6 +63,14 @@ exports[`MCP schema snapshots tool schemas query_reminders 1`] = `
         },
         "type": "object",
       },
+      "modifiedFrom": {
+        "description": "Filter by lastModifiedDate >= this ISO 8601 date (or YYYY-MM-DD).",
+        "type": "string",
+      },
+      "modifiedTo": {
+        "description": "Filter by lastModifiedDate <= this ISO 8601 date (or YYYY-MM-DD).",
+        "type": "string",
+      },
       "outputDetail": {
         "default": "compact",
         "description": "Controls which fields are returned. 'minimal': id, title. 'compact' (default): most useful fields, nulls omitted. 'full': all fields, nulls shown. Ignored when 'query' (JMESPath) is provided. listName and isCompleted are contextually omitted in minimal/compact when implied by query params.",
@@ -72,7 +88,7 @@ exports[`MCP schema snapshots tool schemas query_reminders 1`] = `
         "type": "integer",
       },
       "query": {
-        "description": "JMESPath expression for advanced filtering/projection. Applied after list, status, searchText, and date filters. When provided, outputDetail is ignored (always uses full fields as input).",
+        "description": "JMESPath expression for advanced filtering/projection. Applied after list, status, searchText, and date filters. When provided, outputDetail is ignored (always uses full fields as input). Project-specific extensions: lower(string), upper(string).",
         "type": "string",
       },
       "searchText": {
