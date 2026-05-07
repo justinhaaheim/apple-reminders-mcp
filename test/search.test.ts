@@ -514,6 +514,217 @@ describe('Query operations', () => {
     });
   });
 
+  describe('per-field date filtering', () => {
+    let dateClient: MCPClient;
+    const seedListId = 'date-list-default';
+    const seedListName = 'Date Range Test List';
+
+    beforeAll(async () => {
+      dateClient = await MCPClient.create({mockMode: true, testMode: false});
+
+      // Seed reminders with explicit createdDate / lastModifiedDate / dueDate so we
+      // can exercise each per-field flag in isolation without time-of-day flakes.
+      // Use a unique list name so it doesn't collide with the mock store's
+      // auto-created default "Reminders" list.
+      await dateClient.callTool('_seed_mock_data', {
+        lists: [{id: seedListId, name: seedListName, isDefault: false}],
+        reminders: [
+          {
+            id: 'date001',
+            title: 'Old reminder',
+            listId: seedListId,
+            createdDate: '2026-01-15T10:00:00Z',
+            lastModifiedDate: '2026-01-15T10:00:00Z',
+            dueDate: '2026-02-15T10:00:00Z',
+          },
+          {
+            id: 'date002',
+            title: 'Mid reminder',
+            listId: seedListId,
+            createdDate: '2026-03-15T10:00:00Z',
+            lastModifiedDate: '2026-04-01T10:00:00Z',
+            dueDate: '2026-05-15T10:00:00Z',
+          },
+          {
+            id: 'date003',
+            title: 'New reminder Meeting',
+            listId: seedListId,
+            createdDate: '2026-05-01T10:00:00Z',
+            lastModifiedDate: '2026-05-01T10:00:00Z',
+            dueDate: '2026-08-15T10:00:00Z',
+          },
+          {
+            id: 'date004',
+            title: 'No due date reminder',
+            listId: seedListId,
+            createdDate: '2026-04-01T10:00:00Z',
+            lastModifiedDate: '2026-04-01T10:00:00Z',
+          },
+        ],
+      });
+    });
+
+    afterAll(async () => {
+      await dateClient.cleanup();
+    });
+
+    test('createdFrom filters by createdDate', async () => {
+      const result = await dateClient.callTool('query_reminders', {
+        list: {name: seedListName},
+        createdFrom: '2026-04-01',
+      });
+      const reminders = extractReminders<{id: string}>(result);
+      const ids = reminders.map((r) => r.id).sort();
+      // 003 (May) and 004 (April) qualify; 001 (Jan) and 002 (Mar) do not.
+      expect(ids).toEqual(['date003', 'date004']);
+    });
+
+    test('createdTo filters by createdDate upper bound', async () => {
+      const result = await dateClient.callTool('query_reminders', {
+        list: {name: seedListName},
+        createdTo: '2026-02-01',
+      });
+      const reminders = extractReminders<{id: string}>(result);
+      const ids = reminders.map((r) => r.id).sort();
+      expect(ids).toEqual(['date001']);
+    });
+
+    test('modifiedFrom filters by lastModifiedDate (not createdDate)', async () => {
+      // Reminder 002 has createdDate=2026-03-15 but lastModifiedDate=2026-04-01.
+      // A modifiedFrom of 2026-04-01 must include 002 even though its created date
+      // is earlier — proves we filter on the right field. 003 (modified May) and
+      // 004 (modified April) also qualify; only 001 (modified January) does not.
+      const result = await dateClient.callTool('query_reminders', {
+        list: {name: seedListName},
+        modifiedFrom: '2026-04-01',
+      });
+      const reminders = extractReminders<{id: string}>(result);
+      const ids = reminders.map((r) => r.id).sort();
+      expect(ids).toEqual(['date002', 'date003', 'date004']);
+    });
+
+    test('modifiedTo filters by lastModifiedDate upper bound', async () => {
+      const result = await dateClient.callTool('query_reminders', {
+        list: {name: seedListName},
+        modifiedTo: '2026-03-01',
+      });
+      const reminders = extractReminders<{id: string}>(result);
+      const ids = reminders.map((r) => r.id).sort();
+      expect(ids).toEqual(['date001']);
+    });
+
+    test('dueFrom filters by dueDate, excluding reminders without one', async () => {
+      const result = await dateClient.callTool('query_reminders', {
+        list: {name: seedListName},
+        status: 'all',
+        dueFrom: '2026-04-01',
+      });
+      const reminders = extractReminders<{id: string}>(result);
+      const ids = reminders.map((r) => r.id).sort();
+      // 002 (May), 003 (Aug). 001 (Feb) is too early. 004 has no due date.
+      expect(ids).toEqual(['date002', 'date003']);
+    });
+
+    test('dueTo filters by dueDate upper bound', async () => {
+      const result = await dateClient.callTool('query_reminders', {
+        list: {name: seedListName},
+        status: 'all',
+        dueTo: '2026-03-01',
+      });
+      const reminders = extractReminders<{id: string}>(result);
+      const ids = reminders.map((r) => r.id).sort();
+      expect(ids).toEqual(['date001']);
+    });
+
+    test('combining flags narrows the result intersectively', async () => {
+      const result = await dateClient.callTool('query_reminders', {
+        list: {name: seedListName},
+        status: 'all',
+        createdFrom: '2026-03-01',
+        dueTo: '2026-06-01',
+      });
+      const reminders = extractReminders<{id: string}>(result);
+      const ids = reminders.map((r) => r.id).sort();
+      // 002: created Mar 15, due May 15 → matches both. 003: created May 1, due Aug 15 → fails dueTo.
+      expect(ids).toEqual(['date002']);
+    });
+  });
+
+  describe('positional JMESPath via the `query` field', () => {
+    let qClient: MCPClient;
+    const seedListId = 'q-list-default';
+    const seedListName = 'JMES Test List';
+
+    beforeAll(async () => {
+      qClient = await MCPClient.create({mockMode: true, testMode: false});
+      await qClient.callTool('_seed_mock_data', {
+        lists: [{id: seedListId, name: seedListName, isDefault: false}],
+        reminders: [
+          {
+            id: 'q-1',
+            title: 'Team Meeting today',
+            listId: seedListId,
+            priority: 'high',
+          },
+          {id: 'q-2', title: 'BUY MILK', listId: seedListId, priority: 'low'},
+          {
+            id: 'q-3',
+            title: 'plain task',
+            listId: seedListId,
+            priority: 'none',
+          },
+        ],
+      });
+    });
+
+    afterAll(async () => {
+      await qClient.cleanup();
+    });
+
+    test('query field accepts a JMESPath filter expression', async () => {
+      const result = await qClient.callTool('query_reminders', {
+        list: {name: seedListName},
+        query: "[?priority == 'high']",
+      });
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{id: string}>;
+      expect(reminders.map((r) => r.id)).toEqual(['q-1']);
+    });
+
+    test('lower() makes contains() case-insensitive', async () => {
+      const result = await qClient.callTool('query_reminders', {
+        list: {name: seedListName},
+        query: "[?contains(lower(title), 'meeting')]",
+      });
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{id: string}>;
+      expect(reminders.map((r) => r.id)).toEqual(['q-1']);
+    });
+
+    test('upper() makes uppercase comparisons trivial', async () => {
+      const result = await qClient.callTool('query_reminders', {
+        list: {name: seedListName},
+        query: "[?contains(upper(title), 'MILK')]",
+      });
+      expect(Array.isArray(result)).toBe(true);
+      const reminders = result as Array<{id: string}>;
+      expect(reminders.map((r) => r.id)).toEqual(['q-2']);
+    });
+
+    test('CLI flags + JMESPath compose: flags filter first, JMESPath second', async () => {
+      // Flags narrow to a single list (no-op here since there is only one), then
+      // JMESPath picks high priority. Same flags + same expression must always
+      // produce the same result, regardless of which is "specified first".
+      const result = await qClient.callTool('query_reminders', {
+        list: {name: seedListName},
+        query: "[?priority == 'high' || priority == 'low'].id",
+      });
+      expect(Array.isArray(result)).toBe(true);
+      const ids = result as string[];
+      expect(ids.sort()).toEqual(['q-1', 'q-2']);
+    });
+  });
+
   describe('get_lists', () => {
     test('returns all lists', async () => {
       const result = await client.callTool('get_lists', {});

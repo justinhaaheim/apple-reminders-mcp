@@ -34,17 +34,29 @@ struct QueryCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Opaque cursor from previous response's pageInfo.endCursor for next page")
     var cursor: String?
 
-    @Option(name: .long, help: "Date range start (ISO 8601)")
-    var from: String?
+    @Option(name: .long, help: "Filter by createdDate >= this ISO 8601 date (or YYYY-MM-DD)")
+    var createdFrom: String?
 
-    @Option(name: .long, help: "Date range end (ISO 8601)")
-    var to: String?
+    @Option(name: .long, help: "Filter by createdDate <= this ISO 8601 date (or YYYY-MM-DD)")
+    var createdTo: String?
 
-    @Option(name: .long, help: "JMESPath query expression")
-    var jmespath: String?
+    @Option(name: .long, help: "Filter by lastModifiedDate >= this ISO 8601 date (or YYYY-MM-DD)")
+    var modifiedFrom: String?
+
+    @Option(name: .long, help: "Filter by lastModifiedDate <= this ISO 8601 date (or YYYY-MM-DD)")
+    var modifiedTo: String?
+
+    @Option(name: .long, help: "Filter by dueDate >= this ISO 8601 date (or YYYY-MM-DD)")
+    var dueFrom: String?
+
+    @Option(name: .long, help: "Filter by dueDate <= this ISO 8601 date (or YYYY-MM-DD)")
+    var dueTo: String?
 
     @Option(name: .long, help: "Output detail level: minimal, compact, full")
     var detail: String?
+
+    @Argument(help: "Optional JMESPath expression. CLI flags above filter at fetch time; this expression then filters/projects the result. Example: \"[?priority == 'high']\"")
+    var query: String?
 
     private static let validStatuses = ["incomplete", "completed", "all"]
     private static let validSorts = ["newest", "oldest", "priority", "dueDate"]
@@ -85,12 +97,16 @@ struct QueryCommand: AsyncParsableCommand {
             list: listSelector,
             status: status,
             sortBy: sort,
-            query: jmespath,
+            query: query,
             perPage: perPage,
             cursor: cursor,
             searchText: search,
-            dateFrom: from,
-            dateTo: to,
+            createdFrom: createdFrom,
+            createdTo: createdTo,
+            modifiedFrom: modifiedFrom,
+            modifiedTo: modifiedTo,
+            dueFrom: dueFrom,
+            dueTo: dueTo,
             outputDetail: detail
         )
 

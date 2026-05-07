@@ -202,7 +202,7 @@ public class MCPServer {
             // query_reminders
             MCPResponse.Result.Tool(
                 name: "query_reminders",
-                description: "Search and filter reminders. Returns incomplete reminders from the default list by default. Supports list selection, text search, date ranges, status filtering, and JMESPath queries. Use help(\"query_reminders\") for full parameter docs.",
+                description: "Search and filter reminders. Convention: structured params (list, status, searchText, the per-field date ranges) filter at fetch time; the optional 'query' JMESPath expression then filters/projects the result. Returns incomplete reminders from the default list by default. See docs/query-reference.md for the full convention and JMESPath fundamentals. Use help(\"query_reminders\") for parameter docs.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -226,13 +226,29 @@ public class MCPServer {
                             "type": .string("string"),
                             "description": .string("Case-insensitive text search across reminder titles and notes")
                         ]),
-                        "dateFrom": .object([
+                        "createdFrom": .object([
                             "type": .string("string"),
-                            "description": .string("Start of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.")
+                            "description": .string("Filter by createdDate >= this ISO 8601 date (or YYYY-MM-DD).")
                         ]),
-                        "dateTo": .object([
+                        "createdTo": .object([
                             "type": .string("string"),
-                            "description": .string("End of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.")
+                            "description": .string("Filter by createdDate <= this ISO 8601 date (or YYYY-MM-DD).")
+                        ]),
+                        "modifiedFrom": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by lastModifiedDate >= this ISO 8601 date (or YYYY-MM-DD).")
+                        ]),
+                        "modifiedTo": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by lastModifiedDate <= this ISO 8601 date (or YYYY-MM-DD).")
+                        ]),
+                        "dueFrom": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by dueDate >= this ISO 8601 date (or YYYY-MM-DD). Reminders with no due date are excluded from this filter.")
+                        ]),
+                        "dueTo": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by dueDate <= this ISO 8601 date (or YYYY-MM-DD). Reminders with no due date are excluded from this filter.")
                         ]),
                         "sortBy": .object([
                             "type": .string("string"),
@@ -242,7 +258,7 @@ public class MCPServer {
                         ]),
                         "query": .object([
                             "type": .string("string"),
-                            "description": .string("JMESPath expression for advanced filtering/projection. Applied after list, status, searchText, and date filters. When provided, outputDetail is ignored (always uses full fields as input).")
+                            "description": .string("Optional JMESPath expression for advanced filtering/projection. Applied after the structured filters above. Project extensions: lower(string), upper(string) for case-insensitive comparisons. When provided, outputDetail is ignored (always uses full fields as input). Reference: docs/query-reference.md.")
                         ]),
                         "outputDetail": .object([
                             "type": .string("string"),
@@ -671,8 +687,12 @@ public class MCPServer {
             let perPage = arguments["perPage"]?.value as? Int
             let cursor = arguments["cursor"]?.value as? String
             let searchText = arguments["searchText"]?.value as? String
-            let dateFrom = arguments["dateFrom"]?.value as? String
-            let dateTo = arguments["dateTo"]?.value as? String
+            let createdFrom = arguments["createdFrom"]?.value as? String
+            let createdTo = arguments["createdTo"]?.value as? String
+            let modifiedFrom = arguments["modifiedFrom"]?.value as? String
+            let modifiedTo = arguments["modifiedTo"]?.value as? String
+            let dueFrom = arguments["dueFrom"]?.value as? String
+            let dueTo = arguments["dueTo"]?.value as? String
             let outputDetail = arguments["outputDetail"]?.value as? String
 
             let result = try await remindersManager.queryReminders(
@@ -683,8 +703,12 @@ public class MCPServer {
                 perPage: perPage,
                 cursor: cursor,
                 searchText: searchText,
-                dateFrom: dateFrom,
-                dateTo: dateTo,
+                createdFrom: createdFrom,
+                createdTo: createdTo,
+                modifiedFrom: modifiedFrom,
+                modifiedTo: modifiedTo,
+                dueFrom: dueFrom,
+                dueTo: dueTo,
                 outputDetail: outputDetail
             )
 

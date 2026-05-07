@@ -59,13 +59,15 @@ public class MockReminder: Reminder {
         id: String = UUID().uuidString,
         title: String = "",
         calendarId: String,
+        creationDate: Date = Date(),
+        lastModifiedDate: Date = Date(),
         store: MockReminderStore? = nil
     ) {
         self.id = id
         self.title = title
         self.calendarId = calendarId
-        self.creationDate = Date()
-        self.lastModifiedDate = Date()
+        self.creationDate = creationDate
+        self.lastModifiedDate = lastModifiedDate
         self.store = store
     }
 
@@ -126,7 +128,27 @@ public class MockReminderStore: ReminderStore {
                     throw RemindersError("Seed reminder requires 'id', 'title', and 'listId'")
                 }
 
-                let reminder = MockReminder(id: id, title: title, calendarId: listId, store: self)
+                let creationDate: Date
+                if let s = dict["createdDate"] as? String, let d = Date.fromISO8601(s) {
+                    creationDate = d
+                } else {
+                    creationDate = Date()
+                }
+                let modifiedDate: Date
+                if let s = dict["lastModifiedDate"] as? String, let d = Date.fromISO8601(s) {
+                    modifiedDate = d
+                } else {
+                    modifiedDate = creationDate
+                }
+
+                let reminder = MockReminder(
+                    id: id,
+                    title: title,
+                    calendarId: listId,
+                    creationDate: creationDate,
+                    lastModifiedDate: modifiedDate,
+                    store: self
+                )
                 reminder.notes = dict["notes"] as? String
                 if let priorityStr = dict["priority"] as? String {
                     reminder.priority = Priority.fromString(priorityStr)?.internalValue ?? 0
@@ -172,7 +194,11 @@ public class MockReminderStore: ReminderStore {
         return calendar
     }
 
-    public func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder] {
+    public func fetchReminders(
+        in calendars: [ReminderCalendar],
+        status: ReminderStatus,
+        dueDateRange: DueDateRange?
+    ) async -> [Reminder] {
         let calendarIds = Set(calendars.map { $0.id })
 
         return reminders.filter { reminder in
@@ -180,12 +206,22 @@ public class MockReminderStore: ReminderStore {
 
             switch status {
             case .completed:
-                return reminder.isCompleted
+                guard reminder.isCompleted else { return false }
             case .incomplete:
-                return !reminder.isCompleted
+                guard !reminder.isCompleted else { return false }
+                if let range = dueDateRange {
+                    var components = reminder.dueDateComponents
+                    if components != nil && components!.calendar == nil {
+                        components!.calendar = Calendar.current
+                    }
+                    guard let due = components?.date else { return false }
+                    if let start = range.start, due < start { return false }
+                    if let end = range.end, due > end { return false }
+                }
             case .all:
-                return true
+                break
             }
+            return true
         }
     }
 

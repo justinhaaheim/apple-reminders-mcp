@@ -209,8 +209,12 @@ public class RemindersManager {
         perPage: Int?,
         cursor: String?,
         searchText: String?,
-        dateFrom: String?,
-        dateTo: String?,
+        createdFrom: String?,
+        createdTo: String?,
+        modifiedFrom: String?,
+        modifiedTo: String?,
+        dueFrom: String?,
+        dueTo: String?,
         outputDetail: String?
     ) async throws -> Any {
         let startTime = Date()
@@ -220,7 +224,7 @@ public class RemindersManager {
         let calendars = try resolveList(list)
         log("Resolved \(calendars.count) calendar(s)")
 
-        // 2. Fetch reminders with status filter
+        // 2. Determine status filter
         let reminderStatus: ReminderStatus
         switch status ?? "incomplete" {
         case "completed":
@@ -231,12 +235,36 @@ public class RemindersManager {
             reminderStatus = .all
         }
 
-        var filteredReminders = await store.fetchReminders(in: calendars, status: reminderStatus)
+        // 2a. Parse all date inputs up-front so we can fail fast with field-named errors.
+        let createdFromDate = try parseDateField(createdFrom, fieldName: "createdFrom")
+        let createdToDate = try parseDateField(createdTo, fieldName: "createdTo")
+        let modifiedFromDate = try parseDateField(modifiedFrom, fieldName: "modifiedFrom")
+        let modifiedToDate = try parseDateField(modifiedTo, fieldName: "modifiedTo")
+        let dueFromDate = try parseDateField(dueFrom, fieldName: "dueFrom")
+        let dueToDate = try parseDateField(dueTo, fieldName: "dueTo")
+
+        // 2b. Push due-date range into the EventKit factory predicate when status=incomplete.
+        //     `predicateForIncompleteReminders(withDueDateStarting:ending:)` filters on due date.
+        //     `predicateForCompletedReminders(withCompletionDateStarting:ending:)` filters on
+        //     completion date — not due date — so dueFrom/dueTo must run post-fetch there.
+        //     `predicateForReminders(in:)` (status=all) has no date arguments at all.
+        let dueRange: DueDateRange?
+        if reminderStatus == .incomplete && (dueFromDate != nil || dueToDate != nil) {
+            dueRange = DueDateRange(start: dueFromDate, end: dueToDate)
+        } else {
+            dueRange = nil
+        }
+
+        var filteredReminders = await store.fetchReminders(
+            in: calendars,
+            status: reminderStatus,
+            dueDateRange: dueRange
+        )
 
         let fetchTime = Date().timeIntervalSince(startTime)
         log("Fetched \(filteredReminders.count) reminders in \(Int(fetchTime * 1000))ms")
 
-        // 2b. Apply searchText filter (case-insensitive across title and notes)
+        // 2c. Apply searchText filter (case-insensitive across title and notes)
         if let searchText = searchText, !searchText.isEmpty {
             let lowercasedSearch = searchText.lowercased()
             filteredReminders = filteredReminders.filter { reminder in
@@ -251,45 +279,38 @@ public class RemindersManager {
             log("searchText filter '\(searchText)' reduced to \(filteredReminders.count) reminders")
         }
 
-        // 2c. Apply date range filter on raw Reminder objects (avoids Date→String→Date round-trip)
-        if dateFrom != nil || dateTo != nil {
-            let fromDate: Date? = dateFrom != nil ? Date.fromISO8601(dateFrom!) : nil
-            let toDate: Date? = dateTo != nil ? Date.fromISO8601(dateTo!) : nil
-
-            if dateFrom != nil && fromDate == nil {
-                throw RemindersError("Invalid dateFrom format: '\(dateFrom!)'. Expected ISO 8601.")
-            }
-            if dateTo != nil && toDate == nil {
-                throw RemindersError("Invalid dateTo format: '\(dateTo!)'. Expected ISO 8601.")
-            }
-
+        // 2d. Apply due-date range as a post-fetch filter when it wasn't pushed down
+        //     (i.e. status=all). Reminders with no due date are excluded from the filter.
+        if dueRange == nil && (dueFromDate != nil || dueToDate != nil) {
             filteredReminders = filteredReminders.filter { reminder in
-                // For completed reminders, filter by completionDate
-                // For incomplete reminders, filter by dueDate from dueDateComponents
-                let reminderDate: Date?
-                if reminder.isCompleted {
-                    reminderDate = reminder.completionDate
-                } else {
-                    var components = reminder.dueDateComponents
-                    if components != nil && components!.calendar == nil {
-                        components!.calendar = Calendar.current
-                    }
-                    reminderDate = components?.date
-                }
-
-                guard let date = reminderDate else {
-                    return false  // No date = excluded from date range filter
-                }
-
-                if let from = fromDate, date < from {
-                    return false
-                }
-                if let to = toDate, date > to {
-                    return false
-                }
+                guard let date = effectiveDueDate(for: reminder) else { return false }
+                if let from = dueFromDate, date < from { return false }
+                if let to = dueToDate, date > to { return false }
                 return true
             }
-            log("Date range filter reduced to \(filteredReminders.count) reminders")
+            log("dueDate range filter reduced to \(filteredReminders.count) reminders")
+        }
+
+        // 2e. Apply created-date range as a post-fetch filter on creationDate.
+        if createdFromDate != nil || createdToDate != nil {
+            filteredReminders = filteredReminders.filter { reminder in
+                guard let date = reminder.creationDate else { return false }
+                if let from = createdFromDate, date < from { return false }
+                if let to = createdToDate, date > to { return false }
+                return true
+            }
+            log("createdDate range filter reduced to \(filteredReminders.count) reminders")
+        }
+
+        // 2f. Apply modified-date range as a post-fetch filter on lastModifiedDate.
+        if modifiedFromDate != nil || modifiedToDate != nil {
+            filteredReminders = filteredReminders.filter { reminder in
+                guard let date = reminder.lastModifiedDate else { return false }
+                if let from = modifiedFromDate, date < from { return false }
+                if let to = modifiedToDate, date > to { return false }
+                return true
+            }
+            log("modifiedDate range filter reduced to \(filteredReminders.count) reminders")
         }
 
         // Convert to output format
@@ -377,13 +398,33 @@ public class RemindersManager {
         return response
     }
 
+    /// Parse an ISO 8601 date input, throwing a field-named error on failure.
+    private func parseDateField(_ value: String?, fieldName: String) throws -> Date? {
+        guard let value = value else { return nil }
+        guard let date = Date.fromISO8601(value) else {
+            throw RemindersError("Invalid \(fieldName) format: '\(value)'. Expected ISO 8601.")
+        }
+        return date
+    }
+
+    /// Resolve a raw Reminder's effective due date from its dueDateComponents.
+    private func effectiveDueDate(for reminder: Reminder) -> Date? {
+        var components = reminder.dueDateComponents
+        if components != nil && components!.calendar == nil {
+            components!.calendar = Calendar.current
+        }
+        return components?.date
+    }
+
     private func applyJMESPath(_ reminders: [ReminderOutput], query: String) throws -> Any {
         // Convert reminders to JSON data
         let jsonData = try JSONEncoder().encode(reminders)
 
-        // Compile and run JMESPath expression
+        // Compile and run JMESPath expression with project-specific custom functions
+        // (lower(), upper()) registered.
         let expression = try JMESExpression.compile(query)
-        let result = try expression.search(json: jsonData)
+        let runtime = JMESRuntimeFactory.makeRuntime()
+        let result = try expression.search(json: jsonData, runtime: runtime)
         return result ?? []
     }
 

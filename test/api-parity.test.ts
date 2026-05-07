@@ -1,6 +1,6 @@
 /**
  * API Parity tests for features added to match the Claude iOS Reminders API.
- * Tests: url, dueDateIncludesTime, alarms, recurrence, searchText, dateFrom/dateTo.
+ * Tests: url, dueDateIncludesTime, alarms, recurrence, searchText, dueFrom/dueTo.
  *
  * All operations are isolated to a unique test list using mock mode.
  */
@@ -439,7 +439,7 @@ describe('API Parity features', () => {
     });
   });
 
-  describe('dateFrom/dateTo parameters', () => {
+  describe('dueFrom/dueTo parameters', () => {
     beforeAll(async () => {
       // Create reminders with specific due dates for range testing
       await client.callTool('create_reminders', {
@@ -467,10 +467,10 @@ describe('API Parity features', () => {
       });
     });
 
-    test('filters by dateFrom', async () => {
+    test('filters by dueFrom', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        dateFrom: '2026-01-15T00:00:00-05:00',
+        dueFrom: '2026-01-15T00:00:00-05:00',
       });
 
       const reminders = extractReminders<{
@@ -485,10 +485,10 @@ describe('API Parity features', () => {
       expect(titles).not.toContain('Date range - no date');
     });
 
-    test('filters by dateTo', async () => {
+    test('filters by dueTo', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        dateTo: '2026-01-25T23:59:59-05:00',
+        dueTo: '2026-01-25T23:59:59-05:00',
       });
 
       const reminders = extractReminders<{
@@ -501,11 +501,11 @@ describe('API Parity features', () => {
       expect(titles).not.toContain('Date range - Feb 5');
     });
 
-    test('filters by dateFrom and dateTo together', async () => {
+    test('filters by dueFrom and dueTo together', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        dateFrom: '2026-01-15T00:00:00-05:00',
-        dateTo: '2026-01-25T23:59:59-05:00',
+        dueFrom: '2026-01-15T00:00:00-05:00',
+        dueTo: '2026-01-25T23:59:59-05:00',
       });
 
       const reminders = extractReminders<{title: string}>(result);
@@ -517,10 +517,10 @@ describe('API Parity features', () => {
       expect(titles).not.toContain('Date range - Feb 5');
     });
 
-    test('rejects invalid dateFrom format', async () => {
+    test('rejects invalid dueFrom format', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        dateFrom: 'not-a-date',
+        dueFrom: 'not-a-date',
       });
 
       expect(result._isError).toBe(true);
@@ -533,14 +533,19 @@ describe('API Parity features', () => {
 
       const queryTool = tools.find((t) => t.name === 'query_reminders');
       expect(queryTool).toBeDefined();
-      expect(queryTool!.description).toContain('text search');
+      expect(queryTool!.description).toContain('searchText');
       expect(queryTool!.description).toContain('date ranges');
       expect(queryTool!.description).toContain('JMESPath');
 
       // Verify parameters exist in the schema (progressive disclosure moved details to help tool)
       const querySchema = queryTool!.inputSchema as any;
       expect(querySchema.properties).toHaveProperty('searchText');
-      expect(querySchema.properties).toHaveProperty('dateFrom');
+      expect(querySchema.properties).toHaveProperty('createdFrom');
+      expect(querySchema.properties).toHaveProperty('createdTo');
+      expect(querySchema.properties).toHaveProperty('modifiedFrom');
+      expect(querySchema.properties).toHaveProperty('modifiedTo');
+      expect(querySchema.properties).toHaveProperty('dueFrom');
+      expect(querySchema.properties).toHaveProperty('dueTo');
       expect(querySchema.properties).toHaveProperty('outputDetail');
 
       const createTool = tools.find((t) => t.name === 'create_reminders');

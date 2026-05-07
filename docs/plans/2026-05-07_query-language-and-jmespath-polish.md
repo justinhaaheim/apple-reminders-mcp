@@ -1,8 +1,35 @@
 # Query language & JMESPath polish — plan + discussion record
 
-> **Status**: in progress
+> **Status**: complete
 > **Started**: 2026-05-07
+> **Completed**: 2026-05-07 (epic `apple-reminders-mcp-kw8` closed)
 > **Supersedes**: the GitHub-style query-language migration (epic `apple-reminders-mcp-3h8`, closed)
+
+## What shipped
+
+All 11 sub-beads of `apple-reminders-mcp-kw8` are closed:
+
+- **Manager** (`eic`): `RemindersManager.queryReminders` accepts `createdFrom`/`createdTo`/`modifiedFrom`/`modifiedTo`/`dueFrom`/`dueTo`. Due-date range pushes into `predicateForIncompleteReminders` when status=incomplete; created/modified/all-status due-date are post-fetch filters. Old `dateFrom`/`dateTo` auto-switch removed.
+- **JMESPath functions** (`z6e`): `Sources/AppleRemindersCore/JMESPathExtensions.swift` defines `LowerFunction` and `UpperFunction` and a `JMESRuntimeFactory.makeRuntime()` that registers them. `applyJMESPath` now uses the factory so the extensions are available everywhere.
+- **CLI flags + positional JMESPath** (`xda` + `unl`): `QueryCommand.swift` has the six per-field date flags. `--from`/`--to`/`--jmespath` removed (ArgumentParser cleanly rejects them). The JMESPath query is `@Argument` (positional).
+- **MCP schema** (`jcj`): `query_reminders` schema adds the six per-field date inputs, removes `dateFrom`/`dateTo`. `query` field name kept (already in use). Description mentions the convention and links to `docs/query-reference.md`.
+- **HelpContent** (`n8p`): `topLevelVerbose`, `topLevelSkill`, `queryConcise`, `queryVerbose`, `querySkill` updated.
+- **Foundation reference** (`lwv`): `docs/query-reference.md` written from scratch (Overview, CLI-first convention, CLI flag reference, JMESPath fundamentals, project extensions, recipes, JMESPath-vs-jq, field reference, sources). Old `docs/query-cheatsheet.md` removed.
+- **SKILL.md docs** (`stm`, `ul4`): top-level `SKILL.md` and `skills/reminders/SKILL.md` updated with the convention, new flag set, positional JMESPath, lower()/upper() guidance.
+- **CLAUDE.md** (`14z`): query_reminders description in the tools table mentions the convention and links to the reference. CLI Usage section updated with the new flag examples and convention statement.
+- **Tests** (`5bu`): `test/search.test.ts` has two new describe blocks ("per-field date filtering" and "positional JMESPath via the `query` field"). `test/api-parity.test.ts` updated to use the new fields. Schema snapshot regenerated. **All 102 tests pass.**
+
+Verification:
+
+- `bun run signal` (prettier-check) — passes.
+- `swift build -c release` — passes.
+- All tests pass: `AR_MCP_TEST_MODE=1 bun test` → 102 pass / 0 fail.
+- ArgumentParser cleanly rejects `--from`/`--to`/`--jmespath` with "Unknown option" errors.
+- Same flags + same JMESPath produce identical results regardless of CLI argument order (verified manually + has a test).
+
+## Things noted but not addressed (not blocking)
+
+- `HelpSystem.interceptIfNeeded()` calls `_exit(0)` after `print()` without flushing stdout, so on Linux `reminders --help` produces no output. Pre-existing — predates this work and is unrelated to the migration. Worth a separate small bead.
 
 This document captures both the **decision and the discussion that led
 there**. Several alternatives we explored remain plausible future
