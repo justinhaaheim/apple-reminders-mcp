@@ -19,6 +19,22 @@ import {randomUUID} from 'crypto';
 const EXECUTABLE_PATH = '.build/release/apple-reminders-mcp';
 const TEST_LIST_PREFIX = '[AR-MCP TEST]';
 
+/**
+ * Extract the reminders array from a query_reminders result.
+ * Handles both the new wrapper format {reminders: [...], totalCount, pageInfo}
+ * and raw arrays (e.g. JMESPath results that aren't wrapped).
+ */
+export function extractReminders<T = Record<string, unknown>>(
+  result: unknown,
+): T[] {
+  if (typeof result === 'object' && result !== null && 'reminders' in result) {
+    return (result as {reminders: T[]}).reminders;
+  }
+  // Fallback for JMESPath results that aren't wrapped
+  if (Array.isArray(result)) return result as T[];
+  return [];
+}
+
 interface MCPRequest {
   jsonrpc: '2.0';
   id: number;

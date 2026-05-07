@@ -328,6 +328,63 @@ public struct UpdateReminderInput: Encodable {
     }
 }
 
+// MARK: - Pagination Types
+
+public struct PageInfo: Codable {
+    public let hasNextPage: Bool
+    public let endCursor: String?
+
+    public init(hasNextPage: Bool, endCursor: String?) {
+        self.hasNextPage = hasNextPage
+        self.endCursor = endCursor
+    }
+
+    public func toDict() -> [String: Any] {
+        var dict: [String: Any] = [
+            "hasNextPage": hasNextPage,
+        ]
+        if let endCursor = endCursor {
+            dict["endCursor"] = endCursor
+        } else {
+            dict["endCursor"] = NSNull()
+        }
+        return dict
+    }
+}
+
+// MARK: - Cursor Encoding/Decoding
+
+public enum CursorError: Error, LocalizedError {
+    case invalidCursor(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidCursor(let message):
+            return message
+        }
+    }
+}
+
+public func decodeCursor(_ cursor: String) throws -> Int {
+    guard let data = Data(base64Encoded: cursor) else {
+        throw CursorError.invalidCursor("Invalid cursor: not valid base64")
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let offset = json["offset"] as? Int else {
+        throw CursorError.invalidCursor("Invalid cursor: malformed cursor data")
+    }
+    if offset < 0 {
+        throw CursorError.invalidCursor("Invalid cursor: negative offset")
+    }
+    return offset
+}
+
+public func encodeCursor(offset: Int) throws -> String {
+    let json: [String: Any] = ["offset": offset]
+    let data = try JSONSerialization.data(withJSONObject: json)
+    return data.base64EncodedString()
+}
+
 // MARK: - Priority Conversion
 
 public enum Priority: String, CaseIterable {

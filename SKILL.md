@@ -2,12 +2,19 @@
 
 This file is a standalone reference for the `reminders` CLI. For the Claude Code
 plugin skill (with frontmatter), see [`skills/reminders/SKILL.md`](skills/reminders/SKILL.md).
+For the JMESPath fundamentals + recipe book, see [`docs/query-reference.md`](docs/query-reference.md).
 
 ---
 
 > **For**: Claude Code, Claude Desktop, and LLMs with shell access on macOS
 > **Binary**: `reminders` (built from this repo)
 > **Output**: All commands output JSON to stdout. Logs go to stderr.
+
+## Query convention (governing rule)
+
+**CLI flags filter at fetch time. The optional positional JMESPath argument runs after.** Order on the command line doesn't matter — flags always run first, JMESPath always runs second.
+
+This is the only rule you need to remember when writing query commands. CLI flags push down to EventKit when they can; JMESPath operates on whatever the flags returned and is also the layer for projection / shaping output.
 
 ## Quick Reference
 
@@ -16,7 +23,18 @@ plugin skill (with frontmatter), see [`skills/reminders/SKILL.md`](skills/remind
 reminders query                                          # Incomplete reminders from default list
 reminders query --list "Work" --search "standup"         # Search within a list
 reminders query --all-lists --status all --detail full   # Everything, full detail
-reminders query --sort dueDate --limit 10                # Upcoming due dates
+reminders query --sort dueDate --per-page 10             # Upcoming due dates
+
+# Per-field date ranges (each flag targets exactly one field)
+reminders query --created-from 2026-04-30 --status all   # Created in last 7 days
+reminders query --modified-from 2026-05-01               # Recently modified
+reminders query --due-from 2026-05-08 --due-to 2026-05-15  # Due in a range
+
+# Positional JMESPath — runs after the CLI flags
+reminders query "[?priority == 'high']"
+reminders query --list "Work" "[?contains(lower(title), 'meeting')]"
+reminders query --list "Task Journal" --created-from 2026-04-30 --status all \
+  "[?priority != 'none' || createdDate >= '2026-04-30']"
 
 # Lists
 reminders lists                                          # All reminder lists
@@ -73,6 +91,16 @@ The `query` command filters by status:
 - `--status completed` — Only completed reminders
 - `--status all` — Both
 
+### Per-field date ranges
+
+Each flag targets exactly one reminder field. There is no auto-switching:
+
+- `--created-from D` / `--created-to D` — filter by `createdDate`
+- `--modified-from D` / `--modified-to D` — filter by `lastModifiedDate`
+- `--due-from D` / `--due-to D` — filter by `dueDate` (excludes reminders with no due date)
+
+`D` is ISO 8601 (`2026-03-07T09:00:00-08:00`) or a date-only `YYYY-MM-DD`.
+
 ### Output Detail Levels
 
 Control how much data is returned:
@@ -89,7 +117,7 @@ Control how much data is returned:
 
 All dates use ISO 8601 with timezone: `2026-03-07T09:00:00-08:00`
 
-Date-only format also works for `--from`/`--to`: `2026-03-07`
+Date-only format also works for the per-field date flags: `2026-03-07`.
 
 ### Clearable Fields
 
@@ -99,17 +127,25 @@ On update, some fields can be cleared (set to null) with `--clear-*` flags:
 - `--clear-due-date`
 - `--clear-url`
 
-### JMESPath Queries
+### JMESPath (positional)
 
-Advanced filtering with `--jmespath`:
+The optional JMESPath argument runs after CLI flags. It can filter and project. Project-specific extensions:
+
+- `lower(string)` — lowercase a string (case-insensitive matching)
+- `upper(string)` — uppercase a string
 
 ```bash
 # Get just titles of high-priority reminders
-reminders query --all-lists --detail full --jmespath "[?priority=='high'].title"
+reminders query --all-lists --detail full "[?priority=='high'].title"
 
 # Count by list
-reminders query --all-lists --jmespath "length([?listName=='Work'])"
+reminders query --all-lists "length([?listName=='Work'])"
+
+# Case-insensitive contains
+reminders query "[?contains(lower(title), 'meeting')]"
 ```
+
+For the full JMESPath fundamentals + recipes, see [`docs/query-reference.md`](docs/query-reference.md).
 
 ## Global Options
 
@@ -128,10 +164,10 @@ All commands support:
 
 ```bash
 # What's due today or overdue?
-reminders query --all-lists --status incomplete --from "$(date -I)" --sort dueDate --pretty
+reminders query --all-lists --status incomplete --due-from "$(date -I)" --sort dueDate --pretty
 
 # What did I complete recently?
-reminders query --all-lists --status completed --from "$(date -v-7d -I)" --sort newest --pretty
+reminders query --all-lists --status completed --modified-from "$(date -v-7d -I)" --sort newest --pretty
 ```
 
 ### Task Management
@@ -149,11 +185,11 @@ for id in id1 id2 id3; do reminders update "$id" --complete; done
 
 ```bash
 # Get IDs of all incomplete Work reminders
-reminders query --list "Work" --detail minimal | jq -r '.[].id'
+reminders query --list "Work" --detail minimal | jq -r '.reminders[].id'
 
 # Pretty table of upcoming due dates
 reminders query --all-lists --sort dueDate --detail compact | \
-  jq -r '.[] | [.title, .dueDate // "no date", .priority] | @tsv'
+  jq -r '.reminders[] | [.title, .dueDate // "no date", .priority] | @tsv'
 ```
 
 ### Backup Workflow

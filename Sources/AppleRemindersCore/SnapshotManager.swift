@@ -253,7 +253,7 @@ public class SnapshotManager {
             return "no changes"
         }
 
-        let output = try runGit("commit", "-m", message)
+        _ = try runGit("commit", "-m", message)
 
         // Extract diff summary (files changed, insertions, deletions)
         let diffStat = try runGit("diff", "--stat", "HEAD~1..HEAD")

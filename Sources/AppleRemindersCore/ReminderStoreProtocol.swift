@@ -10,10 +10,17 @@ public protocol ReminderStore {
     func getDefaultCalendar() -> ReminderCalendar?
     func createCalendar(name: String) throws -> ReminderCalendar
     func createReminder(in calendar: ReminderCalendar) throws -> Reminder
-    func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder]
+    func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus, dueDateRange: DueDateRange?) async -> [Reminder]
     func getReminder(withId id: String) -> Reminder?
     func saveReminder(_ reminder: Reminder) throws
     func deleteReminder(_ reminder: Reminder) throws
+}
+
+extension ReminderStore {
+    /// Convenience overload for callers that don't need due-date pushdown.
+    public func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder] {
+        return await fetchReminders(in: calendars, status: status, dueDateRange: nil)
+    }
 }
 
 /// Status filter for fetching reminders
@@ -21,6 +28,20 @@ public enum ReminderStatus {
     case incomplete
     case completed
     case all
+}
+
+/// Due-date range pushdown for fetch-time filtering.
+/// Maps to EventKit's `predicateForIncompleteReminders(withDueDateStarting:ending:)` and
+/// `predicateForCompletedReminders(withCompletionDateStarting:ending:)`. For the latter,
+/// the start/end actually filter on completionDate; only meaningful when status=incomplete.
+public struct DueDateRange {
+    public let start: Date?
+    public let end: Date?
+
+    public init(start: Date?, end: Date?) {
+        self.start = start
+        self.end = end
+    }
 }
 
 /// Protocol-agnostic calendar representation

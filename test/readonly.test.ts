@@ -22,7 +22,7 @@ describe('Read-only operations', () => {
   test('lists available tools', async () => {
     const tools = await client.listTools();
 
-    expect(tools.length).toBe(7);
+    expect(tools.length).toBe(10);
 
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).toContain('query_reminders');
@@ -32,6 +32,9 @@ describe('Read-only operations', () => {
     expect(toolNames).toContain('update_reminders');
     expect(toolNames).toContain('delete_reminders');
     expect(toolNames).toContain('export_reminders');
+    expect(toolNames).toContain('help');
+    expect(toolNames).toContain('schema');
+    expect(toolNames).toContain('guidance');
   });
 
   test('gets reminder lists', async () => {

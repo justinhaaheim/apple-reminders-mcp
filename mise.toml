@@ -1,0 +1,2 @@
+[tools]
+"github:Dicklesworthstone/beads_rust" = { version = "0.1.37", exe = "br" }

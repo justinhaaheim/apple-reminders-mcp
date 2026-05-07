@@ -2,10 +2,8 @@
  * Tests to verify that test mode restrictions work correctly.
  * These tests verify that the server blocks operations on non-test lists.
  *
- * Note: These tests use mock mode WITH test mode enabled to test the
- * test mode restrictions logic.
- *
- * Updated for the new 6-tool API.
+ * Uses _seed_mock_data to inject reminders into non-test lists so we can
+ * verify that the test-mode guard actually fires (not just "not found" errors).
  */
 
 import {describe, test, expect, beforeAll, afterAll} from 'bun:test';
@@ -15,10 +13,29 @@ describe('Test mode restrictions', () => {
   let client: MCPClient;
 
   beforeAll(async () => {
-    // Use mock mode but WITH test mode enabled to test restrictions
     client = await MCPClient.create({
       mockMode: true,
       testMode: true,
+    });
+
+    // Inject reminders into non-test lists via the mock store API
+    await client.callTool('_seed_mock_data', {
+      lists: [
+        {id: 'seed-list-default', name: 'Reminders', isDefault: true},
+        {id: 'seed-list-work', name: 'Work', isDefault: false},
+      ],
+      reminders: [
+        {
+          id: 'seed-rem-001',
+          title: 'Seeded Reminder A',
+          listId: 'seed-list-default',
+        },
+        {
+          id: 'seed-rem-002',
+          title: 'Seeded Reminder B',
+          listId: 'seed-list-work',
+        },
+      ],
     });
   });
 
@@ -86,18 +103,38 @@ describe('Test mode restrictions', () => {
   });
 
   test('blocks updating a reminder in non-test list', async () => {
-    // This test relies on there being at least one reminder in a non-test list.
-    // We'll try to update with a fake ID - the error will be "Reminder not found"
-    // which is fine, but if the reminder existed in a real list, test mode would block it.
-
+    // Use the seeded reminder in the "Reminders" (non-test) list
     const result = await client.callTool('update_reminders', {
-      reminders: [{id: 'fake-reminder-id-12345', title: 'Should Not Work'}],
+      reminders: [{id: 'seed-rem-001', title: 'Should Not Work'}],
     });
 
-    // Either returns {updated:[], failed:[...]} or error
     const hasError =
       result._isError ||
       (result.failed && (result.failed as Array<unknown>).length > 0);
     expect(hasError).toBe(true);
+
+    // Verify the error is specifically about test mode, not "not found"
+    if (result.failed) {
+      const failedItems = result.failed as Array<{error: string}>;
+      expect(failedItems[0].error).toContain('TEST MODE');
+    }
+  });
+
+  test('blocks deleting a reminder in non-test list', async () => {
+    // Use the seeded reminder in the "Work" (non-test) list
+    const result = await client.callTool('delete_reminders', {
+      ids: ['seed-rem-002'],
+    });
+
+    const hasError =
+      result._isError ||
+      (result.failed && (result.failed as Array<unknown>).length > 0);
+    expect(hasError).toBe(true);
+
+    // Verify the error is specifically about test mode, not "not found"
+    if (result.failed) {
+      const failedItems = result.failed as Array<{error: string}>;
+      expect(failedItems[0].error).toContain('TEST MODE');
+    }
   });
 });

@@ -24,14 +24,14 @@ echo ""
 echo "1. List tools:"
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}'
 echo ""
-echo "2. List reminder lists:"
-echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"list_reminder_lists","arguments":{}}}'
+echo "2. Get reminder lists:"
+echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_lists","arguments":{}}}'
 echo ""
-echo "3. List incomplete reminders from a specific list:"
-echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_reminders","arguments":{"list_name":"Work Tasks","completed":false}}}'
+echo "3. Query incomplete reminders from a specific list:"
+echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"query_reminders","arguments":{"list":{"name":"Work Tasks"},"status":"incomplete"}}}'
 echo ""
 echo "4. Create a reminder:"
-echo '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"create_reminder","arguments":{"title":"Test Reminder","list_name":"Reminders"}}}'
+echo '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"create_reminders","arguments":{"reminders":[{"title":"Test Reminder","list":{"name":"Reminders"}}]}}}'
 echo ""
 echo "---"
 echo ""

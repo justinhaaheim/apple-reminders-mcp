@@ -17,7 +17,16 @@
     "prettier": "prettier --write .",
     "prettier:write:file": "prettier --write --ignore-unknown",
     "signal": "bun run prettier-check",
-    "prepare": "husky"
+    "prepare": "husky",
+    "setup-env": "bun scripts/setup-env.ts",
+    "setup-env:swift": "bun scripts/setup-env-swift.ts",
+    "signal:verbose": "bunx justin-sdk signal",
+    "signal:serial": "bunx justin-sdk signal --serial",
+    "doctor": "bunx justin-sdk doctor",
+    "doctor:fix": "bunx justin-sdk doctor --fix",
+    "signal-source:TS": "tsc --noEmit",
+    "signal-source:LINT": "eslint --report-unused-disable-directives --max-warnings 0 .",
+    "signal-source:PRETTIER": "prettier --check ."
   },
   "devDependencies": {
     "@types/node": "25.0.3",

@@ -86,7 +86,7 @@ Sources/
 
 | Tool | Description |
 |------|-------------|
-| `query_reminders` | Search and filter reminders with JMESPath support |
+| `query_reminders` | Search and filter reminders. Convention: structured params (list, status, searchText, per-field date ranges) filter at fetch time; optional JMESPath `query` runs after. See [`docs/query-reference.md`](docs/query-reference.md). |
 | `get_lists` | Get all reminder lists |
 | `create_list` | Create a new list |
 | `create_reminders` | Create one or more reminders (batch) |
@@ -99,9 +99,20 @@ Sources/
 
 ## CLI Usage
 
+The `query` command follows a CLI-first / JMESPath-second convention: structured CLI flags filter at fetch time, then the optional positional JMESPath argument filters/projects on the result. Order on the command line doesn't matter — flags always run first. See [`docs/query-reference.md`](docs/query-reference.md) for the full reference.
+
 ```bash
 # Query reminders (default command)
 reminders query --list "Work" --search "meeting" --status incomplete
+
+# Per-field date ranges (each flag targets exactly one field)
+reminders query --created-from 2026-04-30 --status all
+reminders query --modified-from 2026-05-01
+reminders query --due-from 2026-05-08 --due-to 2026-05-15
+
+# Positional JMESPath — runs after CLI flags
+reminders query "[?priority == 'high']"
+reminders query --list "Work" "[?contains(lower(title), 'meeting')]"
 
 # List all reminder lists
 reminders lists
@@ -139,7 +150,8 @@ reminders --help=skill              # Strategic guidance and best practices
 
 All commands output JSON to stdout. Use `--pretty` for human-readable output. Use `--mock` for testing.
 
-For the full CLI skill reference (common patterns, piping with jq, JMESPath queries, etc.), see @SKILL.md
+For the full CLI skill reference (common patterns, piping with jq, JMESPath queries, etc.), see @SKILL.md.
+For the JMESPath foundation reference (fundamentals + recipes), see [`docs/query-reference.md`](docs/query-reference.md).
 
 ## Claude Desktop Configuration
 
@@ -227,3 +239,5 @@ Follow the protocol in @docs/prompts/PROJECT_STATE_PROTOCOLS.md
 
 Be aware that messages from the user may contain speech-to-text (S2T) artifacts. S2T Guidelines: @docs/prompts/S2T_GUIDELINES.md
 
+
+@docs/prompts/BEADS.md
