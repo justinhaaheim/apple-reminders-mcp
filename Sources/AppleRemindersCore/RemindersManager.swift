@@ -162,7 +162,12 @@ public class RemindersManager {
         let normalized = id.uppercased().replacingOccurrences(of: "-", with: "")
 
         // Fetch all reminders to search for prefix match
-        let allReminders = await store.fetchReminders(in: store.getAllCalendars(), status: .all)
+        let allReminders = await store.fetchReminders(
+            in: store.getAllCalendars(),
+            status: .all,
+            dueDateStart: nil,
+            dueDateEnd: nil
+        )
         let matches = allReminders.filter { reminder in
             let normalizedStored = reminder.id.uppercased().replacingOccurrences(of: "-", with: "")
             return normalizedStored.hasPrefix(normalized)
@@ -209,8 +214,12 @@ public class RemindersManager {
         perPage: Int?,
         cursor: String?,
         searchText: String?,
-        dateFrom: String?,
-        dateTo: String?,
+        createdFrom: String?,
+        createdTo: String?,
+        modifiedFrom: String?,
+        modifiedTo: String?,
+        dueFrom: String?,
+        dueTo: String?,
         outputDetail: String?
     ) async throws -> Any {
         let startTime = Date()
@@ -231,7 +240,27 @@ public class RemindersManager {
             reminderStatus = .all
         }
 
-        var filteredReminders = await store.fetchReminders(in: calendars, status: reminderStatus)
+        // Parse all date filters up-front so we can fail fast on bad input.
+        let createdFromDate = try parseDateFilter(createdFrom, fieldName: "createdFrom")
+        let createdToDate = try parseDateFilter(createdTo, fieldName: "createdTo")
+        let modifiedFromDate = try parseDateFilter(modifiedFrom, fieldName: "modifiedFrom")
+        let modifiedToDate = try parseDateFilter(modifiedTo, fieldName: "modifiedTo")
+        let dueFromDate = try parseDateFilter(dueFrom, fieldName: "dueFrom")
+        let dueToDate = try parseDateFilter(dueTo, fieldName: "dueTo")
+
+        // Push due-date range into EventKit's incomplete predicate when status allows.
+        // For completed/all, the date range can't be expressed as a predicate (the
+        // completed-reminders predicate filters on completionDate, not dueDate), so
+        // we post-filter below.
+        let pushedDueStart: Date? = reminderStatus == .incomplete ? dueFromDate : nil
+        let pushedDueEnd: Date? = reminderStatus == .incomplete ? dueToDate : nil
+
+        var filteredReminders = await store.fetchReminders(
+            in: calendars,
+            status: reminderStatus,
+            dueDateStart: pushedDueStart,
+            dueDateEnd: pushedDueEnd
+        )
 
         let fetchTime = Date().timeIntervalSince(startTime)
         log("Fetched \(filteredReminders.count) reminders in \(Int(fetchTime * 1000))ms")
@@ -251,45 +280,41 @@ public class RemindersManager {
             log("searchText filter '\(searchText)' reduced to \(filteredReminders.count) reminders")
         }
 
-        // 2c. Apply date range filter on raw Reminder objects (avoids Date→String→Date round-trip)
-        if dateFrom != nil || dateTo != nil {
-            let fromDate: Date? = dateFrom != nil ? Date.fromISO8601(dateFrom!) : nil
-            let toDate: Date? = dateTo != nil ? Date.fromISO8601(dateTo!) : nil
-
-            if dateFrom != nil && fromDate == nil {
-                throw RemindersError("Invalid dateFrom format: '\(dateFrom!)'. Expected ISO 8601.")
-            }
-            if dateTo != nil && toDate == nil {
-                throw RemindersError("Invalid dateTo format: '\(dateTo!)'. Expected ISO 8601.")
-            }
-
+        // 2c. Apply per-field date range filters. createdFrom/createdTo and
+        // modifiedFrom/modifiedTo are always post-fetch filters. dueFrom/dueTo is
+        // post-filter for non-incomplete status (incomplete pushes down to predicate).
+        let needsDuePostFilter = reminderStatus != .incomplete && (dueFromDate != nil || dueToDate != nil)
+        if createdFromDate != nil || createdToDate != nil ||
+           modifiedFromDate != nil || modifiedToDate != nil ||
+           needsDuePostFilter {
             filteredReminders = filteredReminders.filter { reminder in
-                // For completed reminders, filter by completionDate
-                // For incomplete reminders, filter by dueDate from dueDateComponents
-                let reminderDate: Date?
-                if reminder.isCompleted {
-                    reminderDate = reminder.completionDate
-                } else {
+                if let creation = reminder.creationDate {
+                    if let from = createdFromDate, creation < from { return false }
+                    if let to = createdToDate, creation > to { return false }
+                } else if createdFromDate != nil || createdToDate != nil {
+                    return false
+                }
+
+                if let modified = reminder.lastModifiedDate {
+                    if let from = modifiedFromDate, modified < from { return false }
+                    if let to = modifiedToDate, modified > to { return false }
+                } else if modifiedFromDate != nil || modifiedToDate != nil {
+                    return false
+                }
+
+                if needsDuePostFilter {
                     var components = reminder.dueDateComponents
                     if components != nil && components!.calendar == nil {
                         components!.calendar = Calendar.current
                     }
-                    reminderDate = components?.date
+                    guard let dueDate = components?.date else { return false }
+                    if let from = dueFromDate, dueDate < from { return false }
+                    if let to = dueToDate, dueDate > to { return false }
                 }
 
-                guard let date = reminderDate else {
-                    return false  // No date = excluded from date range filter
-                }
-
-                if let from = fromDate, date < from {
-                    return false
-                }
-                if let to = toDate, date > to {
-                    return false
-                }
                 return true
             }
-            log("Date range filter reduced to \(filteredReminders.count) reminders")
+            log("Per-field date filters reduced to \(filteredReminders.count) reminders")
         }
 
         // Convert to output format
@@ -377,13 +402,22 @@ public class RemindersManager {
         return response
     }
 
+    private func parseDateFilter(_ value: String?, fieldName: String) throws -> Date? {
+        guard let value = value, !value.isEmpty else { return nil }
+        guard let date = Date.fromISO8601(value) else {
+            throw RemindersError("Invalid \(fieldName) format: '\(value)'. Expected ISO 8601 (e.g. '2026-04-30' or '2026-04-30T17:00:00-08:00').")
+        }
+        return date
+    }
+
     private func applyJMESPath(_ reminders: [ReminderOutput], query: String) throws -> Any {
         // Convert reminders to JSON data
         let jsonData = try JSONEncoder().encode(reminders)
 
-        // Compile and run JMESPath expression
+        // Compile and run JMESPath expression with project-specific runtime
+        // (registers lower() and upper() extensions).
         let expression = try JMESExpression.compile(query)
-        let result = try expression.search(json: jsonData)
+        let result = try expression.search(json: jsonData, runtime: makeJMESRuntime())
         return result ?? []
     }
 
@@ -1012,7 +1046,12 @@ public class RemindersManager {
 
         // Fetch reminders
         let status: ReminderStatus = includeCompleted ? .all : .incomplete
-        let reminders = await store.fetchReminders(in: calendarsToExport, status: status)
+        let reminders = await store.fetchReminders(
+            in: calendarsToExport,
+            status: status,
+            dueDateStart: nil,
+            dueDateEnd: nil
+        )
 
         // Convert to output format
         let reminderOutputs = reminders.map { convertToOutput($0) }

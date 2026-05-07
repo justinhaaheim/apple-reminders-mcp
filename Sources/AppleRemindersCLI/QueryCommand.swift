@@ -10,6 +10,12 @@ struct QueryCommand: AsyncParsableCommand {
 
     @OptionGroup var globals: GlobalOptions
 
+    @Argument(help: ArgumentHelp(
+        "JMESPath expression applied after CLI flag filters. Use quotes; precede with -- if it starts with '-'.",
+        valueName: "query"
+    ))
+    var query: String?
+
     @Option(name: .long, help: "Filter by list name")
     var list: String?
 
@@ -34,14 +40,23 @@ struct QueryCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Opaque cursor from previous response's pageInfo.endCursor for next page")
     var cursor: String?
 
-    @Option(name: .long, help: "Date range start (ISO 8601)")
-    var from: String?
+    @Option(name: .long, help: "Filter by createdDate >= ISO 8601 date (or YYYY-MM-DD)")
+    var createdFrom: String?
 
-    @Option(name: .long, help: "Date range end (ISO 8601)")
-    var to: String?
+    @Option(name: .long, help: "Filter by createdDate <= ISO 8601 date (or YYYY-MM-DD)")
+    var createdTo: String?
 
-    @Option(name: .long, help: "JMESPath query expression")
-    var jmespath: String?
+    @Option(name: .long, help: "Filter by lastModifiedDate >= ISO 8601 date (or YYYY-MM-DD)")
+    var modifiedFrom: String?
+
+    @Option(name: .long, help: "Filter by lastModifiedDate <= ISO 8601 date (or YYYY-MM-DD)")
+    var modifiedTo: String?
+
+    @Option(name: .long, help: "Filter by dueDate >= ISO 8601 date (or YYYY-MM-DD)")
+    var dueFrom: String?
+
+    @Option(name: .long, help: "Filter by dueDate <= ISO 8601 date (or YYYY-MM-DD)")
+    var dueTo: String?
 
     @Option(name: .long, help: "Output detail level: minimal, compact, full")
     var detail: String?
@@ -85,12 +100,16 @@ struct QueryCommand: AsyncParsableCommand {
             list: listSelector,
             status: status,
             sortBy: sort,
-            query: jmespath,
+            query: query,
             perPage: perPage,
             cursor: cursor,
             searchText: search,
-            dateFrom: from,
-            dateTo: to,
+            createdFrom: createdFrom,
+            createdTo: createdTo,
+            modifiedFrom: modifiedFrom,
+            modifiedTo: modifiedTo,
+            dueFrom: dueFrom,
+            dueTo: dueTo,
             outputDetail: detail
         )
 

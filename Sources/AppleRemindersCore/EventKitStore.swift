@@ -257,7 +257,12 @@ public class EKReminderStore: ReminderStore {
         return eventStore.sources.first
     }
 
-    public func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder] {
+    public func fetchReminders(
+        in calendars: [ReminderCalendar],
+        status: ReminderStatus,
+        dueDateStart: Date?,
+        dueDateEnd: Date?
+    ) async -> [Reminder] {
         let ekCalendars = calendars.compactMap { wrapper -> EKCalendar? in
             guard let ekWrapper = wrapper as? EKCalendarWrapper else { return nil }
             return ekWrapper.calendar
@@ -267,6 +272,8 @@ public class EKReminderStore: ReminderStore {
             let predicate: NSPredicate
             switch status {
             case .completed:
+                // Note: predicateForCompletedReminders' date range is for completionDate,
+                // not dueDate. The manager handles dueFrom/dueTo as post-filter for completed.
                 predicate = eventStore.predicateForCompletedReminders(
                     withCompletionDateStarting: nil,
                     ending: nil,
@@ -274,8 +281,8 @@ public class EKReminderStore: ReminderStore {
                 )
             case .incomplete:
                 predicate = eventStore.predicateForIncompleteReminders(
-                    withDueDateStarting: nil,
-                    ending: nil,
+                    withDueDateStarting: dueDateStart,
+                    ending: dueDateEnd,
                     calendars: ekCalendars
                 )
             case .all:

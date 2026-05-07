@@ -41,7 +41,12 @@ public class SnapshotManager {
         // 3. Fetch all reminders from all lists
         let calendars = store.getAllCalendars()
         let defaultCalendar = store.getDefaultCalendar()
-        let allReminders = await store.fetchReminders(in: calendars, status: .all)
+        let allReminders = await store.fetchReminders(
+            in: calendars,
+            status: .all,
+            dueDateStart: nil,
+            dueDateEnd: nil
+        )
 
         // 4. Build list metadata
         let listOutputs = calendars.map { calendar in

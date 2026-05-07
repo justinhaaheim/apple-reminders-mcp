@@ -172,7 +172,12 @@ public class MockReminderStore: ReminderStore {
         return calendar
     }
 
-    public func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder] {
+    public func fetchReminders(
+        in calendars: [ReminderCalendar],
+        status: ReminderStatus,
+        dueDateStart: Date?,
+        dueDateEnd: Date?
+    ) async -> [Reminder] {
         let calendarIds = Set(calendars.map { $0.id })
 
         return reminders.filter { reminder in
@@ -180,12 +185,25 @@ public class MockReminderStore: ReminderStore {
 
             switch status {
             case .completed:
-                return reminder.isCompleted
+                guard reminder.isCompleted else { return false }
             case .incomplete:
-                return !reminder.isCompleted
+                guard !reminder.isCompleted else { return false }
             case .all:
-                return true
+                break
             }
+
+            // Mirror EventKit's predicateForIncompleteReminders(withDueDateStarting:ending:)
+            // semantics for parity. Only applied to incomplete reminders; otherwise the
+            // RemindersManager post-filters dueFrom/dueTo.
+            if status == .incomplete, dueDateStart != nil || dueDateEnd != nil {
+                guard var components = reminder.dueDateComponents else { return false }
+                if components.calendar == nil { components.calendar = Calendar.current }
+                guard let dueDate = components.date else { return false }
+                if let start = dueDateStart, dueDate < start { return false }
+                if let end = dueDateEnd, dueDate > end { return false }
+            }
+
+            return true
         }
     }
 

@@ -10,7 +10,12 @@ public protocol ReminderStore {
     func getDefaultCalendar() -> ReminderCalendar?
     func createCalendar(name: String) throws -> ReminderCalendar
     func createReminder(in calendar: ReminderCalendar) throws -> Reminder
-    func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder]
+    func fetchReminders(
+        in calendars: [ReminderCalendar],
+        status: ReminderStatus,
+        dueDateStart: Date?,
+        dueDateEnd: Date?
+    ) async -> [Reminder]
     func getReminder(withId id: String) -> Reminder?
     func saveReminder(_ reminder: Reminder) throws
     func deleteReminder(_ reminder: Reminder) throws
