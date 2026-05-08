@@ -41,12 +41,16 @@ public class SnapshotManager {
         // 3. Fetch all reminders from all lists
         let calendars = store.getAllCalendars()
         let defaultCalendar = store.getDefaultCalendar()
+        log("Snapshot: fetching reminders from \(calendars.count) list(s) (this can take a moment for large libraries)")
+        let fetchStart = Date()
         let allReminders = await store.fetchReminders(
             in: calendars,
             status: .all,
             dueDateStart: nil,
             dueDateEnd: nil
         )
+        let fetchMs = Int(Date().timeIntervalSince(fetchStart) * 1000)
+        log("Snapshot: fetched \(allReminders.count) reminders in \(fetchMs)ms")
 
         // 4. Build list metadata
         let listOutputs = calendars.map { calendar in
@@ -72,13 +76,25 @@ public class SnapshotManager {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
+        log("Snapshot: writing \(allReminders.count) JSON files...")
+        let writeStart = Date()
+        // Log progress every ~10% of total, or every 500 items, whichever is smaller.
+        let progressInterval = max(1, min(500, allReminders.count / 10))
+
         do {
-            for reminder in allReminders {
+            for (index, reminder) in allReminders.enumerated() {
                 let output = convertToSnapshotOutput(reminder, calendars: calendars, defaultCalendar: defaultCalendar, store: store)
                 let jsonData = try encoder.encode(output)
                 let filePath = (tempDir as NSString).appendingPathComponent("\(reminder.id).json")
                 try jsonData.write(to: URL(fileURLWithPath: filePath))
+
+                let written = index + 1
+                if written % progressInterval == 0 && written < allReminders.count {
+                    log("Snapshot: wrote \(written)/\(allReminders.count) files")
+                }
             }
+            let writeMs = Int(Date().timeIntervalSince(writeStart) * 1000)
+            log("Snapshot: wrote \(allReminders.count) files in \(writeMs)ms")
 
             // 7. Write lists.json to temp file first
             let listsData = try encoder.encode(listOutputs)
@@ -111,11 +127,16 @@ public class SnapshotManager {
         }
 
         // 8. Git add + commit
+        log("Snapshot: committing to git...")
+        let commitStart = Date()
         let timestamp = Date().toISO8601WithTimezone()
         let commitMessage = "Snapshot \(timestamp) — \(allReminders.count) reminders, \(calendars.count) lists"
         let diffSummary = try gitAddAndCommit(message: commitMessage)
+        let commitMs = Int(Date().timeIntervalSince(commitStart) * 1000)
+        log("Snapshot: git commit done in \(commitMs)ms")
 
         let elapsed = Date().timeIntervalSince(startTime)
+        log("Snapshot: complete (\(allReminders.count) reminders, \(calendars.count) lists, \(String(format: "%.2f", elapsed))s total)")
 
         return SnapshotResult(
             timestamp: timestamp,

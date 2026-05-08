@@ -118,10 +118,11 @@ func withAutoSnapshot<T>(
 }
 
 private func tryAutoSnapshot(_ manager: SnapshotManager, reason: String) async {
+    fputs("Auto-snapshot (\(reason)) starting...\n", stderr)
     do {
         let result = try await manager.takeSnapshot()
         fputs(
-            "Auto-snapshot (\(reason)): \(result.reminderCount) reminders, \(result.listCount) lists\n",
+            "Auto-snapshot (\(reason)) done: \(result.reminderCount) reminders, \(result.listCount) lists in \(String(format: "%.2f", result.elapsedSeconds))s\n",
             stderr
         )
     } catch {
