@@ -267,6 +267,17 @@ public class SnapshotManager {
 
     @discardableResult
     private func runGit(_ args: String...) throws -> String {
+        return try runGitArgs(args, expectedExitCodes: [0])
+    }
+
+    /// Run git, draining stdout/stderr concurrently to avoid the classic
+    /// Process pipe-buffer deadlock when output exceeds ~64 KB (the macOS
+    /// pipe buffer size). With 10k+ snapshot files this happens immediately
+    /// on `git status --porcelain`, `git diff --stat`, etc. Reads happen on
+    /// background queues so neither pipe can fill while we're blocked on the
+    /// other.
+    @discardableResult
+    private func runGitArgs(_ args: [String], expectedExitCodes: [Int32]) throws -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = args
@@ -278,38 +289,85 @@ public class SnapshotManager {
         process.standardError = stderrPipe
 
         try process.run()
-        process.waitUntilExit()
 
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        let group = DispatchGroup()
+        var stdoutData = Data()
+        var stderrData = Data()
+        let queue = DispatchQueue.global(qos: .userInitiated)
+        queue.async(group: group) {
+            stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        }
+        queue.async(group: group) {
+            stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        }
+        process.waitUntilExit()
+        group.wait()
+
         let output = String(data: stdoutData, encoding: .utf8) ?? ""
         let errorOutput = String(data: stderrData, encoding: .utf8) ?? ""
+        let exitCode = process.terminationStatus
 
-        if process.terminationStatus != 0 {
-            // git commit returns exit 1 when nothing to commit — handle gracefully
+        if !expectedExitCodes.contains(exitCode) {
+            // git commit returns exit 1 when nothing to commit — handle gracefully.
             if args.first == "commit" && (output + errorOutput).contains("nothing to commit") {
                 return "nothing to commit"
             }
             let details = errorOutput.isEmpty ? output : errorOutput
-            throw RemindersError("git \(args.joined(separator: " ")) failed: \(details)")
+            throw RemindersError("git \(args.joined(separator: " ")) failed (exit \(exitCode)): \(details)")
         }
 
         return output
     }
 
-    private func gitAddAndCommit(message: String) throws -> String {
-        try runGit("add", "-A")
+    /// Returns the exit code without throwing for non-zero. Used for plumbing
+    /// commands like `git diff --cached --quiet` where the exit code itself
+    /// is the answer (0 = clean, 1 = differences).
+    private func runGitExitCode(_ args: String...) throws -> Int32 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = args
+        process.currentDirectoryURL = URL(fileURLWithPath: repoPath)
+        // Suppress output; we only want the exit code.
+        process.standardOutput = Pipe()
+        process.standardError = Pipe()
+        try process.run()
+        process.waitUntilExit()
+        return process.terminationStatus
+    }
 
-        // Check if there are actually changes to commit
-        let status = try runGit("status", "--porcelain")
-        if status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+    private func gitAddAndCommit(message: String) throws -> String {
+        // Each step here can be slow on first snapshot (10k+ new files), so
+        // log timings — that's the only signal a watching user has to know
+        // whether things are progressing.
+
+        log("Snapshot: git add -A...")
+        let addStart = Date()
+        try runGit("add", "-A")
+        log("Snapshot: git add done in \(Int(Date().timeIntervalSince(addStart) * 1000))ms")
+
+        // Has anything actually staged? `git diff --cached --quiet` returns
+        // exit 0 if no staged changes, 1 if changes exist. No large output.
+        // (The previous implementation called `git status --porcelain`, which
+        // emits one line per staged file — fine for small repos but pipe-
+        // deadlock-prone for thousands.)
+        log("Snapshot: checking for staged changes...")
+        let diffExitCode = try runGitExitCode("diff", "--cached", "--quiet")
+        if diffExitCode == 0 {
+            log("Snapshot: no staged changes — skipping commit")
             return "no changes"
         }
 
+        log("Snapshot: git commit...")
+        let commitStart = Date()
         _ = try runGit("commit", "-m", message)
+        log("Snapshot: git commit done in \(Int(Date().timeIntervalSince(commitStart) * 1000))ms")
 
-        // Extract diff summary (files changed, insertions, deletions)
-        let diffStat = try runGit("diff", "--stat", "HEAD~1..HEAD")
+        log("Snapshot: building diff summary...")
+        let summaryStart = Date()
+        // --shortstat collapses a (potentially huge) per-file --stat output
+        // into one line: "N files changed, M insertions(+), K deletions(-)".
+        let diffStat = try runGit("diff", "--shortstat", "HEAD~1..HEAD")
+        log("Snapshot: diff summary done in \(Int(Date().timeIntervalSince(summaryStart) * 1000))ms")
         return diffStat.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
