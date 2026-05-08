@@ -205,6 +205,18 @@ For auto-snapshots via MCP server, set environment variables:
 }
 ```
 
+For CLI auto-snapshots around mutations (`create`, `create-list`, `update`,
+`delete`), set `AR_SNAPSHOT_ENABLED=1` (and optionally `AR_SNAPSHOT_REPO`):
+
+```bash
+export AR_SNAPSHOT_ENABLED=1
+reminders update <id> --complete   # post-snapshot runs after the mutation
+```
+
+A pre-snapshot also runs when the repo is uninitialized or its last snapshot
+is more than 7 days old. Snapshot failures warn to stderr but never abort
+the mutation.
+
 ## Completed Enhancements
 
 - [x] Add alarm support (absolute + relative)

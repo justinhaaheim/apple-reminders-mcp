@@ -15,7 +15,10 @@ struct CreateListCommand: AsyncParsableCommand {
 
     func run() async throws {
         let manager = try await createManager(options: globals)
-        let list = try manager.createList(name: name)
-        try outputJSON(list, pretty: globals.pretty)
+
+        try await withAutoSnapshot(store: manager.store, reason: "create_list") {
+            let list = try manager.createList(name: name)
+            try outputJSON(list, pretty: globals.pretty)
+        }
     }
 }

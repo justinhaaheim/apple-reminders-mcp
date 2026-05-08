@@ -128,6 +128,33 @@ public class SnapshotManager {
         )
     }
 
+    /// Whether a pre-mutation snapshot is warranted given the repo's current state.
+    /// Returns true when the repo is uninitialized, has no real `Snapshot`-prefixed
+    /// commits yet (e.g. only the auto-init "Initial commit"), or the most recent
+    /// snapshot is older than `staleAfterDays`.
+    /// On any I/O / git error the caller's context is too uncertain for a meaningful
+    /// pre-snapshot, so this returns false (the post-snapshot will still run).
+    public func needsPreSnapshot(staleAfterDays: Int = 7) -> Bool {
+        do {
+            let status = try getStatus()
+            if !status.initialized { return true }
+            guard let lastMessage = status.lastCommitMessage,
+                  lastMessage.hasPrefix("Snapshot ") else {
+                // Only "Initial commit" or some non-snapshot commit on top — no
+                // real snapshot exists yet, take a pre-snapshot.
+                return true
+            }
+            guard let lastDateString = status.lastSnapshotDate,
+                  let lastDate = Date.fromISO8601(lastDateString) else {
+                return true
+            }
+            let staleCutoff = Date().addingTimeInterval(-Double(staleAfterDays) * 86400)
+            return lastDate < staleCutoff
+        } catch {
+            return false
+        }
+    }
+
     /// Get status of the snapshot repository.
     public func getStatus() throws -> SnapshotStatus {
         let repoExists = FileManager.default.fileExists(

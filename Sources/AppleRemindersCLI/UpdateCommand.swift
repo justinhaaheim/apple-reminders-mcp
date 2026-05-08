@@ -113,17 +113,19 @@ struct UpdateCommand: AsyncParsableCommand {
             url: urlValue
         )
 
-        let result = await manager.updateReminders(inputs: [input])
+        try await withAutoSnapshot(store: manager.store, reason: "update_reminder") {
+            let result = await manager.updateReminders(inputs: [input])
 
-        if !result.failed.isEmpty {
-            for failure in result.failed {
-                fputs("Error updating \(failure.id): \(failure.error)\n", stderr)
+            if !result.failed.isEmpty {
+                for failure in result.failed {
+                    fputs("Error updating \(failure.id): \(failure.error)\n", stderr)
+                }
+                throw ExitCode.failure
             }
-            throw ExitCode.failure
-        }
 
-        if let updated = result.updated.first {
-            try outputJSON(updated, pretty: globals.pretty)
+            if let updated = result.updated.first {
+                try outputJSON(updated, pretty: globals.pretty)
+            }
         }
     }
 }

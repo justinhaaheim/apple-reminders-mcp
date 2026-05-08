@@ -20,22 +20,25 @@ struct DeleteCommand: AsyncParsableCommand {
         }
 
         let manager = try await createManager(options: globals)
-        let result = await manager.deleteReminders(ids: ids)
 
-        var output: [String: Any] = [
-            "deleted": result.deleted,
-            "deletedCount": result.deleted.count,
-        ]
+        try await withAutoSnapshot(store: manager.store, reason: "delete_reminder") {
+            let result = await manager.deleteReminders(ids: ids)
 
-        if !result.failed.isEmpty {
-            output["failed"] = result.failed.map { ["id": $0.id, "error": $0.error] }
-            output["failedCount"] = result.failed.count
-        }
+            var output: [String: Any] = [
+                "deleted": result.deleted,
+                "deletedCount": result.deleted.count,
+            ]
 
-        try outputJSON(output, pretty: globals.pretty)
+            if !result.failed.isEmpty {
+                output["failed"] = result.failed.map { ["id": $0.id, "error": $0.error] }
+                output["failedCount"] = result.failed.count
+            }
 
-        if !result.failed.isEmpty {
-            throw ExitCode.failure
+            try outputJSON(output, pretty: globals.pretty)
+
+            if !result.failed.isEmpty {
+                throw ExitCode.failure
+            }
         }
     }
 }

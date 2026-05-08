@@ -194,10 +194,11 @@ reminders export --path ~/reminders-backup.json --include-completed --pretty
 
 ## Environment Variables
 
-| Variable                      | Description                                      |
-| ----------------------------- | ------------------------------------------------ |
-| `AR_MCP_TEST_MODE=1`          | Enable test mode (restrict writes to test lists) |
-| `AR_MCP_MOCK_MODE=1`          | Use mock store                                   |
-| `AR_MCP_SNAPSHOT_ENABLED=1`   | Enable auto-snapshots in MCP server              |
-| `AR_MCP_SNAPSHOT_REPO=<path>` | Snapshot repository path                         |
-| `AR_SNAPSHOT_REPO=<path>`     | Snapshot repository path (CLI)                   |
+| Variable                      | Description                                                                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `AR_MCP_TEST_MODE=1`          | Enable test mode (restrict writes to test lists)                                                                             |
+| `AR_MCP_MOCK_MODE=1`          | Use mock store                                                                                                               |
+| `AR_MCP_SNAPSHOT_ENABLED=1`   | Enable auto-snapshots in MCP server                                                                                          |
+| `AR_MCP_SNAPSHOT_REPO=<path>` | Snapshot repository path                                                                                                     |
+| `AR_SNAPSHOT_ENABLED=1`       | Enable CLI auto-snapshots around mutations (post always; pre only if repo is uninitialized or last snapshot is > 7 days old) |
+| `AR_SNAPSHOT_REPO=<path>`     | Snapshot repository path (CLI)                                                                                               |

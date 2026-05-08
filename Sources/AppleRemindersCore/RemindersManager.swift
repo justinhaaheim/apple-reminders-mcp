@@ -4,7 +4,7 @@ import JMESPath
 // MARK: - Reminders Manager
 
 public class RemindersManager {
-    private let store: ReminderStore
+    public let store: ReminderStore
     private var hasAccess = false
 
     public init(store: ReminderStore) {

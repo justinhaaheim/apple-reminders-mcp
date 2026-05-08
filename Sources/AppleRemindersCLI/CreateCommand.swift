@@ -81,17 +81,19 @@ struct CreateCommand: AsyncParsableCommand {
             recurrenceRule: recurrenceRule
         )
 
-        let result = manager.createReminders(inputs: [input])
+        try await withAutoSnapshot(store: manager.store, reason: "create_reminder") {
+            let result = manager.createReminders(inputs: [input])
 
-        if !result.failed.isEmpty {
-            for failure in result.failed {
-                fputs("Error: \(failure.error)\n", stderr)
+            if !result.failed.isEmpty {
+                for failure in result.failed {
+                    fputs("Error: \(failure.error)\n", stderr)
+                }
+                throw ExitCode.failure
             }
-            throw ExitCode.failure
-        }
 
-        if let created = result.created.first {
-            try outputJSON(created, pretty: globals.pretty)
+            if let created = result.created.first {
+                try outputJSON(created, pretty: globals.pretty)
+            }
         }
     }
 }

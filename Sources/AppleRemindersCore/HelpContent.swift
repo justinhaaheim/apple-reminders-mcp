@@ -84,6 +84,10 @@ public enum HelpContent {
       AR_MCP_MOCK_MODE=1            Use mock store
       AR_MCP_SNAPSHOT_ENABLED=1     Enable auto-snapshots in MCP server
       AR_MCP_SNAPSHOT_REPO=<path>   Snapshot repository path
+      AR_SNAPSHOT_ENABLED=1         Enable CLI auto-snapshots around mutations
+                                    (post-snapshot always; pre-snapshot only
+                                    if repo is uninitialized or last snapshot
+                                    is > 7 days old)
       AR_SNAPSHOT_REPO=<path>       Snapshot repository path (CLI)
 
     Examples:
@@ -689,6 +693,12 @@ public enum HelpContent {
     • Use `snapshot diff` to verify what changed before committing to more changes.
     • Snapshots are lightweight git commits — take them frequently.
     • For MCP server auto-snapshots, set AR_MCP_SNAPSHOT_ENABLED=1.
+    • For CLI auto-snapshots around mutations (create/create-list/update/delete),
+      set AR_SNAPSHOT_ENABLED=1. Post-snapshot runs after every successful
+      mutation; pre-snapshot only runs when the repo is uninitialized or the
+      last snapshot is > 7 days old. Snapshot failures warn to stderr but
+      don't abort the mutation. Repo path resolves via AR_SNAPSHOT_REPO or
+      defaults to ~/.config/apple-reminders-data.
     """
 
     // MARK: - MCP
