@@ -171,6 +171,59 @@ describe('CLI auto-snapshot (AR_SNAPSHOT_ENABLED)', () => {
     expect(after.length).toBe(beforeCount + 2);
   });
 
+  test('first snapshot writes snapshot-state.json with cutoff timestamp', async () => {
+    const before = new Date();
+    const result = await runCLI(['create-list', '--mock', 'My List'], {
+      AR_SNAPSHOT_ENABLED: '1',
+      AR_SNAPSHOT_REPO: repoPath,
+    });
+    const after = new Date();
+    expect(result.exitCode).toBe(0);
+
+    const statePath = join(repoPath, 'snapshot-state.json');
+    expect(existsSync(statePath)).toBe(true);
+
+    const fileText = await Bun.file(statePath).text();
+    const parsed = JSON.parse(fileText);
+    expect(parsed.schemaVersion).toBe(1);
+    expect(typeof parsed.lastSnapshotAt).toBe('string');
+
+    // Cutoff was captured before fetch — should be at or after `before` and
+    // before/equal to the current time after the run finished.
+    const cutoff = new Date(parsed.lastSnapshotAt).getTime();
+    // Allow 5s slop since the snapshot encloses the time window.
+    expect(cutoff).toBeGreaterThanOrEqual(before.getTime() - 5000);
+    expect(cutoff).toBeLessThanOrEqual(after.getTime() + 5000);
+  });
+
+  test('first snapshot logs mode = full (no previous snapshot state)', async () => {
+    const result = await runCLI(['create-list', '--mock', 'My List'], {
+      AR_SNAPSHOT_ENABLED: '1',
+      AR_SNAPSHOT_REPO: repoPath,
+    });
+    expect(result.exitCode).toBe(0);
+    // The first auto-snapshot of a fresh repo has no prior state.
+    expect(result.stderr).toContain('mode = full (no previous snapshot state)');
+  });
+
+  test('subsequent snapshot with new list logs mode = full (list set or names changed)', async () => {
+    // First invocation creates state file + lists.json with one list.
+    await runCLI(['create-list', '--mock', 'First'], {
+      AR_SNAPSHOT_ENABLED: '1',
+      AR_SNAPSHOT_REPO: repoPath,
+    });
+
+    // Second invocation: mock store starts empty again, then creates a
+    // different list. Pre-snapshot finds lists.json differs from current
+    // calendars → forces full mode.
+    const result = await runCLI(['create-list', '--mock', 'Second'], {
+      AR_SNAPSHOT_ENABLED: '1',
+      AR_SNAPSHOT_REPO: repoPath,
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toContain('mode = full (list set or names changed)');
+  });
+
   test('mutation succeeds even when snapshot fails', async () => {
     // Create the repo dir as a regular directory (no git init), and put a
     // file there that will conflict with .git initialization. We just write

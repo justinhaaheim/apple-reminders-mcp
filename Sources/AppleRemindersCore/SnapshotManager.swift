@@ -38,7 +38,20 @@ public class SnapshotManager {
         // 2. Check for uncommitted changes
         try checkCleanState()
 
-        // 3. Fetch all reminders from all lists
+        // Capture the cutoff for the NEXT snapshot BEFORE we fetch. Anything
+        // modified during the fetch will land at or after this instant, so the
+        // next snapshot will pick those changes up. Conservative — we may
+        // re-export a few unchanged reminders next time, but we never miss.
+        let snapshotCutoff = Date()
+
+        // 3. Read previous snapshot state (cutoff timestamp from last run).
+        //    Absent → fall back to a full snapshot.
+        let previousState = readSnapshotState()
+        let previousCutoff = previousState.flatMap { Date.fromISO8601($0.lastSnapshotAt) }
+
+        // 4. Fetch all reminders from all lists. Even in incremental mode we
+        //    need the full set to detect deletes and to write the per-fetch
+        //    lists.json. EventKit doesn't expose a "modified-since" predicate.
         let calendars = store.getAllCalendars()
         let defaultCalendar = store.getDefaultCalendar()
         log("Snapshot: fetching reminders from \(calendars.count) list(s) (this can take a moment for large libraries)")
@@ -52,7 +65,7 @@ public class SnapshotManager {
         let fetchMs = Int(Date().timeIntervalSince(fetchStart) * 1000)
         log("Snapshot: fetched \(allReminders.count) reminders in \(fetchMs)ms")
 
-        // 4. Build list metadata
+        // 5. Build list metadata.
         let listOutputs = calendars.map { calendar in
             ReminderListOutput(
                 id: calendar.id,
@@ -61,79 +74,106 @@ public class SnapshotManager {
             )
         }
 
-        // 5. Write reminders and lists to a temp directory, then atomically swap
+        // 6. Decide mode (incremental vs. full re-export). A list rename or
+        //    membership change forces full because reminder JSON files embed
+        //    `listName` — EventKit doesn't bump per-reminder lastModifiedDate
+        //    when its parent list is renamed, so a pure mtime filter would
+        //    leave stale list names in the snapshot.
         let dataDir = (repoPath as NSString).appendingPathComponent("data/id")
-        let tempDir = (repoPath as NSString).appendingPathComponent("data/.id-temp-\(UUID().uuidString)")
         let listsPath = (repoPath as NSString).appendingPathComponent("lists.json")
-        let tempListsPath = (repoPath as NSString).appendingPathComponent(".lists-temp-\(UUID().uuidString).json")
 
         try FileManager.default.createDirectory(
-            atPath: tempDir,
+            atPath: dataDir,
             withIntermediateDirectories: true
         )
 
-        // 6. Write each reminder as individual JSON file (to temp dir)
+        let listsChanged = listsHaveChanged(newLists: listOutputs, listsPath: listsPath)
+        let mode: SnapshotMode
+        if previousCutoff == nil {
+            mode = .full(reason: "no previous snapshot state")
+        } else if listsChanged {
+            mode = .full(reason: "list set or names changed")
+        } else {
+            mode = .incremental(cutoff: previousCutoff!)
+        }
+        log("Snapshot: mode = \(mode.description)")
+
+        // 7. Determine which reminders to write and which files to delete.
+        let currentIDs = Set(allReminders.map { $0.id })
+        let existingFileIDs = existingReminderFileIDs(dataDir: dataDir)
+
+        let toWrite: [Reminder]
+        switch mode {
+        case .full:
+            toWrite = allReminders
+        case .incremental(let cutoff):
+            toWrite = allReminders.filter { reminder in
+                // No lastModifiedDate? Be safe — treat as changed.
+                guard let lm = reminder.lastModifiedDate else { return true }
+                return lm >= cutoff
+            }
+        }
+        let toDelete = existingFileIDs.subtracting(currentIDs)
+
+        let unchanged = allReminders.count - toWrite.count
+        log("Snapshot: writing \(toWrite.count) changed reminders (\(unchanged) unchanged), deleting \(toDelete.count) removed file(s)")
+
+        // 8. Write reminder JSON files. Each write is per-file atomic via
+        //    Data.write(.atomic) — Foundation writes to a temp file in the
+        //    same directory and renames over the destination. No directory
+        //    swap, so a crash partway through leaves some files updated and
+        //    others not — the next snapshot's checkCleanState will surface
+        //    the partial state for the user.
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
 
-        log("Snapshot: writing \(allReminders.count) JSON files...")
         let writeStart = Date()
-        // Log progress every ~10% of total, or every 500 items, whichever is smaller.
-        let progressInterval = max(1, min(500, allReminders.count / 10))
+        let progressInterval = max(1, min(500, toWrite.count / 10))
 
-        do {
-            for (index, reminder) in allReminders.enumerated() {
-                let output = convertToSnapshotOutput(reminder, calendars: calendars, defaultCalendar: defaultCalendar, store: store)
-                let jsonData = try encoder.encode(output)
-                let filePath = (tempDir as NSString).appendingPathComponent("\(reminder.id).json")
-                try jsonData.write(to: URL(fileURLWithPath: filePath))
+        for (index, reminder) in toWrite.enumerated() {
+            let output = convertToSnapshotOutput(reminder, calendars: calendars, defaultCalendar: defaultCalendar, store: store)
+            let jsonData = try encoder.encode(output)
+            let filePath = (dataDir as NSString).appendingPathComponent("\(reminder.id).json")
+            try jsonData.write(to: URL(fileURLWithPath: filePath), options: .atomic)
 
-                let written = index + 1
-                if written % progressInterval == 0 && written < allReminders.count {
-                    log("Snapshot: wrote \(written)/\(allReminders.count) files")
-                }
+            let written = index + 1
+            if written % progressInterval == 0 && written < toWrite.count {
+                log("Snapshot: wrote \(written)/\(toWrite.count) files")
             }
+        }
+        if !toWrite.isEmpty {
             let writeMs = Int(Date().timeIntervalSince(writeStart) * 1000)
-            log("Snapshot: wrote \(allReminders.count) files in \(writeMs)ms")
-
-            // 7. Write lists.json to temp file first
-            let listsData = try encoder.encode(listOutputs)
-            try listsData.write(to: URL(fileURLWithPath: tempListsPath))
-
-            // Atomically replace data/id directory using replaceItemAt for crash safety.
-            // replaceItemAt handles the swap atomically on APFS/HFS+, avoiding the
-            // window where dataDir doesn't exist between remove + move.
-            let dataDirURL = URL(fileURLWithPath: dataDir)
-            let tempDirURL = URL(fileURLWithPath: tempDir)
-            if FileManager.default.fileExists(atPath: dataDir) {
-                _ = try FileManager.default.replaceItemAt(dataDirURL, withItemAt: tempDirURL)
-            } else {
-                try FileManager.default.moveItem(atPath: tempDir, toPath: dataDir)
-            }
-
-            // Atomically replace lists.json
-            let listsURL = URL(fileURLWithPath: listsPath)
-            let tempListsURL = URL(fileURLWithPath: tempListsPath)
-            if FileManager.default.fileExists(atPath: listsPath) {
-                _ = try FileManager.default.replaceItemAt(listsURL, withItemAt: tempListsURL)
-            } else {
-                try FileManager.default.moveItem(atPath: tempListsPath, toPath: listsPath)
-            }
-        } catch {
-            // Clean up temp files on failure
-            try? FileManager.default.removeItem(atPath: tempDir)
-            try? FileManager.default.removeItem(atPath: tempListsPath)
-            throw error
+            log("Snapshot: wrote \(toWrite.count) files in \(writeMs)ms")
         }
 
-        // 8. Git add + commit
+        for id in toDelete {
+            let filePath = (dataDir as NSString).appendingPathComponent("\(id).json")
+            try? FileManager.default.removeItem(atPath: filePath)
+        }
+        if !toDelete.isEmpty {
+            log("Snapshot: deleted \(toDelete.count) stale reminder file(s)")
+        }
+
+        // 9. Always re-export lists.json (one-line change covers list create
+        //    / delete / rename without depending on reminder mtime updates).
+        let listsData = try encoder.encode(listOutputs)
+        try listsData.write(to: URL(fileURLWithPath: listsPath), options: .atomic)
+
+        // 10. Persist new state file with the cutoff for the NEXT snapshot.
+        let newState = SnapshotState(
+            lastSnapshotAt: snapshotCutoff.toISO8601WithTimezone(),
+            schemaVersion: SnapshotState.currentSchemaVersion
+        )
+        try writeSnapshotState(newState)
+
+        // 11. Git add + commit (no-op if nothing actually changed on disk).
         log("Snapshot: committing to git...")
         let commitStart = Date()
         let timestamp = Date().toISO8601WithTimezone()
         let commitMessage = "Snapshot \(timestamp) — \(allReminders.count) reminders, \(calendars.count) lists"
         let diffSummary = try gitAddAndCommit(message: commitMessage)
         let commitMs = Int(Date().timeIntervalSince(commitStart) * 1000)
-        log("Snapshot: git commit done in \(commitMs)ms")
+        log("Snapshot: git pipeline done in \(commitMs)ms")
 
         let elapsed = Date().timeIntervalSince(startTime)
         log("Snapshot: complete (\(allReminders.count) reminders, \(calendars.count) lists, \(String(format: "%.2f", elapsed))s total)")
@@ -147,6 +187,68 @@ public class SnapshotManager {
             elapsedSeconds: elapsed,
             repoPath: repoPath
         )
+    }
+
+    /// Snapshot operating mode for one invocation.
+    private enum SnapshotMode {
+        case full(reason: String)
+        case incremental(cutoff: Date)
+
+        var description: String {
+            switch self {
+            case .full(let reason): return "full (\(reason))"
+            case .incremental(let cutoff): return "incremental (cutoff: \(cutoff.toISO8601WithTimezone()))"
+            }
+        }
+    }
+
+    /// Read the persisted snapshot state, or nil if absent / unparseable.
+    /// Unparseable = treat as missing → safe fallback to full snapshot.
+    private func readSnapshotState() -> SnapshotState? {
+        let path = (repoPath as NSString).appendingPathComponent(SnapshotState.fileName)
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(SnapshotState.self, from: data)
+    }
+
+    private func writeSnapshotState(_ state: SnapshotState) throws {
+        let path = (repoPath as NSString).appendingPathComponent(SnapshotState.fileName)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(state)
+        try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+    }
+
+    /// IDs of existing reminder snapshot files in `data/id/` (the `<id>` part
+    /// of `<id>.json`). Used to compute deletions in incremental mode.
+    private func existingReminderFileIDs(dataDir: String) -> Set<String> {
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: dataDir) else {
+            return []
+        }
+        return Set(
+            entries
+                .filter { $0.hasSuffix(".json") }
+                .map { String($0.dropLast(5)) }
+        )
+    }
+
+    /// True iff the lists.json on disk would change. Compares the encoded
+    /// representations rather than struct fields so any future field added
+    /// to ReminderListOutput is automatically picked up.
+    private func listsHaveChanged(newLists: [ReminderListOutput], listsPath: String) -> Bool {
+        guard let existingData = try? Data(contentsOf: URL(fileURLWithPath: listsPath)),
+              let existing = try? JSONDecoder().decode([ReminderListOutput].self, from: existingData)
+        else {
+            // No lists.json yet (or unreadable) — treat as changed.
+            return true
+        }
+
+        // Compare as (id → name) maps; ignores ordering and `isDefault` flips
+        // (those don't affect reminder JSON content).
+        let existingMap = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0.name) })
+        let newMap = Dictionary(uniqueKeysWithValues: newLists.map { ($0.id, $0.name) })
+        return existingMap != newMap
     }
 
     /// Whether a pre-mutation snapshot is warranted given the repo's current state.
@@ -259,8 +361,15 @@ public class SnapshotManager {
         let status = try runGit("status", "--porcelain")
         if !status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             throw RemindersError(
-                "Snapshot repository has uncommitted changes. " +
-                "Please commit or discard changes before taking a snapshot."
+                """
+                Snapshot repository has uncommitted changes at \(repoPath).
+
+                If a previous snapshot was interrupted, you can discard the partial
+                state with:
+                  cd \(repoPath) && git reset --hard HEAD && git clean -fd
+
+                Otherwise, commit or discard the changes manually before retrying.
+                """
             )
         }
     }
@@ -470,6 +579,26 @@ public struct SnapshotResult: Codable {
     public let diffSummary: String
     public let elapsedSeconds: Double
     public let repoPath: String
+}
+
+/// On-disk record of the most recent snapshot's cutoff timestamp. Persisted
+/// at `<repoPath>/snapshot-state.json` and read by the next snapshot to
+/// decide what to re-export.
+///
+/// `lastSnapshotAt` is captured *just before* the EventKit fetch — anything
+/// modified at or after this instant is included in the next snapshot.
+/// `schemaVersion` lets us evolve the format if needed.
+public struct SnapshotState: Codable {
+    public static let currentSchemaVersion = 1
+    public static let fileName = "snapshot-state.json"
+
+    public let lastSnapshotAt: String
+    public let schemaVersion: Int
+
+    public init(lastSnapshotAt: String, schemaVersion: Int) {
+        self.lastSnapshotAt = lastSnapshotAt
+        self.schemaVersion = schemaVersion
+    }
 }
 
 /// Status of the snapshot repository.
