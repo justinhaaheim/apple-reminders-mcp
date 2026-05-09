@@ -283,6 +283,15 @@ public class MCPServer {
                         "hashtag": .object([
                             "type": .string("string"),
                             "description": .string("Filter by hashtag name (case-insensitive). Matches reminders that have this hashtag applied. Requires SQLite enrichment (Full Disk Access on the calling process).")
+                        ]),
+                        "parentId": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter to direct children of the given reminder UUID. Mutually exclusive with topLevelOnly. Requires SQLite enrichment.")
+                        ]),
+                        "topLevelOnly": .object([
+                            "type": .string("boolean"),
+                            "default": .bool(false),
+                            "description": .string("Return only reminders without a parent. Mutually exclusive with parentId. Requires SQLite enrichment.")
                         ])
                     ]),
                     "additionalProperties": .bool(false)
@@ -720,6 +729,8 @@ public class MCPServer {
             let dueTo = arguments["dueTo"]?.value as? String
             let outputDetail = arguments["outputDetail"]?.value as? String
             let hashtag = arguments["hashtag"]?.value as? String
+            let parentId = arguments["parentId"]?.value as? String
+            let topLevelOnly = arguments["topLevelOnly"]?.value as? Bool ?? false
 
             let result = try await remindersManager.queryReminders(
                 list: listDict == nil ? nil : listSelector,
@@ -736,7 +747,9 @@ public class MCPServer {
                 dueFrom: dueFrom,
                 dueTo: dueTo,
                 outputDetail: outputDetail,
-                hashtag: hashtag
+                hashtag: hashtag,
+                parentId: parentId,
+                topLevelOnly: topLevelOnly
             )
 
             return try toJSON(result)

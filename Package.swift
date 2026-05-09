@@ -44,7 +44,10 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/adam-fowler/jmespath.swift", from: "1.0.0"),
-        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0"),
+        // 1.6+ uses `internal import os`, which on macOS-14's default Xcode
+        // (Swift 5.9) requires `-enable-experimental-feature AccessLevelOnImport`.
+        // Pin to <1.6 to keep CI building on the stock toolchain.
+        .package(url: "https://github.com/apple/swift-argument-parser", "1.3.0" ..< "1.6.0"),
     ],
     targets: [
         .systemLibrary(

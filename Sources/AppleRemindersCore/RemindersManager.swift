@@ -234,8 +234,13 @@ public class RemindersManager {
         dueFrom: String?,
         dueTo: String?,
         outputDetail: String?,
-        hashtag: String? = nil
+        hashtag: String? = nil,
+        parentId: String? = nil,
+        topLevelOnly: Bool = false
     ) async throws -> Any {
+        if parentId != nil && topLevelOnly {
+            throw RemindersError("--parent and --top-level are mutually exclusive")
+        }
         let startTime = Date()
         log("Starting queryReminders")
 
@@ -358,6 +363,30 @@ public class RemindersManager {
             }
         }
 
+        // 2f. Parent / top-level filter (DB-derived, post-fetch). Same
+        //     graceful-degrade contract as the hashtag filter.
+        if topLevelOnly {
+            if hasDBEnrichment {
+                reminderOutputs = reminderOutputs.filter { $0.parentId == nil }
+                log("--top-level filter reduced to \(reminderOutputs.count) reminders")
+            } else {
+                ReminderDBReader.warnOnce(
+                    "top-level-filter-no-enrichment",
+                    "--top-level filter requested but DB enrichment is unavailable; returning unfiltered results. Grant Full Disk Access to enable parent/child filtering."
+                )
+            }
+        } else if let parentId = parentId, !parentId.isEmpty {
+            if hasDBEnrichment {
+                reminderOutputs = reminderOutputs.filter { $0.parentId == parentId }
+                log("--parent \(parentId) filter reduced to \(reminderOutputs.count) reminders")
+            } else {
+                ReminderDBReader.warnOnce(
+                    "parent-filter-no-enrichment",
+                    "--parent filter requested but DB enrichment is unavailable; returning unfiltered results. Grant Full Disk Access to enable parent/child filtering."
+                )
+            }
+        }
+
         // 3. Apply JMESPath if provided — always uses full fields, outputDetail is ignored
         //    When JMESPath is used, return full result with no pagination (users can use JMESPath slicing)
         if let jmesQuery = query, !jmesQuery.isEmpty {
@@ -464,7 +493,7 @@ public class RemindersManager {
     private static let compactFields: Set<String> = [
         "id", "title", "notes", "listName", "isCompleted",
         "dueDate", "priority", "createdDate", "modifiedDate",
-        "hashtags"
+        "hashtags", "parentId", "childIds"
     ]
     // "full" uses all fields — no filtering needed
 
@@ -577,6 +606,14 @@ public class RemindersManager {
             dict["hashtags"] = hashtags
         } else {
             dict["hashtags"] = NSNull()
+        }
+
+        // parentId / childIds: same enrichment contract as hashtags.
+        dict["parentId"] = reminder.parentId as Any? ?? NSNull()
+        if let childIds = reminder.childIds {
+            dict["childIds"] = childIds
+        } else {
+            dict["childIds"] = NSNull()
         }
 
         return dict
@@ -1173,22 +1210,43 @@ public class RemindersManager {
 
         let uuids = outputs.map { $0.id }
         var hashtagsByUUID: [String: [String]] = [:]
+        var parentByUUID: [String: String] = [:]
+        var childrenByUUID: [String: [String]] = [:]
         for reader in dbReaders {
             do {
                 let chunk = try reader.hashtags(forReminderUUIDs: uuids)
-                for (uuid, tags) in chunk {
-                    hashtagsByUUID[uuid] = tags
-                }
+                for (uuid, tags) in chunk { hashtagsByUUID[uuid] = tags }
             } catch {
                 ReminderDBReader.warnOnce(
                     "enrich.hashtags.\(reader.storeURL.lastPathComponent)",
                     "Hashtag enrichment failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
                 )
             }
+            do {
+                let parents = try reader.parents(forReminderUUIDs: uuids)
+                for (uuid, parent) in parents { parentByUUID[uuid] = parent }
+            } catch {
+                ReminderDBReader.warnOnce(
+                    "enrich.parents.\(reader.storeURL.lastPathComponent)",
+                    "Parent enrichment failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+            do {
+                let kids = try reader.children(forReminderUUIDs: uuids)
+                for (uuid, ids) in kids { childrenByUUID[uuid] = ids }
+            } catch {
+                ReminderDBReader.warnOnce(
+                    "enrich.children.\(reader.storeURL.lastPathComponent)",
+                    "Children enrichment failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
         }
 
         for i in outputs.indices {
-            outputs[i].hashtags = hashtagsByUUID[outputs[i].id] ?? []
+            let uuid = outputs[i].id
+            outputs[i].hashtags = hashtagsByUUID[uuid] ?? []
+            outputs[i].parentId = parentByUUID[uuid]
+            outputs[i].childIds = childrenByUUID[uuid] ?? []
         }
     }
 

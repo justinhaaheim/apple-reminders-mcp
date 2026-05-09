@@ -164,3 +164,78 @@ extension ReminderDBReader {
         return Date(timeIntervalSinceReferenceDate: value)
     }
 }
+
+// MARK: - Parent/child queries
+
+extension ReminderDBReader {
+
+    /// For each input UUID, returns the parent reminder's UUID if one
+    /// exists in this store. Reminders without a parent (top-level) and
+    /// reminders not present in this store simply don't appear in the
+    /// output.
+    ///
+    /// `ZREMCDREMINDER.ZPARENTREMINDER` is an integer FK to the parent's
+    /// `Z_PK`. UUIDs round-trip via `ZCKIDENTIFIER`. Tombstones filtered
+    /// on both sides.
+    public func parents(forReminderUUIDs uuids: [String]) throws -> [String: String] {
+        guard !uuids.isEmpty else { return [:] }
+
+        let placeholders = Array(repeating: "?", count: uuids.count).joined(separator: ", ")
+        let sql = """
+            SELECT child.ZCKIDENTIFIER, parent.ZCKIDENTIFIER
+            FROM ZREMCDREMINDER child
+            JOIN ZREMCDREMINDER parent ON parent.Z_PK = child.ZPARENTREMINDER
+            WHERE child.ZMARKEDFORDELETION = 0
+              AND parent.ZMARKEDFORDELETION = 0
+              AND child.ZCKIDENTIFIER IN (\(placeholders))
+            """
+
+        var out: [String: String] = [:]
+        try eachRow(
+            sql: sql,
+            bind: { stmt in
+                for (i, uuid) in uuids.enumerated() {
+                    sqlite3_bind_text(stmt, Int32(i + 1), uuid, -1, Self.SQLITE_TRANSIENT)
+                }
+            }
+        ) { stmt in
+            guard let cPtr = sqlite3_column_text(stmt, 0),
+                  let pPtr = sqlite3_column_text(stmt, 1) else { return }
+            out[String(cString: cPtr)] = String(cString: pPtr)
+        }
+        return out
+    }
+
+    /// For each input UUID, returns the UUIDs of its direct children.
+    /// Reminders with no children get an empty array. Reminders not
+    /// present in this store don't appear in the output.
+    public func children(forReminderUUIDs uuids: [String]) throws -> [String: [String]] {
+        guard !uuids.isEmpty else { return [:] }
+
+        let placeholders = Array(repeating: "?", count: uuids.count).joined(separator: ", ")
+        let sql = """
+            SELECT parent.ZCKIDENTIFIER, child.ZCKIDENTIFIER, child.ZICSDISPLAYORDER
+            FROM ZREMCDREMINDER child
+            JOIN ZREMCDREMINDER parent ON parent.Z_PK = child.ZPARENTREMINDER
+            WHERE child.ZMARKEDFORDELETION = 0
+              AND parent.ZMARKEDFORDELETION = 0
+              AND parent.ZCKIDENTIFIER IN (\(placeholders))
+            ORDER BY parent.ZCKIDENTIFIER, child.ZICSDISPLAYORDER ASC, child.Z_PK ASC
+            """
+
+        var out: [String: [String]] = [:]
+        try eachRow(
+            sql: sql,
+            bind: { stmt in
+                for (i, uuid) in uuids.enumerated() {
+                    sqlite3_bind_text(stmt, Int32(i + 1), uuid, -1, Self.SQLITE_TRANSIENT)
+                }
+            }
+        ) { stmt in
+            guard let pPtr = sqlite3_column_text(stmt, 0),
+                  let cPtr = sqlite3_column_text(stmt, 1) else { return }
+            out[String(cString: pPtr), default: []].append(String(cString: cPtr))
+        }
+        return out
+    }
+}

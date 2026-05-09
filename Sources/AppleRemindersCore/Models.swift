@@ -84,13 +84,25 @@ public struct ReminderOutput: Codable {
     // an empty value means "DB available, this reminder has none".
     public var hashtags: [String]?
 
+    /// UUID of the parent reminder when this reminder is a subtask.
+    /// nil means either "top-level" or "DB enrichment unavailable" — the
+    /// two cases are functionally indistinguishable from a single field.
+    public var parentId: String?
+
+    /// UUIDs of direct children. nil when DB enrichment is unavailable;
+    /// `[]` when the reminder has no children. Order matches the user's
+    /// arrangement in Reminders.app (sorted by `ZICSDISPLAYORDER`).
+    public var childIds: [String]?
+
     public init(
         id: String, title: String, notes: String?,
         listId: String, listName: String, isCompleted: Bool,
         priority: String, dueDate: String?, dueDateIncludesTime: Bool?,
         completedDate: String?, createdDate: String, modifiedDate: String,
         url: String?, alarms: [AlarmOutput]?, recurrenceRules: [RecurrenceRuleOutput]?,
-        hashtags: [String]? = nil
+        hashtags: [String]? = nil,
+        parentId: String? = nil,
+        childIds: [String]? = nil
     ) {
         self.id = id
         self.title = title
@@ -108,6 +120,8 @@ public struct ReminderOutput: Codable {
         self.alarms = alarms
         self.recurrenceRules = recurrenceRules
         self.hashtags = hashtags
+        self.parentId = parentId
+        self.childIds = childIds
     }
 }
 

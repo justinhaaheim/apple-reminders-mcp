@@ -5,10 +5,6 @@ on:
     branches: [main]
   pull_request:
 
-permissions:
-  contents: read
-  pull-requests: write
-
 jobs:
   build:
     runs-on: macos-14
@@ -16,40 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Print toolchain
-        run: |
-          swift --version
-          xcode-select -p || true
-
       - name: Build Swift package
-        id: swift_build
-        shell: bash
-        run: |
-          set +e
-          swift build -c release 2>&1 | tee /tmp/build.log
-          rc=${PIPESTATUS[0]}
-          {
-            echo '## swift build output'
-            echo
-            echo '```'
-            tail -200 /tmp/build.log
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          exit $rc
-
-      - name: Post build log to PR on failure
-        if: failure() && github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          {
-            echo "macOS \`swift build -c release\` failed. Tail of build log:"
-            echo
-            echo '```'
-            tail -120 /tmp/build.log
-            echo '```'
-          } > /tmp/comment.md
-          gh pr comment "${{ github.event.pull_request.number }}" -R "${{ github.repository }}" -F /tmp/comment.md || true
+        run: swift build -c release
 
   format:
     runs-on: ubuntu-latest

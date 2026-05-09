@@ -64,6 +64,12 @@ struct QueryCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Filter by hashtag (case-insensitive on canonical name)")
     var hashtag: String?
 
+    @Option(name: .long, help: "Filter to direct children of the given reminder UUID (mutually exclusive with --top-level)")
+    var parent: String?
+
+    @Flag(name: .long, help: "Filter to top-level reminders only (mutually exclusive with --parent)")
+    var topLevel: Bool = false
+
     private static let validStatuses = ["incomplete", "completed", "all"]
     private static let validSorts = ["newest", "oldest", "priority", "dueDate"]
     private static let validDetails = ["minimal", "compact", "full"]
@@ -84,6 +90,10 @@ struct QueryCommand: AsyncParsableCommand {
         let listOptionCount = [list != nil, listId != nil, allLists].filter { $0 }.count
         if listOptionCount > 1 {
             throw ValidationError("Specify only one of --list, --list-id, or --all-lists")
+        }
+
+        if parent != nil && topLevel {
+            throw ValidationError("--parent and --top-level are mutually exclusive")
         }
 
         let manager = try await createManager(options: globals)
@@ -114,7 +124,9 @@ struct QueryCommand: AsyncParsableCommand {
             dueFrom: dueFrom,
             dueTo: dueTo,
             outputDetail: detail,
-            hashtag: hashtag
+            hashtag: hashtag,
+            parentId: parent,
+            topLevelOnly: topLevel
         )
 
         try outputJSON(result, pretty: globals.pretty)
