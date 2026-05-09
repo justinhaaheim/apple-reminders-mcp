@@ -236,11 +236,11 @@ public class MCPServer {
                         ]),
                         "modifiedFrom": .object([
                             "type": .string("string"),
-                            "description": .string("Filter by lastModifiedDate >= this ISO 8601 date (or YYYY-MM-DD).")
+                            "description": .string("Filter by modifiedDate >= this ISO 8601 date (or YYYY-MM-DD).")
                         ]),
                         "modifiedTo": .object([
                             "type": .string("string"),
-                            "description": .string("Filter by lastModifiedDate <= this ISO 8601 date (or YYYY-MM-DD).")
+                            "description": .string("Filter by modifiedDate <= this ISO 8601 date (or YYYY-MM-DD).")
                         ]),
                         "dueFrom": .object([
                             "type": .string("string"),
@@ -993,7 +993,7 @@ public class MCPServer {
                 "isCompleted": reminder.isCompleted,
                 "priority": reminder.priority,
                 "createdDate": reminder.createdDate,
-                "lastModifiedDate": reminder.lastModifiedDate
+                "modifiedDate": reminder.modifiedDate
             ]
             if let notes = reminder.notes {
                 dict["notes"] = notes
@@ -1004,8 +1004,8 @@ public class MCPServer {
             if let dueDateIncludesTime = reminder.dueDateIncludesTime {
                 dict["dueDateIncludesTime"] = dueDateIncludesTime
             }
-            if let completionDate = reminder.completionDate {
-                dict["completionDate"] = completionDate
+            if let completedDate = reminder.completedDate {
+                dict["completedDate"] = completedDate
             }
             if let url = reminder.url {
                 dict["url"] = url

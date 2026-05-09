@@ -72,9 +72,9 @@ public struct ReminderOutput: Codable {
     public let priority: String  // "none", "low", "medium", "high"
     public let dueDate: String?
     public let dueDateIncludesTime: Bool?
-    public let completionDate: String?
+    public let completedDate: String?
     public let createdDate: String
-    public let lastModifiedDate: String
+    public let modifiedDate: String
     public let url: String?
     public let alarms: [AlarmOutput]?
     public let recurrenceRules: [RecurrenceRuleOutput]?
@@ -83,7 +83,7 @@ public struct ReminderOutput: Codable {
         id: String, title: String, notes: String?,
         listId: String, listName: String, isCompleted: Bool,
         priority: String, dueDate: String?, dueDateIncludesTime: Bool?,
-        completionDate: String?, createdDate: String, lastModifiedDate: String,
+        completedDate: String?, createdDate: String, modifiedDate: String,
         url: String?, alarms: [AlarmOutput]?, recurrenceRules: [RecurrenceRuleOutput]?
     ) {
         self.id = id
@@ -95,9 +95,9 @@ public struct ReminderOutput: Codable {
         self.priority = priority
         self.dueDate = dueDate
         self.dueDateIncludesTime = dueDateIncludesTime
-        self.completionDate = completionDate
+        self.completedDate = completedDate
         self.createdDate = createdDate
-        self.lastModifiedDate = lastModifiedDate
+        self.modifiedDate = modifiedDate
         self.url = url
         self.alarms = alarms
         self.recurrenceRules = recurrenceRules

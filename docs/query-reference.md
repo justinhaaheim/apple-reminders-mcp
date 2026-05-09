@@ -73,26 +73,26 @@ For more flexible matching (regex-like patterns, conditions on other fields), dr
 
 Each `from` is **inclusive lower bound** (`>=`); each `to` is **inclusive upper bound** (`<=`). Reminders missing the field are excluded from the filter.
 
-| Flag                     | Filters by         |
-| ------------------------ | ------------------ |
-| `--created-from <date>`  | `createdDate`      |
-| `--created-to <date>`    | `createdDate`      |
-| `--modified-from <date>` | `lastModifiedDate` |
-| `--modified-to <date>`   | `lastModifiedDate` |
-| `--due-from <date>`      | `dueDate`          |
-| `--due-to <date>`        | `dueDate`          |
+| Flag                     | Filters by     |
+| ------------------------ | -------------- |
+| `--created-from <date>`  | `createdDate`  |
+| `--created-to <date>`    | `createdDate`  |
+| `--modified-from <date>` | `modifiedDate` |
+| `--modified-to <date>`   | `modifiedDate` |
+| `--due-from <date>`      | `dueDate`      |
+| `--due-to <date>`        | `dueDate`      |
 
 Date format: ISO 8601 with timezone (`2026-05-07T09:00:00-08:00`) or date-only (`2026-05-07`).
 
-There's no per-field `completionDate` flag — the EventKit predicate doesn't expose it cleanly when combined with other filters. Use JMESPath: `[?completionDate >= '2026-04-30']`.
+There's no per-field `completedDate` flag — the EventKit predicate doesn't expose it cleanly when combined with other filters. Use JMESPath: `[?completedDate >= '2026-04-30']`.
 
 ### Output shape
 
-| Flag               | Meaning                                                                                          |
-| ------------------ | ------------------------------------------------------------------------------------------------ |
-| `--detail minimal` | `id`, `title`, plus context-implied `listName` / `isCompleted`                                   |
-| `--detail compact` | (default) Adds `notes`, `dueDate`, `priority`, `createdDate`, `lastModifiedDate`. Nulls omitted. |
-| `--detail full`    | Every field including `alarms`, `recurrenceRules`, `url`. Nulls shown.                           |
+| Flag               | Meaning                                                                                      |
+| ------------------ | -------------------------------------------------------------------------------------------- |
+| `--detail minimal` | `id`, `title`, plus context-implied `listName` / `isCompleted`                               |
+| `--detail compact` | (default) Adds `notes`, `dueDate`, `priority`, `createdDate`, `modifiedDate`. Nulls omitted. |
+| `--detail full`    | Every field including `alarms`, `recurrenceRules`, `url`. Nulls shown.                       |
 
 When you supply a JMESPath expression, `--detail` is ignored — JMESPath always operates on the full payload (so it can see all fields), and the output is whatever the expression returns.
 
@@ -207,7 +207,7 @@ length([?priority == 'high'])                   # count after filter
 | `keys(obj)` / `values(obj)`                       | Object keys/values                 |
 | `min_by(arr, &field)` / `max_by(arr, &field)`     | Single element by field            |
 
-Field names are camelCase: `createdDate`, `lastModifiedDate`, `dueDate`, `completionDate`, `listName`, `isCompleted`, `priority`, `notes`, `title`, `url`, `alarms`, `recurrenceRules`.
+Field names are camelCase: `createdDate`, `modifiedDate`, `dueDate`, `completedDate`, `listName`, `isCompleted`, `priority`, `notes`, `title`, `url`, `alarms`, `recurrenceRules`.
 
 ---
 
@@ -292,10 +292,10 @@ reminders query --list "Personal" --status all --pretty "sort_by(@, &createdDate
 
 ```bash
 reminders query --all-lists --status completed --detail full --pretty \
-  "sort_by([?completionDate >= '2026-04-30'], &completionDate)"
+  "sort_by([?completedDate >= '2026-04-30'], &completedDate)"
 ```
 
-`--detail full` is needed because `compact` (the default) doesn't include `completionDate`. JMESPath ignores `--detail`, so it'd see the field anyway — but the example here uses both filter and sort inside JMESPath.
+`--detail full` is needed because `compact` (the default) doesn't include `completedDate`. JMESPath ignores `--detail`, so it'd see the field anyway — but the example here uses both filter and sort inside JMESPath.
 
 ### 9. Reminders with no due date
 

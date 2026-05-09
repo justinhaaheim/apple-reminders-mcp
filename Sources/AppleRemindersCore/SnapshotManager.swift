@@ -74,11 +74,12 @@ public class SnapshotManager {
             )
         }
 
-        // 6. Decide mode (incremental vs. full re-export). A list rename or
-        //    membership change forces full because reminder JSON files embed
-        //    `listName` — EventKit doesn't bump per-reminder lastModifiedDate
-        //    when its parent list is renamed, so a pure mtime filter would
-        //    leave stale list names in the snapshot.
+        // 6. Decide mode (incremental vs. full re-export). Reminder JSON files
+        //    no longer embed listName (consumers join via lists.json), so a
+        //    list rename does NOT force a full re-export. List membership
+        //    changes update each affected reminder's modifiedDate in EventKit
+        //    (verified empirically), so incremental picks them up via the
+        //    listId field.
         let dataDir = (repoPath as NSString).appendingPathComponent("data/id")
         let listsPath = (repoPath as NSString).appendingPathComponent("lists.json")
 
@@ -87,12 +88,11 @@ public class SnapshotManager {
             withIntermediateDirectories: true
         )
 
-        let listsChanged = listsHaveChanged(newLists: listOutputs, listsPath: listsPath)
         let mode: SnapshotMode
-        if previousCutoff == nil {
+        if previousState == nil {
             mode = .full(reason: "no previous snapshot state")
-        } else if listsChanged {
-            mode = .full(reason: "list set or names changed")
+        } else if previousState!.schemaVersion != SnapshotState.currentSchemaVersion {
+            mode = .full(reason: "schema version changed (was \(previousState!.schemaVersion), now \(SnapshotState.currentSchemaVersion))")
         } else {
             mode = .incremental(cutoff: previousCutoff!)
         }
@@ -131,7 +131,7 @@ public class SnapshotManager {
         let progressInterval = max(1, min(500, toWrite.count / 10))
 
         for (index, reminder) in toWrite.enumerated() {
-            let output = convertToSnapshotOutput(reminder, calendars: calendars, defaultCalendar: defaultCalendar, store: store)
+            let output = convertToSnapshotOutput(reminder)
             let jsonData = try encoder.encode(output)
             let filePath = (dataDir as NSString).appendingPathComponent("\(reminder.id).json")
             try jsonData.write(to: URL(fileURLWithPath: filePath), options: .atomic)
@@ -233,23 +233,6 @@ public class SnapshotManager {
         )
     }
 
-    /// True iff the lists.json on disk would change. Compares the encoded
-    /// representations rather than struct fields so any future field added
-    /// to ReminderListOutput is automatically picked up.
-    private func listsHaveChanged(newLists: [ReminderListOutput], listsPath: String) -> Bool {
-        guard let existingData = try? Data(contentsOf: URL(fileURLWithPath: listsPath)),
-              let existing = try? JSONDecoder().decode([ReminderListOutput].self, from: existingData)
-        else {
-            // No lists.json yet (or unreadable) — treat as changed.
-            return true
-        }
-
-        // Compare as (id → name) maps; ignores ordering and `isDefault` flips
-        // (those don't affect reminder JSON content).
-        let existingMap = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0.name) })
-        let newMap = Dictionary(uniqueKeysWithValues: newLists.map { ($0.id, $0.name) })
-        return existingMap != newMap
-    }
 
     /// Whether a pre-mutation snapshot is warranted given the repo's current state.
     /// Returns true when the repo is uninitialized, has no real `Snapshot`-prefixed
@@ -480,14 +463,7 @@ public class SnapshotManager {
         return diffStat.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private func convertToSnapshotOutput(
-        _ reminder: Reminder,
-        calendars: [ReminderCalendar],
-        defaultCalendar: ReminderCalendar?,
-        store: ReminderStore
-    ) -> SnapshotReminderOutput {
-        let listName = reminder.getCalendarName(from: store)
-
+    private func convertToSnapshotOutput(_ reminder: Reminder) -> SnapshotReminderOutput {
         let alarmOutputs: [AlarmOutput]? = reminder.alarms.isEmpty ? nil : reminder.alarms.map { alarm in
             if let absoluteDate = alarm.absoluteDate {
                 return AlarmOutput(type: "absolute", date: absoluteDate.toISO8601WithTimezone(), offset: nil)
@@ -515,29 +491,18 @@ public class SnapshotManager {
             return components.date?.toISO8601WithTimezone()
         }()
 
-        let dueDateMS: Int64? = {
-            guard var components = reminder.dueDateComponents else { return nil }
-            if components.calendar == nil { components.calendar = Calendar.current }
-            return components.date.map { Int64($0.timeIntervalSince1970 * 1000) }
-        }()
-
         return SnapshotReminderOutput(
             id: reminder.id,
             title: reminder.title,
             notes: reminder.notes,
             listId: reminder.calendarId,
-            listName: listName,
             isCompleted: reminder.isCompleted,
             priority: Priority.fromInternal(reminder.priority).rawValue,
             dueDate: dueDate,
             dueDateIncludesTime: reminder.dueDateComponents != nil ? !reminder.isAllDay : nil,
-            dueDateMS: dueDateMS,
-            completionDate: reminder.completionDate?.toISO8601WithTimezone(),
-            completionDateMS: reminder.completionDate.map { Int64($0.timeIntervalSince1970 * 1000) },
+            completedDate: reminder.completionDate?.toISO8601WithTimezone(),
             createdDate: reminder.creationDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
-            createdDateMS: Int64((reminder.creationDate ?? Date()).timeIntervalSince1970 * 1000),
-            lastModifiedDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
-            lastModifiedDateMS: Int64((reminder.lastModifiedDate ?? Date()).timeIntervalSince1970 * 1000),
+            modifiedDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
             url: reminder.url?.absoluteString,
             alarms: alarmOutputs,
             recurrenceRules: recurrenceOutputs
@@ -547,24 +512,27 @@ public class SnapshotManager {
 
 // MARK: - Snapshot Output Types
 
-/// Extended reminder output with millisecond epoch timestamps for snapshots.
+/// Per-reminder JSON record written to `<repo>/data/id/<id>.json`.
+///
+/// Differences from `ReminderOutput`:
+/// - **No `listName`.** The list name lives once in `lists.json`; consumers
+///   join via `listId`. Avoids re-writing every reminder file when a list
+///   is renamed (EventKit doesn't bump per-reminder modifiedDate on list
+///   rename, so leaving listName here would silently drift).
+/// - **ISO 8601 strings only.** No `*Ms` epoch variants. The ISO strings are
+///   sortable lexically and round-trip via `Date.fromISO8601`.
 public struct SnapshotReminderOutput: Codable {
     public let id: String
     public let title: String
     public let notes: String?
     public let listId: String
-    public let listName: String
     public let isCompleted: Bool
     public let priority: String
     public let dueDate: String?
     public let dueDateIncludesTime: Bool?
-    public let dueDateMS: Int64?
-    public let completionDate: String?
-    public let completionDateMS: Int64?
+    public let completedDate: String?
     public let createdDate: String
-    public let createdDateMS: Int64
-    public let lastModifiedDate: String
-    public let lastModifiedDateMS: Int64
+    public let modifiedDate: String
     public let url: String?
     public let alarms: [AlarmOutput]?
     public let recurrenceRules: [RecurrenceRuleOutput]?
@@ -589,7 +557,14 @@ public struct SnapshotResult: Codable {
 /// modified at or after this instant is included in the next snapshot.
 /// `schemaVersion` lets us evolve the format if needed.
 public struct SnapshotState: Codable {
-    public static let currentSchemaVersion = 1
+    /// Bump this when the on-disk snapshot file format changes in a way that
+    /// requires re-writing existing files (e.g. dropped fields, renamed
+    /// fields). On schema mismatch the next snapshot does a full re-export.
+    /// History:
+    ///   1: initial format with listName + Ms epoch variants
+    ///   2: dropped listName (joined via lists.json), dropped Ms variants,
+    ///      renamed completionDate→completedDate, lastModifiedDate→modifiedDate
+    public static let currentSchemaVersion = 2
     public static let fileName = "snapshot-state.json"
 
     public let lastSnapshotAt: String

@@ -150,7 +150,7 @@ All commands support:
 # What's due today or overdue?
 reminders query --all-lists --status incomplete --due-from "$(date -I)" --sort dueDate --pretty
 
-# What did I complete recently? (no --completed-from flag — use JMESPath for completionDate)
+# What did I complete recently? (no --completed-from flag — use JMESPath for completedDate)
 reminders query --all-lists --status completed --modified-from "$(date -v-7d -I)" --sort newest --pretty
 ```
 

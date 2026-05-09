@@ -64,11 +64,11 @@ exports[`MCP schema snapshots tool schemas query_reminders 1`] = `
         "type": "object",
       },
       "modifiedFrom": {
-        "description": "Filter by lastModifiedDate >= this ISO 8601 date (or YYYY-MM-DD).",
+        "description": "Filter by modifiedDate >= this ISO 8601 date (or YYYY-MM-DD).",
         "type": "string",
       },
       "modifiedTo": {
-        "description": "Filter by lastModifiedDate <= this ISO 8601 date (or YYYY-MM-DD).",
+        "description": "Filter by modifiedDate <= this ISO 8601 date (or YYYY-MM-DD).",
         "type": "string",
       },
       "outputDetail": {

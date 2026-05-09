@@ -185,7 +185,7 @@ describe('CLI auto-snapshot (AR_SNAPSHOT_ENABLED)', () => {
 
     const fileText = await Bun.file(statePath).text();
     const parsed = JSON.parse(fileText);
-    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.schemaVersion).toBe(2);
     expect(typeof parsed.lastSnapshotAt).toBe('string');
 
     // Cutoff was captured before fetch — should be at or after `before` and
@@ -206,22 +206,23 @@ describe('CLI auto-snapshot (AR_SNAPSHOT_ENABLED)', () => {
     expect(result.stderr).toContain('mode = full (no previous snapshot state)');
   });
 
-  test('subsequent snapshot with new list logs mode = full (list set or names changed)', async () => {
+  test('subsequent snapshot uses incremental mode (list changes no longer force full)', async () => {
     // First invocation creates state file + lists.json with one list.
     await runCLI(['create-list', '--mock', 'First'], {
       AR_SNAPSHOT_ENABLED: '1',
       AR_SNAPSHOT_REPO: repoPath,
     });
 
-    // Second invocation: mock store starts empty again, then creates a
-    // different list. Pre-snapshot finds lists.json differs from current
-    // calendars → forces full mode.
+    // Second invocation creates a different list. With listName no longer
+    // embedded in reminder JSON files, list set/name changes don't force a
+    // full re-export — mode stays incremental.
     const result = await runCLI(['create-list', '--mock', 'Second'], {
       AR_SNAPSHOT_ENABLED: '1',
       AR_SNAPSHOT_REPO: repoPath,
     });
     expect(result.exitCode).toBe(0);
-    expect(result.stderr).toContain('mode = full (list set or names changed)');
+    expect(result.stderr).toContain('mode = incremental');
+    expect(result.stderr).not.toContain('mode = full');
   });
 
   test('mutation succeeds even when snapshot fails', async () => {

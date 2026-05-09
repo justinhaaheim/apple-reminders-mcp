@@ -425,7 +425,7 @@ public class RemindersManager {
     private static let minimalFields: Set<String> = ["id", "title", "listName", "isCompleted"]
     private static let compactFields: Set<String> = [
         "id", "title", "notes", "listName", "isCompleted",
-        "dueDate", "priority", "createdDate", "lastModifiedDate"
+        "dueDate", "priority", "createdDate", "modifiedDate"
     ]
     // "full" uses all fields — no filtering needed
 
@@ -510,9 +510,9 @@ public class RemindersManager {
             "priority": reminder.priority,
             "dueDate": reminder.dueDate as Any? ?? NSNull(),
             "dueDateIncludesTime": reminder.dueDateIncludesTime as Any? ?? NSNull(),
-            "completionDate": reminder.completionDate as Any? ?? NSNull(),
+            "completedDate": reminder.completedDate as Any? ?? NSNull(),
             "createdDate": reminder.createdDate,
-            "lastModifiedDate": reminder.lastModifiedDate,
+            "modifiedDate": reminder.modifiedDate,
             "url": reminder.url as Any? ?? NSNull(),
         ]
 
@@ -610,9 +610,9 @@ public class RemindersManager {
                 return components.date?.toISO8601WithTimezone()
             }(),
             dueDateIncludesTime: reminder.dueDateComponents != nil ? !reminder.isAllDay : nil,
-            completionDate: reminder.completionDate?.toISO8601WithTimezone(),
+            completedDate: reminder.completionDate?.toISO8601WithTimezone(),
             createdDate: reminder.creationDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
-            lastModifiedDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
+            modifiedDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
             url: reminder.url?.absoluteString,
             alarms: alarmOutputs,
             recurrenceRules: recurrenceOutputs

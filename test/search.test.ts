@@ -301,7 +301,7 @@ describe('Query operations', () => {
         // Even with "minimal", JMESPath should get full fields
         outputDetail: 'minimal',
         query:
-          '[*].{id: id, list: listName, created: createdDate, modified: lastModifiedDate}',
+          '[*].{id: id, list: listName, created: createdDate, modified: modifiedDate}',
       });
 
       // JMESPath returns raw array
@@ -315,7 +315,7 @@ describe('Query operations', () => {
       expect(reminders[0].modified).toBeDefined();
     });
 
-    test('field names use createdDate and lastModifiedDate', async () => {
+    test('field names use createdDate and modifiedDate', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
         perPage: 1,
@@ -323,12 +323,13 @@ describe('Query operations', () => {
       });
 
       const reminders = extractReminders<Record<string, unknown>>(result);
-      // New field names should be present
+      // Current field names should be present
       expect(reminders[0].createdDate).toBeDefined();
-      expect(reminders[0].lastModifiedDate).toBeDefined();
-      // Old field names should NOT be present
+      expect(reminders[0].modifiedDate).toBeDefined();
+      // Legacy / EventKit-style field names should NOT be present
       expect(reminders[0].creationDate).toBeUndefined();
       expect(reminders[0].modificationDate).toBeUndefined();
+      expect(reminders[0].lastModifiedDate).toBeUndefined();
     });
 
     test('default outputDetail (omitted) behaves like compact', async () => {
@@ -392,9 +393,9 @@ describe('Query operations', () => {
         'priority',
         'dueDate',
         'dueDateIncludesTime',
-        'completionDate',
+        'completedDate',
         'createdDate',
-        'lastModifiedDate',
+        'modifiedDate',
         'url',
         'alarms',
         'recurrenceRules',
@@ -528,7 +529,7 @@ describe('Query operations', () => {
       expect(pastReminders.find((r) => r.title === sentinel)).toBeDefined();
     });
 
-    test('modifiedFrom filters by lastModifiedDate >= bound', async () => {
+    test('modifiedFrom filters by modifiedDate >= bound', async () => {
       const sentinel = `Modified-Bound Sentinel ${Date.now()}`;
       await client.callTool('create_reminders', {
         reminders: [{title: sentinel, list: {name: testListName}}],

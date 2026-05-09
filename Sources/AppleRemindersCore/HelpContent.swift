@@ -148,7 +148,7 @@ public enum HelpContent {
     GOTCHAS:
     • The --list flag is case-insensitive but must match the full list name.
     • Date-only format (2026-03-07) works for the per-field date flags but not for --due (which needs full ISO 8601 with time).
-    • There's no --completed-from/-to flag (EventKit predicate quirks); use JMESPath: `[?completionDate >= '2026-04-30']`.
+    • There's no --completed-from/-to flag (EventKit predicate quirks); use JMESPath: `[?completedDate >= '2026-04-30']`.
     • JMESPath overrides --sort and --detail — it always operates on full data and bypasses pagination.
 
     Use `reminders <command> --help` for API documentation.
@@ -180,8 +180,8 @@ public enum HelpContent {
       --cursor <string>     Opaque cursor from previous response's pageInfo.endCursor
       --created-from <d>    Filter by createdDate >= date (ISO 8601 or YYYY-MM-DD)
       --created-to <d>      Filter by createdDate <= date
-      --modified-from <d>   Filter by lastModifiedDate >= date
-      --modified-to <d>     Filter by lastModifiedDate <= date
+      --modified-from <d>   Filter by modifiedDate >= date
+      --modified-to <d>     Filter by modifiedDate <= date
       --due-from <d>        Filter by dueDate >= date
       --due-to <d>          Filter by dueDate <= date
       --detail <level>      minimal, compact (default), full
@@ -219,8 +219,8 @@ public enum HelpContent {
       --cursor <string>     Opaque cursor from previous response's pageInfo.endCursor
       --created-from <d>    Filter by createdDate >= date (ISO 8601 or YYYY-MM-DD)
       --created-to <d>      Filter by createdDate <= date
-      --modified-from <d>   Filter by lastModifiedDate >= date
-      --modified-to <d>     Filter by lastModifiedDate <= date
+      --modified-from <d>   Filter by modifiedDate >= date
+      --modified-to <d>     Filter by modifiedDate <= date
       --due-from <d>        Filter by dueDate >= date
       --due-to <d>          Filter by dueDate <= date
       --detail <level>      minimal, compact (default), full
@@ -231,17 +231,17 @@ public enum HelpContent {
 
     Detail Levels:
       minimal   id, title only (plus listName if --all-lists, isCompleted if --status all)
-      compact   id, title, notes, dueDate, priority, createdDate, lastModifiedDate
+      compact   id, title, notes, dueDate, priority, createdDate, modifiedDate
                 (plus listName/isCompleted when contextually useful). Null fields omitted.
       full      All fields always included: id, title, notes, dueDate, priority,
-                isCompleted, completionDate, createdDate, lastModifiedDate, listId,
+                isCompleted, completedDate, createdDate, modifiedDate, listId,
                 listName, url, alarms, recurrenceRule. Null values shown explicitly.
 
     Date Range Filtering:
       Each per-field flag filters by the named field. Reminders missing the
       field are excluded from that filter. Date-only (YYYY-MM-DD) is accepted.
-      There's no --completed-from/-to flag; for completionDate ranges, use
-      JMESPath: `[?completionDate >= '2026-04-30']`.
+      There's no --completed-from/-to flag; for completedDate ranges, use
+      JMESPath: `[?completedDate >= '2026-04-30']`.
 
     JMESPath Queries:
       The positional [<query>] runs JMESPath on the result of the CLI flag
@@ -288,7 +288,7 @@ public enum HelpContent {
       `sort_by(@, &field)`; slice with `[N:M]`.
     • Default query (no args) is often sufficient — it returns incomplete reminders
       from the default list. Don't add flags unless you need to narrow or expand.
-    • For completionDate ranges, use JMESPath: there's no --completed-from/-to flag.
+    • For completedDate ranges, use JMESPath: there's no --completed-from/-to flag.
     • For case-insensitive matching, use lower()/upper() in JMESPath:
       `reminders query "[?contains(lower(title), 'meeting')]"`.
     • Results auto-paginate at 200. Use --per-page to control page size, --cursor for next page.
