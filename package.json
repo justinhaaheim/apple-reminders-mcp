@@ -8,7 +8,7 @@
     "build:debug": "swift build",
     "build:universal": "bun scripts/build-universal.ts",
     "build:npm": "bun scripts/build-universal.ts --check",
-    "reminders": "swift run reminders",
+    "reminders": "AR_SNAPSHOT_ENABLED=1 swift run reminders",
     "run": ".build/release/apple-reminders-mcp",
     "run:cli": ".build/release/reminders",
     "test": "bun test",
