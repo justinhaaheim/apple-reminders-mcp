@@ -38,6 +38,8 @@ Apple Reminders Tools — A multi-target Swift project providing access to Apple
 
 **Test Safety**: Tests run with `AR_MCP_TEST_MODE=1` which restricts all write operations to lists prefixed with `[AR-MCP TEST]`. This prevents tests from modifying your real reminders.
 
+**SQLite test fixture**: `test/fixtures/jtest1-reminders-db/` contains a snapshot of a real Apple Reminders Core Data store layout (5 `Data-*.sqlite` files, ~4.2 MB total) captured from a dedicated test macOS account. Used by tests for the read-only SQLite enrichment path (epic `apple-reminders-mcp-rbf` — hashtags, parent/child, sections). All synthetic data, no PII. See [`test/fixtures/jtest1-reminders-db/README.md`](test/fixtures/jtest1-reminders-db/README.md).
+
 ## Architecture
 
 ### MCP Protocol
