@@ -94,6 +94,11 @@ public struct ReminderOutput: Codable {
     /// arrangement in Reminders.app (sorted by `ZICSDISPLAYORDER`).
     public var childIds: [String]?
 
+    /// Within-list section ("kanban column"), if the reminder is in one.
+    /// `nil` either means "DB unavailable" or "not in a section" — same
+    /// ambiguity as parentId.
+    public var section: SectionInfo?
+
     public init(
         id: String, title: String, notes: String?,
         listId: String, listName: String, isCompleted: Bool,
@@ -102,7 +107,8 @@ public struct ReminderOutput: Codable {
         url: String?, alarms: [AlarmOutput]?, recurrenceRules: [RecurrenceRuleOutput]?,
         hashtags: [String]? = nil,
         parentId: String? = nil,
-        childIds: [String]? = nil
+        childIds: [String]? = nil,
+        section: SectionInfo? = nil
     ) {
         self.id = id
         self.title = title
@@ -122,6 +128,7 @@ public struct ReminderOutput: Codable {
         self.hashtags = hashtags
         self.parentId = parentId
         self.childIds = childIds
+        self.section = section
     }
 }
 
@@ -130,10 +137,16 @@ public struct ReminderListOutput: Codable {
     public let name: String
     public let isDefault: Bool
 
-    public init(id: String, name: String, isDefault: Bool) {
+    /// Within-list sections (kanban columns) defined in Reminders.app.
+    /// nil when DB enrichment is unavailable; `[]` when the list has no
+    /// sections; populated array when it does.
+    public var sections: [SectionInfo]?
+
+    public init(id: String, name: String, isDefault: Bool, sections: [SectionInfo]? = nil) {
         self.id = id
         self.name = name
         self.isDefault = isDefault
+        self.sections = sections
     }
 }
 

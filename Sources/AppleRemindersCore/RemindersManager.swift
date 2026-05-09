@@ -40,10 +40,24 @@ public class RemindersManager {
         let defaultCalendar = store.getDefaultCalendar()
 
         return calendars.map { calendar in
-            ReminderListOutput(
+            // When DB enrichment is available, attach the list's sections.
+            // Multiple stores might know about the same list (rare, e.g.
+            // shared-list replicas) — use the first non-empty result.
+            var sections: [SectionInfo]? = nil
+            if hasDBEnrichment {
+                sections = []
+                for reader in dbReaders {
+                    if let found = try? reader.sections(forListUUID: calendar.id), !found.isEmpty {
+                        sections = found
+                        break
+                    }
+                }
+            }
+            return ReminderListOutput(
                 id: calendar.id,
                 name: calendar.name,
-                isDefault: calendar.id == defaultCalendar?.id
+                isDefault: calendar.id == defaultCalendar?.id,
+                sections: sections
             )
         }
     }
@@ -236,7 +250,8 @@ public class RemindersManager {
         outputDetail: String?,
         hashtag: String? = nil,
         parentId: String? = nil,
-        topLevelOnly: Bool = false
+        topLevelOnly: Bool = false,
+        sectionId: String? = nil
     ) async throws -> Any {
         if parentId != nil && topLevelOnly {
             throw RemindersError("--parent and --top-level are mutually exclusive")
@@ -387,6 +402,26 @@ public class RemindersManager {
             }
         }
 
+        // 2g. Section filter (DB-derived, post-fetch). Matches by section
+        //     UUID OR display name (case-insensitive). Same graceful-
+        //     degrade contract as the other DB filters.
+        if let sectionId = sectionId, !sectionId.isEmpty {
+            if hasDBEnrichment {
+                let needle = sectionId.lowercased()
+                reminderOutputs = reminderOutputs.filter { reminder in
+                    guard let section = reminder.section else { return false }
+                    return section.id.lowercased() == needle
+                        || section.name.lowercased() == needle
+                }
+                log("--section filter reduced to \(reminderOutputs.count) reminders")
+            } else {
+                ReminderDBReader.warnOnce(
+                    "section-filter-no-enrichment",
+                    "--section filter requested but DB enrichment is unavailable; returning unfiltered results. Grant Full Disk Access to enable section filtering."
+                )
+            }
+        }
+
         // 3. Apply JMESPath if provided — always uses full fields, outputDetail is ignored
         //    When JMESPath is used, return full result with no pagination (users can use JMESPath slicing)
         if let jmesQuery = query, !jmesQuery.isEmpty {
@@ -493,7 +528,7 @@ public class RemindersManager {
     private static let compactFields: Set<String> = [
         "id", "title", "notes", "listName", "isCompleted",
         "dueDate", "priority", "createdDate", "modifiedDate",
-        "hashtags", "parentId", "childIds"
+        "hashtags", "parentId", "childIds", "section"
     ]
     // "full" uses all fields — no filtering needed
 
@@ -614,6 +649,15 @@ public class RemindersManager {
             dict["childIds"] = childIds
         } else {
             dict["childIds"] = NSNull()
+        }
+
+        // Section: dict with id+name when populated, NSNull otherwise.
+        if let section = reminder.section {
+            var sec: [String: Any] = ["id": section.id, "name": section.name]
+            if let canonical = section.canonicalName { sec["canonicalName"] = canonical }
+            dict["section"] = sec
+        } else {
+            dict["section"] = NSNull()
         }
 
         return dict
@@ -1209,9 +1253,13 @@ public class RemindersManager {
         guard hasDBEnrichment, !outputs.isEmpty else { return }
 
         let uuids = outputs.map { $0.id }
+        // Distinct list IDs in this result set — drives the section
+        // membership lookup so we read each list's blob at most once.
+        let listUUIDs = Array(Set(outputs.map { $0.listId }))
         var hashtagsByUUID: [String: [String]] = [:]
         var parentByUUID: [String: String] = [:]
         var childrenByUUID: [String: [String]] = [:]
+        var sectionByUUID: [String: SectionInfo] = [:]
         for reader in dbReaders {
             do {
                 let chunk = try reader.hashtags(forReminderUUIDs: uuids)
@@ -1240,6 +1288,15 @@ public class RemindersManager {
                     "Children enrichment failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
                 )
             }
+            do {
+                let sections = try reader.reminderSectionMap(forListUUIDs: listUUIDs)
+                for (uuid, info) in sections { sectionByUUID[uuid] = info }
+            } catch {
+                ReminderDBReader.warnOnce(
+                    "enrich.sections.\(reader.storeURL.lastPathComponent)",
+                    "Section enrichment failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
         }
 
         for i in outputs.indices {
@@ -1247,6 +1304,7 @@ public class RemindersManager {
             outputs[i].hashtags = hashtagsByUUID[uuid] ?? []
             outputs[i].parentId = parentByUUID[uuid]
             outputs[i].childIds = childrenByUUID[uuid] ?? []
+            outputs[i].section = sectionByUUID[uuid]
         }
     }
 

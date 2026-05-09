@@ -70,6 +70,9 @@ struct QueryCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Filter to top-level reminders only (mutually exclusive with --parent)")
     var topLevel: Bool = false
 
+    @Option(name: .long, help: "Filter by section (matches section UUID or display name, case-insensitive)")
+    var section: String?
+
     private static let validStatuses = ["incomplete", "completed", "all"]
     private static let validSorts = ["newest", "oldest", "priority", "dueDate"]
     private static let validDetails = ["minimal", "compact", "full"]
@@ -126,7 +129,8 @@ struct QueryCommand: AsyncParsableCommand {
             outputDetail: detail,
             hashtag: hashtag,
             parentId: parent,
-            topLevelOnly: topLevel
+            topLevelOnly: topLevel,
+            sectionId: section
         )
 
         try outputJSON(result, pretty: globals.pretty)

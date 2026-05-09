@@ -6,6 +6,23 @@ import SQLite3
 import CSQLite3
 #endif
 
+// MARK: - Section info
+
+/// A within-list section (kanban-style column) defined in
+/// `ZREMCDBASESECTION`. Reminders 16+ surfaces these as columns inside a
+/// list; EventKit doesn't expose them.
+public struct SectionInfo: Codable, Equatable, Hashable {
+    public let id: String       // ZCKIDENTIFIER
+    public let name: String     // ZDISPLAYNAME
+    public let canonicalName: String?  // ZCANONICALNAME (often nil)
+
+    public init(id: String, name: String, canonicalName: String? = nil) {
+        self.id = id
+        self.name = name
+        self.canonicalName = canonicalName
+    }
+}
+
 // MARK: - Hashtag info
 
 /// One entry in the master hashtag inventory. Mirrors the data Apple stores
@@ -237,5 +254,154 @@ extension ReminderDBReader {
             out[String(cString: pPtr), default: []].append(String(cString: cPtr))
         }
         return out
+    }
+}
+
+// MARK: - Section queries
+
+extension ReminderDBReader {
+
+    /// Returns all sections defined within a given list, in display order.
+    ///
+    /// `ZREMCDBASESECTION` rows hold the section definitions. The bead's
+    /// JSON schema-notes promise mentioned `ZSECTIONIDSORDERINGASDATA` as
+    /// a per-list ordering blob — in the current fixture it's nil, so we
+    /// fall back to ordering by display name. (When real users hit a
+    /// list with explicit ordering, that hex blob can be decoded as JSON
+    /// `["<uuid>", "<uuid>", ...]` and used as the primary sort key.)
+    ///
+    /// Tombstones filtered. List can be referenced by ZLIST (regular
+    /// list), ZSMARTLIST, or ZTEMPLATE — current Reminders only uses
+    /// ZLIST in practice; we follow that.
+    public func sections(forListUUID listUUID: String) throws -> [SectionInfo] {
+        let sql = """
+            SELECT s.ZCKIDENTIFIER, s.ZDISPLAYNAME, s.ZCANONICALNAME, s.Z_PK
+            FROM ZREMCDBASESECTION s
+            JOIN ZREMCDBASELIST l ON l.Z_PK = s.ZLIST
+            WHERE s.ZMARKEDFORDELETION = 0
+              AND l.ZMARKEDFORDELETION = 0
+              AND l.ZCKIDENTIFIER = ?1
+            ORDER BY s.ZDISPLAYNAME COLLATE NOCASE ASC, s.Z_PK ASC
+            """
+
+        var out: [SectionInfo] = []
+        try eachRow(
+            sql: sql,
+            bind: { stmt in
+                sqlite3_bind_text(stmt, 1, listUUID, -1, Self.SQLITE_TRANSIENT)
+            }
+        ) { stmt in
+            guard let idPtr = sqlite3_column_text(stmt, 0),
+                  let namePtr = sqlite3_column_text(stmt, 1) else { return }
+            let canonical = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
+            out.append(SectionInfo(
+                id: String(cString: idPtr),
+                name: String(cString: namePtr),
+                canonicalName: canonical?.isEmpty == false ? canonical : nil
+            ))
+        }
+        return out
+    }
+
+    /// Decodes the per-list section-membership JSON blobs and returns a
+    /// map from reminder UUID → SectionInfo for every reminder that
+    /// belongs to a section.
+    ///
+    /// The blob lives on `ZREMCDBASELIST.ZMEMBERSHIPSOFREMINDERSINSECTIONSASDATA`
+    /// and has the verified shape:
+    ///
+    /// ```
+    /// {"minimumSupportedVersion":20230430,
+    ///  "memberships":[{"groupID":"<sectionUUID>",
+    ///                  "memberID":"<reminderUUID>",
+    ///                  "modifiedOn":<core-data-timestamp>}, …]}
+    /// ```
+    ///
+    /// We resolve `groupID` against `ZREMCDBASESECTION` once per section
+    /// to attach friendly names. Reminders not mentioned in any blob
+    /// have no entry in the result (caller treats that as "no section").
+    public func reminderSectionMap(forListUUIDs listUUIDs: [String])
+        throws -> [String: SectionInfo]
+    {
+        guard !listUUIDs.isEmpty else { return [:] }
+
+        // 1) Build a section UUID → SectionInfo lookup table for all
+        //    requested lists in one query.
+        var sectionsByID: [String: SectionInfo] = [:]
+        let placeholders = Array(repeating: "?", count: listUUIDs.count).joined(separator: ", ")
+        let sectionSQL = """
+            SELECT s.ZCKIDENTIFIER, s.ZDISPLAYNAME, s.ZCANONICALNAME
+            FROM ZREMCDBASESECTION s
+            JOIN ZREMCDBASELIST l ON l.Z_PK = s.ZLIST
+            WHERE s.ZMARKEDFORDELETION = 0
+              AND l.ZMARKEDFORDELETION = 0
+              AND l.ZCKIDENTIFIER IN (\(placeholders))
+            """
+        try eachRow(
+            sql: sectionSQL,
+            bind: { stmt in
+                for (i, uuid) in listUUIDs.enumerated() {
+                    sqlite3_bind_text(stmt, Int32(i + 1), uuid, -1, Self.SQLITE_TRANSIENT)
+                }
+            }
+        ) { stmt in
+            guard let idPtr = sqlite3_column_text(stmt, 0),
+                  let namePtr = sqlite3_column_text(stmt, 1) else { return }
+            let canonical = sqlite3_column_text(stmt, 2).map { String(cString: $0) }
+            let id = String(cString: idPtr)
+            sectionsByID[id] = SectionInfo(
+                id: id,
+                name: String(cString: namePtr),
+                canonicalName: canonical?.isEmpty == false ? canonical : nil
+            )
+        }
+
+        // 2) Read each list's membership blob and decode it. We don't
+        //    care about modifiedOn — the latest data wins implicitly.
+        let membershipSQL = """
+            SELECT ZMEMBERSHIPSOFREMINDERSINSECTIONSASDATA
+            FROM ZREMCDBASELIST
+            WHERE ZMARKEDFORDELETION = 0
+              AND ZMEMBERSHIPSOFREMINDERSINSECTIONSASDATA IS NOT NULL
+              AND ZCKIDENTIFIER IN (\(placeholders))
+            """
+
+        var out: [String: SectionInfo] = [:]
+        try eachRow(
+            sql: membershipSQL,
+            bind: { stmt in
+                for (i, uuid) in listUUIDs.enumerated() {
+                    sqlite3_bind_text(stmt, Int32(i + 1), uuid, -1, Self.SQLITE_TRANSIENT)
+                }
+            }
+        ) { stmt in
+            guard let blobPtr = sqlite3_column_blob(stmt, 0) else { return }
+            let count = Int(sqlite3_column_bytes(stmt, 0))
+            let data = Data(bytes: blobPtr, count: count)
+            guard let parsed = try? JSONDecoder().decode(MembershipBlob.self, from: data) else {
+                ReminderDBReader.warnOnce(
+                    "section-blob-decode",
+                    "Could not decode membership blob; section enrichment partial. (Possible Reminders schema change.)"
+                )
+                return
+            }
+            for entry in parsed.memberships {
+                if let info = sectionsByID[entry.groupID] {
+                    out[entry.memberID] = info
+                }
+            }
+        }
+        return out
+    }
+
+    /// Internal Codable mirror of the membership JSON. `modifiedOn` is
+    /// captured for completeness even though we don't currently use it.
+    private struct MembershipBlob: Codable {
+        let memberships: [Membership]
+        struct Membership: Codable {
+            let groupID: String
+            let memberID: String
+            let modifiedOn: Double?
+        }
     }
 }
