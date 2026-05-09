@@ -4,6 +4,11 @@
 *.xcodeproj
 *.xcworkspace
 
+# SQLite WAL/SHM siblings — created transiently when SQLite opens a DB
+# in WAL mode, even read-only. Never commit; they're regenerated.
+*.sqlite-wal
+*.sqlite-shm
+
 # macOS
 .DS_Store
 
