@@ -12,8 +12,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Print toolchain
+        run: |
+          swift --version
+          xcode-select -p || true
+
       - name: Build Swift package
-        run: swift build -c release
+        shell: bash
+        run: |
+          set +e
+          swift build -c release 2>&1 | tee /tmp/build.log
+          rc=${PIPESTATUS[0]}
+          echo "===END BUILD; rc=$rc==="
+          tail -120 /tmp/build.log
+          exit $rc
 
   format:
     runs-on: ubuntu-latest
