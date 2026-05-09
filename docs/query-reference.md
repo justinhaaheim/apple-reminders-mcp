@@ -88,13 +88,33 @@ There's no per-field `completedDate` flag — the EventKit predicate doesn't exp
 
 ### Output shape
 
-| Flag               | Meaning                                                                                      |
-| ------------------ | -------------------------------------------------------------------------------------------- |
-| `--detail minimal` | `id`, `title`, plus context-implied `listName` / `isCompleted`                               |
-| `--detail compact` | (default) Adds `notes`, `dueDate`, `priority`, `createdDate`, `modifiedDate`. Nulls omitted. |
-| `--detail full`    | Every field including `alarms`, `recurrenceRules`, `url`. Nulls shown.                       |
+| Flag               | Meaning                                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `--detail minimal` | `id`, `title`, plus context-implied `listName` / `isCompleted`                                                       |
+| `--detail compact` | (default) Adds `notes`, `dueDate`, `priority`, `createdDate`, `modifiedDate`, plus enrichment fields. Nulls omitted. |
+| `--detail full`    | Every field including `alarms`, `recurrenceRules`, `url`, plus enrichment fields. Nulls shown.                       |
+
+Enrichment fields (`hashtags`, `parentId`, `childIds`, `section`) appear in `compact` and `full` when SQLite enrichment is available. They're omitted from `compact` when null (DB unavailable) and shown explicitly in `full`.
 
 When you supply a JMESPath expression, `--detail` is ignored — JMESPath always operates on the full payload (so it can see all fields), and the output is whatever the expression returns.
+
+### SQLite enrichment filters
+
+Reading the read-only Apple Reminders Core Data store unlocks four extra
+filter flags. EventKit doesn't surface any of these fields; the SQLite
+layer is purely a read-through (no writes ever).
+
+| Flag                     | Meaning                                                                     |
+| ------------------------ | --------------------------------------------------------------------------- |
+| `--hashtag <name>`       | Reminders with the named hashtag (case-insensitive on canonical name).      |
+| `--parent <uuid>`        | Direct children of the given reminder UUID. Mutually exclusive with…        |
+| `--top-level`            | …`--top-level`, which keeps only reminders without a parent.                |
+| `--section <name\|uuid>` | Reminders in a section matching by display name or UUID (case-insensitive). |
+
+These filters require Full Disk Access on the calling terminal. Without
+FDA the filter is skipped with a single stderr warning and the unfiltered
+result is returned. Same goes for the enrichment fields themselves —
+they're `null` when the SQLite store is unreachable.
 
 ### Sort
 

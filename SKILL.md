@@ -9,6 +9,22 @@ plugin skill (with frontmatter), see [`skills/reminders/SKILL.md`](skills/remind
 > **Binary**: `reminders` (built from this repo)
 > **Output**: All commands output JSON to stdout. Logs go to stderr.
 
+## SQLite enrichment (read-only)
+
+Some fields aren't exposed by EventKit and come from a direct read-only
+read of Apple's Reminders Core Data SQLite store:
+
+- On reminders: `hashtags`, `parentId`, `childIds`, `section`
+- On lists: `sections`
+- New command: `reminders hashtags`
+- New filters on `reminders query`: `--hashtag`, `--parent`, `--top-level`, `--section`
+- New MCP tool: `list_hashtags`
+
+Requires Full Disk Access on the calling terminal. Without it, the
+enrichment fields are `null` and the filters skip with a single stderr
+warning. EventKit remains authoritative for writes; the SQLite layer
+never writes.
+
 ## Query convention
 
 Structured CLI flags (`--list`, `--status`, `--search`, `--created-from/-to`,
@@ -60,6 +76,14 @@ reminders export --path ~/backup.json --include-completed
 reminders snapshot                                       # Take a snapshot
 reminders snapshot status                                # Show repo info
 reminders snapshot diff                                  # Changes since last snapshot
+
+# SQLite enrichment (needs Full Disk Access)
+reminders hashtags --pretty                              # Master hashtag inventory
+reminders hashtags --all --pretty                        # Include zero-usage tags
+reminders query --hashtag work                           # Filter by hashtag (ci)
+reminders query --top-level                              # No parent
+reminders query --parent <reminder-uuid>                 # Direct children
+reminders query --list "Groceries" --section "Breads & Cereals"
 
 # MCP server
 reminders mcp                                            # Start JSON-RPC server on stdio

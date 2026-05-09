@@ -88,16 +88,30 @@ Sources/
 
 | Tool | Description |
 |------|-------------|
-| `query_reminders` | Search and filter reminders. Convention: structured params (list, status, searchText, per-field date ranges) filter at fetch time; the JMESPath `query` filters/projects on the result. See [`docs/query-reference.md`](docs/query-reference.md). |
-| `get_lists` | Get all reminder lists |
+| `query_reminders` | Search and filter reminders. Convention: structured params (list, status, searchText, per-field date ranges, hashtag, parentId/topLevelOnly, sectionId) filter at fetch time; the JMESPath `query` filters/projects on the result. Output reminders include `hashtags`, `parentId`, `childIds`, `section` when SQLite enrichment is available. See [`docs/query-reference.md`](docs/query-reference.md). |
+| `get_lists` | Get all reminder lists. Each list includes a `sections` array when SQLite enrichment is available. |
 | `create_list` | Create a new list |
 | `create_reminders` | Create one or more reminders (batch) |
 | `update_reminders` | Update reminders including mark complete/incomplete (batch) |
 | `delete_reminders` | Delete reminders (batch) |
 | `export_reminders` | Export reminders to JSON file for backup |
+| `list_hashtags` | Master hashtag inventory with usage counts (read-only SQLite enrichment) |
 | `help` | Get documentation for any tool (MCP meta-tool) |
 | `schema` | Get JSON input schema for any tool (MCP meta-tool) |
 | `guidance` | Get strategic best practices (MCP meta-tool) |
+
+### SQLite enrichment (read-only)
+
+A few fields — `hashtags`, `parentId`, `childIds`, `section` on reminders
+and `sections` on lists — are not exposed by EventKit. The MCP server /
+CLI reads them by opening the Apple Reminders Core Data SQLite store
+**read only** alongside the EventKit path. EventKit remains authoritative
+for all writes; the SQLite layer is purely an enrichment read-through.
+
+This requires Full Disk Access on the calling process / terminal. When
+unavailable, those fields are null and a single stderr warning explains
+how to grant access. See [`docs/sqlite-schema-notes.md`](docs/sqlite-schema-notes.md)
+for the on-disk format.
 
 ## CLI Usage
 
@@ -135,6 +149,16 @@ reminders update <id> --title "New title" --priority high
 
 # Delete reminders
 reminders delete <id1> <id2>
+
+# Hashtag inventory (SQLite enrichment; needs Full Disk Access)
+reminders hashtags --pretty
+reminders hashtags --all --pretty                  # Include zero-usage tags
+
+# Filter by enrichment fields
+reminders query --hashtag work --pretty
+reminders query --top-level --pretty               # Reminders with no parent
+reminders query --parent <reminder-uuid> --pretty  # Direct children
+reminders query --list "Groceries" --section "Breads & Cereals"
 
 # Export reminders
 reminders export --path ~/backup.json --include-completed

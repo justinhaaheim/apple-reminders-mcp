@@ -69,25 +69,39 @@ Improve reminder discovery.
 - [x] URL attachment support
 - [x] Explicit dueDateIncludesTime boolean
 
+### M8: SQLite enrichment (read-only) ✅
+
+Surface fields EventKit doesn't expose by reading Apple's Reminders Core
+Data SQLite store directly in read-only mode. EventKit remains
+authoritative for writes.
+
+- [x] DB reader scaffolding (store discovery, schema fingerprint, FDA detection)
+- [x] Hashtag enrichment (`hashtags` field, `--hashtag` filter, `list_hashtags` tool)
+- [x] Parent/child enrichment (`parentId`, `childIds`, `--parent`, `--top-level`)
+- [x] Section enrichment (`section` field, `sections` array on lists, `--section`)
+- [x] CLI/MCP surface integration + `docs/sqlite-schema-notes.md`
+
 ---
 
 ## In Progress
 
-- [docs/plans/2026-03-04_project-restructure-cli-snapshots.md](docs/plans/2026-03-04_project-restructure-cli-snapshots.md) - Restructure + CLI + Snapshots
+- [docs/plans/2026-05-09_sqlite-enrichment-epic.md](docs/plans/2026-05-09_sqlite-enrichment-epic.md) — SQLite enrichment epic (closing)
 
 ---
 
 ## Next Actions
 
-1. **Test CLI on macOS** — Build and verify `reminders` binary against real Apple Reminders. Confirm all commands work end-to-end.
+1. **Test enrichment on macOS with real data** — Build the binary on a Mac with FDA, run `reminders query --pretty` and verify hashtags / parentId / childIds / section populate. Run `reminders hashtags --pretty`. Confirm `--hashtag`, `--parent`, `--section` filters work end-to-end.
 
-2. **Test snapshot system on macOS** — Run `reminders snapshot` with real data, verify git commits, inspect JSON files.
+2. **Performance validation** — Bead 9py acceptance: enrichment of 1,000 reminders should add < 100ms. Time `reminders query --all-lists --status all --pretty | wc -l` on a fresh build with real data.
 
-3. **Rename repo to apple-reminders-tools** — Update GitHub repo name, remotes, and references.
+3. **Urgent-alarm decoding (deferred)** — `ZURGENTPRESENTATIONALARMSASDATA` is a binary blob; would surface a few users' notifications-only urgent alarm rules. Follow-on to the SQLite enrichment epic.
 
-4. **Wire up `reminders mcp` fully** — Ensure the unified binary can replace the standalone `apple-reminders-mcp` in Claude Desktop config.
+4. **Rich-text decoding (deferred)** — `ZTITLEDOCUMENT` / `ZNOTESDOCUMENT` blobs encode formatted text. Niche but interesting; another follow-on.
 
-5. **Add `--format markdown` option** — Human-readable output for CLI queries (alternative to JSON).
+5. **Test CLI on macOS** — Build and verify `reminders` binary against real Apple Reminders. Confirm all commands work end-to-end.
+
+6. **Add `--format markdown` option** — Human-readable output for CLI queries (alternative to JSON).
 
 ---
 
@@ -113,6 +127,9 @@ _(none currently tracked)_
 - Swift testing for core library (unit tests against MockStore)
 - Audit log with before/after state capture
 - Undo support (revert specific operations)
+- Urgent-alarm decoding from `ZURGENTPRESENTATIONALARMSASDATA` (deferred from M8)
+- Rich-text decoding from `ZTITLEDOCUMENT` / `ZNOTESDOCUMENT` (deferred from M8)
+- Smart-list / template / sharee surfacing (deferred from M8)
 
 ---
 

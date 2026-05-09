@@ -90,9 +90,37 @@ JSON shape (verified from fixture):
 
 ## Progress
 
-- [ ] aol — DB reader scaffolding
-- [ ] cvm — Hashtags
-- [ ] qfp — Parent/child
-- [ ] 16x — Sections
-- [ ] 9py — Surface integration
+- [x] aol — DB reader scaffolding
+- [x] cvm — Hashtags
+- [x] qfp — Parent/child (also fixed pre-existing macOS CI failure by
+      pinning swift-argument-parser <1.6, since its 1.7.0's
+      `internal import os` requires Swift 6 / experimental flag).
+- [x] 16x — Sections (membership JSON shape verified and documented in
+      `docs/sqlite-schema-notes.md`)
+- [x] 9py — Surface integration (CLAUDE.md, SKILL.md, query-reference.md,
+      ROADMAP.md, HelpContent.swift all updated)
 - [ ] Close epic
+
+## Verification done locally (Linux Swift 6.1)
+
+- `swift build` clean.
+- `swift test` — 30 XCTest cases pass against the jtest1 fixture.
+  - 9 in ReminderDBReaderTests (incl. mtime invariant)
+  - 7 in HashtagEnrichmentTests
+  - 6 in ParentChildEnrichmentTests
+  - 8 in SectionEnrichmentTests
+- `bun run signal` — prettier clean.
+- CLI smoke: `reminders --help` lists `hashtags`; `reminders hashtags
+--mock --pretty` gracefully falls through with a single stderr warning
+  when DB enrichment is unavailable.
+
+## Verification still needed (macOS)
+
+These can't be done from this Linux environment:
+
+- Run binary from terminal with FDA, confirm `hashtags`, `parentId`,
+  `childIds`, `section` populate against real EventKit data.
+- Performance: 1,000 reminders enriched in < 100ms over EventKit-only
+  baseline (acceptance criterion of bead 9py).
+- Confirm the existing `bun test` TS suite still passes (no regressions
+  in batch operations).

@@ -22,6 +22,7 @@ public enum HelpContent {
       export        Export reminders to a JSON file
       snapshot      Git-backed snapshot of all reminders
       audit         View audit log of mutation operations
+      hashtags      List the hashtag inventory (read-only SQLite enrichment)
       mcp           Start MCP server on stdio
 
     Global Options:
@@ -31,6 +32,11 @@ public enum HelpContent {
       --verbose      Show debug logging on stderr
       --version      Show version
       --help         Show help
+
+    SQLite enrichment: query, lists, and hashtags surface fields that
+    EventKit doesn't expose (hashtags, parentId, childIds, section). These
+    require Full Disk Access on the calling terminal — without it the
+    fields are null and a single stderr warning explains how to grant it.
 
     Use --help --verbose for detailed docs and examples.
     Use --help=skill for best practices and strategic guidance.
@@ -185,6 +191,15 @@ public enum HelpContent {
       --due-from <d>        Filter by dueDate >= date
       --due-to <d>          Filter by dueDate <= date
       --detail <level>      minimal, compact (default), full
+      --hashtag <name>      Filter by hashtag (case-insensitive). DB enrichment.
+      --parent <uuid>       Filter to direct children of the given reminder
+      --top-level           Filter to reminders without a parent
+      --section <name|uuid> Filter by section (UUID or display name, ci)
+
+    DB enrichment (--hashtag, --parent, --top-level, --section): reads
+    Apple Reminders' SQLite store directly. Requires Full Disk Access on
+    the calling terminal. When unavailable, the filter is skipped with a
+    single stderr warning.
 
     Foundation reference: docs/query-reference.md
 
@@ -224,6 +239,22 @@ public enum HelpContent {
       --due-from <d>        Filter by dueDate >= date
       --due-to <d>          Filter by dueDate <= date
       --detail <level>      minimal, compact (default), full
+      --hashtag <name>      Filter by hashtag (case-insensitive)
+      --parent <uuid>       Filter to direct children of the given reminder
+      --top-level           Filter to reminders without a parent
+      --section <name|uuid> Filter by section (UUID or display name, ci)
+
+    SQLite Enrichment (Full Disk Access required):
+      The reader opens the on-disk Apple Reminders Core Data store
+      read-only to surface hashtags, parent/child links, and sections —
+      none of which EventKit exposes. Output reminders gain hashtags,
+      parentId, childIds, and section fields. `reminders lists` gains a
+      sections array per list.
+
+      Without FDA on the calling terminal, those fields are null and
+      --hashtag / --parent / --top-level / --section are skipped with a
+      single stderr warning. EventKit remains authoritative for writes;
+      nothing is ever written to the SQLite store.
 
     Default Behavior (no options):
       Returns incomplete reminders from the default list, sorted by newest
