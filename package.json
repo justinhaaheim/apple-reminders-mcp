@@ -19,6 +19,7 @@
     "signal": "bun run prettier-check",
     "prepare": "husky",
     "setup-env": "bun scripts/setup-env.ts",
+    "setup-env:sqlite": "bun scripts/setup-env-sqlite.ts",
     "setup-env:swift": "bun scripts/setup-env-swift.ts",
     "signal:verbose": "bunx justin-sdk signal",
     "signal:serial": "bunx justin-sdk signal --serial",
