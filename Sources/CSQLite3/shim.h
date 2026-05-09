@@ -1,0 +1,6 @@
+#ifndef APPLE_REMINDERS_MCP_CSQLITE3_SHIM_H
+#define APPLE_REMINDERS_MCP_CSQLITE3_SHIM_H
+
+#include <sqlite3.h>
+
+#endif

@@ -1,0 +1,98 @@
+# SQLite Enrichment Epic — Work Plan
+
+Epic: `apple-reminders-mcp-rbf` — Extend MCP/CLI with EventKit-invisible fields via direct SQLite read.
+
+## Sub-beads
+
+1. **aol** — DB reader scaffolding (gates everything)
+2. **cvm** — Hashtags
+3. **qfp** — Parent/child
+4. **16x** — Sections
+5. **9py** — Surface integration
+
+## Environment notes
+
+- Working from Linux (Swift 6.1, libsqlite3-dev installed). The codebase already
+  uses `#if canImport(EventKit)` so the package builds on Linux with the
+  EventKit-dependent parts elided.
+- On Linux, `import SQLite3` doesn't work out of the box (no system module),
+  so we add a `CSQLite3` system library target with a module map and use a
+  `#if canImport(SQLite3)` toggle so production builds on macOS still get the
+  Apple-supplied SQLite3 module verbatim, while Linux/CI uses the modulemap.
+- Tests: there's no existing Swift test target. Adding a `swift test` target
+  for the new DB layer is justified — the existing TS tests assume access to
+  EventKit (a real macOS context) and aren't suitable for fixture-based
+  read-only verification.
+
+## Sub-bead 1 (aol) — DB reader scaffolding
+
+Files:
+
+- `Sources/CSQLite3/module.modulemap` + `shim.h` (Linux libsqlite3 binding)
+- `Sources/AppleRemindersCore/ReminderDBReader.swift`
+- `Tests/AppleRemindersCoreTests/ReminderDBReaderTests.swift`
+- `Package.swift` updates (system library target, test target)
+
+Public surface:
+
+- `enum ReminderDBError`: notFound, permissionDenied, unsupportedSchema(String), sqliteError(Int32, String)
+- `class ReminderDBReader`:
+  - `init(storeURL: URL) throws` — opens with `SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX`, URI form `file:...?mode=ro`
+  - `static func discover(containerOverride: URL?) -> [ReminderDBReader]` — discovers stores in the group container; skips `Data-local.sqlite`, `*-wal`, `*-shm`
+  - `func schemaFingerprint() throws -> String` — sha256 of Z_METADATA + Z_MODELCACHE rows
+  - `func isSchemaSupported() throws -> Bool` — fingerprint vs. known-good list
+  - `func reminderRowID(forUUID: String) throws -> Int64?` — UUID lookup
+  - `deinit` closes connection
+- Single stderr warning per process via an atomic flag.
+
+## Sub-bead 2 (cvm) — Hashtag enrichment
+
+- ReminderDBReader API:
+  - `func hashtags(forReminderUUIDs: [String]) -> [String: [String]]`
+  - `func hashtagInventory(includeUnused: Bool) -> [HashtagInfo]`
+- Models: `hashtags: [String]?` on ReminderOutput (null when DB unavailable)
+- CLI: `--hashtag <name>` filter; `reminders hashtags` command
+- MCP: hashtag field on query_reminders output; new `list_hashtags` tool
+
+Z_ENT for hashtag rows = 32; FK column is `ZREMINDER2` in current schema —
+must `COALESCE(ZREMINDER2, ZREMINDER1, ZREMINDER, ZREMINDER3, ZREMINDER4, ZREMINDER5)` for forward-compat.
+
+## Sub-bead 3 (qfp) — Parent/child
+
+- ReminderDBReader API:
+  - `func parentChildPairs(forReminderUUIDs: [String]) -> [(child: String, parent: String)]`
+  - or batched `parents` and `children` per UUID
+- Models: `parentId: String?` and `childIds: [String]?` on ReminderOutput
+- CLI: `--parent <id>`, `--top-level` (mutually exclusive)
+- MCP: `parentId` filter, `topLevelOnly` boolean
+
+## Sub-bead 4 (16x) — Sections
+
+JSON shape (verified from fixture):
+
+```json
+{"minimumSupportedVersion":20230430,"memberships":[{"groupID":"<section uuid>","memberID":"<reminder uuid>","modifiedOn":<float>}]}
+```
+
+- ReminderDBReader API:
+  - `func sections(forListUUID: String) -> [SectionInfo]` (ordered by ZSECTIONIDSORDERINGASDATA)
+  - `func reminderSectionMap(forListUUIDs: [String]) -> [String: SectionInfo]`
+- Models: `section: { id, name }?` on reminders; `sections: [...]?` on lists
+- CLI: `--section <name>` filter (requires `--list`)
+- MCP: `sectionId` filter; `sections` array on get_lists output
+
+## Sub-bead 5 (9py) — Surface integration
+
+- Wire enrichment into RemindersManager (single batched query per result set)
+- Update CLI flags, MCP tool schemas, help content
+- Update CLAUDE.md, SKILL.md, query-reference.md, ROADMAP.md
+- New `docs/sqlite-schema-notes.md`
+
+## Progress
+
+- [ ] aol — DB reader scaffolding
+- [ ] cvm — Hashtags
+- [ ] qfp — Parent/child
+- [ ] 16x — Sections
+- [ ] 9py — Surface integration
+- [ ] Close epic

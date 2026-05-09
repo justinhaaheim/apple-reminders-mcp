@@ -1,6 +1,34 @@
 // swift-tools-version: 5.9
 import PackageDescription
 
+// On Apple platforms, `import SQLite3` resolves to the system module shipped
+// with the SDK. On Linux (used for CI / development tooling), Swift has no
+// built-in SQLite3 module, so we provide our own system library target
+// pointing at the platform's libsqlite3-dev. ReminderDBReader picks the
+// right one with `#if canImport(SQLite3)`.
+#if canImport(Darwin)
+let sqliteCoreDeps: [PackageDescription.Target.Dependency] = [
+    .product(name: "JMESPath", package: "jmespath.swift")
+]
+let sqliteSystemTargets: [PackageDescription.Target] = []
+#else
+let sqliteCoreDeps: [PackageDescription.Target.Dependency] = [
+    .product(name: "JMESPath", package: "jmespath.swift"),
+    "CSQLite3",
+]
+let sqliteSystemTargets: [PackageDescription.Target] = [
+    .systemLibrary(
+        name: "CSQLite3",
+        path: "Sources/CSQLite3",
+        pkgConfig: "sqlite3",
+        providers: [
+            .apt(["libsqlite3-dev"]),
+            .brew(["sqlite3"]),
+        ]
+    )
+]
+#endif
+
 let package = Package(
     name: "AppleRemindersTools",
     platforms: [
@@ -27,9 +55,7 @@ let package = Package(
     targets: [
         .target(
             name: "AppleRemindersCore",
-            dependencies: [
-                .product(name: "JMESPath", package: "jmespath.swift"),
-            ],
+            dependencies: sqliteCoreDeps,
             path: "Sources/AppleRemindersCore"
         ),
         .executableTarget(
@@ -45,5 +71,10 @@ let package = Package(
             ],
             path: "Sources/AppleRemindersCLI"
         ),
-    ]
+        .testTarget(
+            name: "AppleRemindersCoreTests",
+            dependencies: ["AppleRemindersCore"],
+            path: "Tests/AppleRemindersCoreTests"
+        ),
+    ] + sqliteSystemTargets
 )
