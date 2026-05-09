@@ -285,7 +285,8 @@ public final class ReminderDBReader {
 
     /// Helper for binding text. SQLite's `SQLITE_TRANSIENT` constant is a
     /// magic pointer (-1 cast to a destructor) and isn't directly importable
-    /// in Swift, so we define the equivalent here.
+    /// in Swift, so we define the equivalent here. Goes through OpaquePointer
+    /// because the type system rejects an Int → function-pointer bitcast.
     static let SQLITE_TRANSIENT = unsafeBitCast(
         OpaquePointer(bitPattern: -1),
         to: sqlite3_destructor_type.self

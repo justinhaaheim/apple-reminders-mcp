@@ -18,6 +18,7 @@ struct Reminders: AsyncParsableCommand {
             ExportCommand.self,
             SnapshotCommand.self,
             AuditCommand.self,
+            HashtagsCommand.self,
             MCPCommand.self,
         ],
         defaultSubcommand: QueryCommand.self
@@ -73,7 +74,11 @@ func createManager(options: GlobalOptions) async throws -> RemindersManager {
         setenv(TestModeConfig.envVar, "1", 1)
     }
     let store = createStore(mock: options.mock)
-    let manager = RemindersManager(store: store)
+    // Discover SQLite enrichment stores. Returns [] (with one stderr
+    // warning) when the calling terminal lacks Full Disk Access — the
+    // manager degrades gracefully in that case.
+    let dbReaders = options.mock ? [] : ReminderDBReader.discover()
+    let manager = RemindersManager(store: store, dbReaders: dbReaders)
     try await manager.requestAccess()
     return manager
 }

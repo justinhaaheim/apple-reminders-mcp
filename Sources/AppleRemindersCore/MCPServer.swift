@@ -22,7 +22,11 @@ public class MCPServer {
             #endif
         }
         self.store = store
-        self.remindersManager = RemindersManager(store: store)
+        // Discover SQLite enrichment stores. Returns [] (with one stderr
+        // warning) when the calling process lacks Full Disk Access — the
+        // manager degrades gracefully in that case.
+        let dbReaders = MockModeConfig.isEnabled ? [] : ReminderDBReader.discover()
+        self.remindersManager = RemindersManager(store: store, dbReaders: dbReaders)
 
         // Set audit logger source to MCP
         AuditLogger.shared.source = "mcp"
@@ -275,6 +279,10 @@ public class MCPServer {
                         "cursor": .object([
                             "type": .string("string"),
                             "description": .string("Opaque cursor from previous response's pageInfo.endCursor for next page.")
+                        ]),
+                        "hashtag": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by hashtag name (case-insensitive). Matches reminders that have this hashtag applied. Requires SQLite enrichment (Full Disk Access on the calling process).")
                         ])
                     ]),
                     "additionalProperties": .bool(false)
@@ -661,6 +669,23 @@ public class MCPServer {
                     "additionalProperties": .bool(false)
                 ])
             ),
+
+            // list_hashtags
+            MCPResponse.Result.Tool(
+                name: "list_hashtags",
+                description: "Get the master hashtag inventory with usage counts, last-used and first-seen timestamps. Hashtags come from the Apple Reminders SQLite store (EventKit doesn't expose them). Returns an empty array when the calling process lacks Full Disk Access.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "includeUnused": .object([
+                            "type": .string("boolean"),
+                            "default": .bool(false),
+                            "description": .string("Include hashtags with zero current applications (default: only currently-used)")
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
+            ),
         ]
     }
 
@@ -694,6 +719,7 @@ public class MCPServer {
             let dueFrom = arguments["dueFrom"]?.value as? String
             let dueTo = arguments["dueTo"]?.value as? String
             let outputDetail = arguments["outputDetail"]?.value as? String
+            let hashtag = arguments["hashtag"]?.value as? String
 
             let result = try await remindersManager.queryReminders(
                 list: listDict == nil ? nil : listSelector,
@@ -709,7 +735,8 @@ public class MCPServer {
                 modifiedTo: modifiedTo,
                 dueFrom: dueFrom,
                 dueTo: dueTo,
-                outputDetail: outputDetail
+                outputDetail: outputDetail,
+                hashtag: hashtag
             )
 
             return try toJSON(result)
@@ -904,6 +931,11 @@ public class MCPServer {
         case "guidance":
             let topic = arguments["topic"]?.value as? String
             return getGuidance(topic: topic)
+
+        case "list_hashtags":
+            let includeUnused = arguments["includeUnused"]?.value as? Bool ?? false
+            let entries = remindersManager.listHashtags(includeUnused: includeUnused)
+            return try toJSON(entries)
 
         case "_seed_mock_data":
             guard let mockStore = store as? MockReminderStore else {

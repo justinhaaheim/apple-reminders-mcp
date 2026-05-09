@@ -7,8 +7,21 @@ public class RemindersManager {
     public let store: ReminderStore
     private var hasAccess = false
 
-    public init(store: ReminderStore) {
+    /// Optional read-only DB readers used to enrich reminders with fields
+    /// that EventKit doesn't expose (hashtags, parent/child, sections).
+    /// Empty when the binary's caller lacks Full Disk Access or the
+    /// container is unreachable.
+    public var dbReaders: [ReminderDBReader]
+
+    public init(store: ReminderStore, dbReaders: [ReminderDBReader] = []) {
         self.store = store
+        self.dbReaders = dbReaders
+    }
+
+    /// True when at least one DB reader is wired up; callers can use this
+    /// to switch behaviour between "enrichment available" vs. "EventKit-only".
+    public var hasDBEnrichment: Bool {
+        return !dbReaders.isEmpty
     }
 
     // MARK: - Access
@@ -220,7 +233,8 @@ public class RemindersManager {
         modifiedTo: String?,
         dueFrom: String?,
         dueTo: String?,
-        outputDetail: String?
+        outputDetail: String?,
+        hashtag: String? = nil
     ) async throws -> Any {
         let startTime = Date()
         log("Starting queryReminders")
@@ -319,6 +333,30 @@ public class RemindersManager {
 
         // Convert to output format
         var reminderOutputs = filteredReminders.map { convertToOutput($0) }
+
+        // 2d. Enrich with SQLite-derived fields (hashtags, etc.) before
+        //     applying any post-conversion filters or JMESPath. Single
+        //     batched query per reader; no-op when dbReaders is empty.
+        enrich(&reminderOutputs)
+
+        // 2e. Hashtag filter (DB-derived, post-fetch). Case-insensitive on
+        //     canonical name. Skipped silently when DB enrichment is
+        //     unavailable — degrade gracefully rather than error.
+        if let hashtag = hashtag, !hashtag.isEmpty {
+            if hasDBEnrichment {
+                let needle = hashtag.lowercased()
+                reminderOutputs = reminderOutputs.filter { reminder in
+                    guard let tags = reminder.hashtags else { return false }
+                    return tags.contains { $0.lowercased() == needle }
+                }
+                log("Hashtag filter '\(hashtag)' reduced to \(reminderOutputs.count) reminders")
+            } else {
+                ReminderDBReader.warnOnce(
+                    "hashtag-filter-no-enrichment",
+                    "--hashtag filter requested but DB enrichment is unavailable; returning unfiltered results. Grant Full Disk Access to enable hashtag filtering."
+                )
+            }
+        }
 
         // 3. Apply JMESPath if provided — always uses full fields, outputDetail is ignored
         //    When JMESPath is used, return full result with no pagination (users can use JMESPath slicing)
@@ -425,7 +463,8 @@ public class RemindersManager {
     private static let minimalFields: Set<String> = ["id", "title", "listName", "isCompleted"]
     private static let compactFields: Set<String> = [
         "id", "title", "notes", "listName", "isCompleted",
-        "dueDate", "priority", "createdDate", "modifiedDate"
+        "dueDate", "priority", "createdDate", "modifiedDate",
+        "hashtags"
     ]
     // "full" uses all fields — no filtering needed
 
@@ -528,6 +567,16 @@ public class RemindersManager {
             dict["recurrenceRules"] = rules.map { $0.toDict() }
         } else {
             dict["recurrenceRules"] = NSNull()
+        }
+
+        // Hashtags: array (possibly empty) when DB enrichment populated
+        // the field, NSNull when DB enrichment is unavailable. The
+        // distinction matters: empty means "this reminder has no tags",
+        // null means "we don't know."
+        if let hashtags = reminder.hashtags {
+            dict["hashtags"] = hashtags
+        } else {
+            dict["hashtags"] = NSNull()
         }
 
         return dict
@@ -1110,6 +1159,91 @@ public class RemindersManager {
             fileSizeBytes: jsonData.count,
             note: path == nil ? "File is in temp directory. Move it to a permanent location to keep it." : nil
         )
+    }
+
+    // MARK: - DB Enrichment
+
+    /// Populates SQLite-derived fields on each reminder output by querying
+    /// the configured `dbReaders`. A no-op when no readers are wired up.
+    /// All readers are queried and their results merged — a reminder lives
+    /// in exactly one CloudKit zone / store, so at most one reader will
+    /// have data for any given UUID.
+    public func enrich(_ outputs: inout [ReminderOutput]) {
+        guard hasDBEnrichment, !outputs.isEmpty else { return }
+
+        let uuids = outputs.map { $0.id }
+        var hashtagsByUUID: [String: [String]] = [:]
+        for reader in dbReaders {
+            do {
+                let chunk = try reader.hashtags(forReminderUUIDs: uuids)
+                for (uuid, tags) in chunk {
+                    hashtagsByUUID[uuid] = tags
+                }
+            } catch {
+                ReminderDBReader.warnOnce(
+                    "enrich.hashtags.\(reader.storeURL.lastPathComponent)",
+                    "Hashtag enrichment failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+        }
+
+        for i in outputs.indices {
+            outputs[i].hashtags = hashtagsByUUID[outputs[i].id] ?? []
+        }
+    }
+
+    /// Returns the master hashtag inventory aggregated across all
+    /// configured DB readers. When DB enrichment is unavailable, returns
+    /// an empty array (callers that need to distinguish "unavailable" from
+    /// "no hashtags" should check `hasDBEnrichment` first).
+    public func listHashtags(includeUnused: Bool = false) -> [HashtagInfo] {
+        var combined: [String: HashtagInfo] = [:]
+        for reader in dbReaders {
+            do {
+                let entries = try reader.hashtagInventory(includeUnused: includeUnused)
+                for entry in entries {
+                    if let existing = combined[entry.canonicalName] {
+                        // Merge usage counts and pick the most recent dates
+                        // when a hashtag exists in multiple stores (rare, but
+                        // possible for shared lists).
+                        let merged = HashtagInfo(
+                            name: existing.name,
+                            canonicalName: existing.canonicalName,
+                            usageCount: existing.usageCount + entry.usageCount,
+                            lastUsed: latest(existing.lastUsed, entry.lastUsed),
+                            firstSeen: earliest(existing.firstSeen, entry.firstSeen)
+                        )
+                        combined[entry.canonicalName] = merged
+                    } else {
+                        combined[entry.canonicalName] = entry
+                    }
+                }
+            } catch {
+                ReminderDBReader.warnOnce(
+                    "listHashtags.\(reader.storeURL.lastPathComponent)",
+                    "Hashtag inventory failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+        }
+        return combined.values.sorted { $0.canonicalName < $1.canonicalName }
+    }
+
+    private func latest(_ a: Date?, _ b: Date?) -> Date? {
+        switch (a, b) {
+        case (nil, nil): return nil
+        case (.some(let x), nil): return x
+        case (nil, .some(let y)): return y
+        case (.some(let x), .some(let y)): return x > y ? x : y
+        }
+    }
+
+    private func earliest(_ a: Date?, _ b: Date?) -> Date? {
+        switch (a, b) {
+        case (nil, nil): return nil
+        case (.some(let x), nil): return x
+        case (nil, .some(let y)): return y
+        case (.some(let x), .some(let y)): return x < y ? x : y
+        }
     }
 
     // MARK: - Audit Helpers

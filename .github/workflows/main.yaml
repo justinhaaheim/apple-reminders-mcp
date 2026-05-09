@@ -12,13 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Print toolchain
-        run: |
-          swift --version
-          xcode-select -p || true
-
       - name: Build Swift package
-        run: swift build -c release --verbose 2>&1 | tail -200
+        run: swift build -c release
 
   format:
     runs-on: ubuntu-latest

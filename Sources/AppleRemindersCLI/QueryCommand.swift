@@ -61,6 +61,9 @@ struct QueryCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Output detail level: minimal, compact, full")
     var detail: String?
 
+    @Option(name: .long, help: "Filter by hashtag (case-insensitive on canonical name)")
+    var hashtag: String?
+
     private static let validStatuses = ["incomplete", "completed", "all"]
     private static let validSorts = ["newest", "oldest", "priority", "dueDate"]
     private static let validDetails = ["minimal", "compact", "full"]
@@ -110,7 +113,8 @@ struct QueryCommand: AsyncParsableCommand {
             modifiedTo: modifiedTo,
             dueFrom: dueFrom,
             dueTo: dueTo,
-            outputDetail: detail
+            outputDetail: detail,
+            hashtag: hashtag
         )
 
         try outputJSON(result, pretty: globals.pretty)

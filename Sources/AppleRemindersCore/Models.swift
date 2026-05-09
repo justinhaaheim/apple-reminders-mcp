@@ -79,12 +79,18 @@ public struct ReminderOutput: Codable {
     public let alarms: [AlarmOutput]?
     public let recurrenceRules: [RecurrenceRuleOutput]?
 
+    // SQLite-derived enrichment (populated when ReminderDBReader is
+    // available to the caller). nil means "DB enrichment unavailable";
+    // an empty value means "DB available, this reminder has none".
+    public var hashtags: [String]?
+
     public init(
         id: String, title: String, notes: String?,
         listId: String, listName: String, isCompleted: Bool,
         priority: String, dueDate: String?, dueDateIncludesTime: Bool?,
         completedDate: String?, createdDate: String, modifiedDate: String,
-        url: String?, alarms: [AlarmOutput]?, recurrenceRules: [RecurrenceRuleOutput]?
+        url: String?, alarms: [AlarmOutput]?, recurrenceRules: [RecurrenceRuleOutput]?,
+        hashtags: [String]? = nil
     ) {
         self.id = id
         self.title = title
@@ -101,6 +107,7 @@ public struct ReminderOutput: Codable {
         self.url = url
         self.alarms = alarms
         self.recurrenceRules = recurrenceRules
+        self.hashtags = hashtags
     }
 }
 
