@@ -50,7 +50,6 @@ let package = Package(
         .systemLibrary(
             name: "CSQLite3",
             path: "Sources/CSQLite3",
-            pkgConfig: "sqlite3",
             providers: [
                 .apt(["libsqlite3-dev"]),
                 .brew(["sqlite3"]),
