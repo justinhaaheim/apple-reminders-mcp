@@ -23,12 +23,23 @@ public final class ReminderDBReader {
     public static let containerSubpath =
         "Library/Group Containers/group.com.apple.reminders/Container_v1/Stores"
 
-    /// Schema fingerprints we've inspected and consider supported. New macOS
-    /// releases may bump these; an unrecognized fingerprint logs a warning
-    /// and disables enrichment but does not crash. Listed here as
-    /// `nil` initially — populated on first observation per process so tests
-    /// don't need to be re-run when Apple bumps minor schema versions.
-    public static let knownGoodFingerprints: Set<String> = []
+    /// Schema fingerprints we've inspected and consider supported. An
+    /// unrecognized fingerprint logs a one-shot warning naming the
+    /// fingerprint, but enrichment continues best-effort — schema drift is
+    /// not fatal. To suppress the warning for a known-OK schema, run the
+    /// binary once with FDA, capture the fingerprint from the warning text,
+    /// and add it here as a hex string literal. Empty set means "warn on
+    /// every fingerprint we encounter," which is the right default until
+    /// we've observed the wild population.
+    public static let knownGoodFingerprints: Set<String> = [
+        // Observed on macOS 25.x (May 2026), apple-reminders-mcp dev box.
+        // Each Reminders SQLite store carries its own Core Data metadata
+        // hash; multiple per-account stores produce different fingerprints
+        // even on the same Reminders schema version.
+        "094362e2bfafb3899e59256c3885feaa",
+        "494c9cf8d8374cbf095a5d4a0a8c8bf7",
+        "e98e4dfd1efbf4a8ef8fe3c52c3be9b1",
+    ]
 
     // MARK: Errors
 
@@ -163,7 +174,20 @@ public final class ReminderDBReader {
         var readers: [ReminderDBReader] = []
         for url in candidates {
             do {
-                readers.append(try ReminderDBReader(storeURL: url))
+                let reader = try ReminderDBReader(storeURL: url)
+                // Schema fingerprint check: if the live DB's schema doesn't
+                // match a known-good fingerprint, log a one-shot warning
+                // naming the fingerprint so the user can file an issue or
+                // populate `knownGoodFingerprints`. Enrichment continues
+                // either way — unknown schema is best-effort, not fatal.
+                if let fp = try? reader.schemaFingerprint(),
+                   !ReminderDBReader.knownGoodFingerprints.contains(fp) {
+                    warnOnce(
+                        "schema.unknown.\(url.lastPathComponent)",
+                        "Reminders DB at \(url.lastPathComponent) has unrecognized schema fingerprint \(fp). Enrichment will proceed best-effort. If fields look wrong, consider adding this fingerprint to ReminderDBReader.knownGoodFingerprints (see code comments)."
+                    )
+                }
+                readers.append(reader)
             } catch let ReminderDBError.permissionDenied(path) {
                 warnOnce(
                     "discover.permission",

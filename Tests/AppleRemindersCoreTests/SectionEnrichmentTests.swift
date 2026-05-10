@@ -85,4 +85,35 @@ final class SectionEnrichmentTests: XCTestCase {
         let map = try reader.reminderSectionMap(forListUUIDs: [])
         XCTAssertEqual(map.count, 0)
     }
+
+    /// Regression: real Reminders membership blobs include entries for
+    /// reminders that live in a sectioned list but aren't placed in any
+    /// section ("free" items at the top of the list). Those entries omit
+    /// `groupID`. An earlier version of MembershipBlob.Membership declared
+    /// `groupID` as a required `String`, causing JSONDecoder to throw
+    /// `keyNotFound` for the entire blob and dropping ALL section data
+    /// for any list with even one such entry.
+    func testMembershipBlobToleratesMissingGroupID() throws {
+        let json = """
+        {
+          "minimumSupportedVersion": 20230430,
+          "memberships": [
+            { "memberID": "no-section-1", "modifiedOn": 800000000.0 },
+            { "groupID": "section-A", "memberID": "in-section-1", "modifiedOn": 800000001.0 },
+            { "memberID": "no-section-2", "modifiedOn": 800000002.0 },
+            { "groupID": "section-A", "memberID": "in-section-2", "modifiedOn": 800000003.0 }
+          ]
+        }
+        """.data(using: .utf8)!
+
+        let parsed = try JSONDecoder().decode(ReminderDBReader.MembershipBlob.self, from: json)
+        XCTAssertEqual(parsed.memberships.count, 4)
+
+        let withGroup = parsed.memberships.filter { $0.groupID != nil }
+        let withoutGroup = parsed.memberships.filter { $0.groupID == nil }
+        XCTAssertEqual(withGroup.count, 2)
+        XCTAssertEqual(withoutGroup.count, 2)
+        XCTAssertEqual(Set(withoutGroup.map { $0.memberID }),
+                       ["no-section-1", "no-section-2"])
+    }
 }

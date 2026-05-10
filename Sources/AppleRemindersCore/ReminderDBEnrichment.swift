@@ -386,9 +386,10 @@ extension ReminderDBReader {
                 return
             }
             for entry in parsed.memberships {
-                if let info = sectionsByID[entry.groupID] {
-                    out[entry.memberID] = info
-                }
+                // groupID is nil when a reminder lives in a sectioned list
+                // but is not in any section (free at the top of the list).
+                guard let gid = entry.groupID, let info = sectionsByID[gid] else { continue }
+                out[entry.memberID] = info
             }
         }
         return out
@@ -396,10 +397,18 @@ extension ReminderDBReader {
 
     /// Internal Codable mirror of the membership JSON. `modifiedOn` is
     /// captured for completeness even though we don't currently use it.
-    private struct MembershipBlob: Codable {
+    /// Internal (not private) so unit tests can construct synthetic blobs
+    /// that exercise edge cases the static fixture doesn't cover.
+    struct MembershipBlob: Codable {
         let memberships: [Membership]
         struct Membership: Codable {
-            let groupID: String
+            // groupID is OPTIONAL: real Reminders blobs include entries for
+            // reminders that live in a sectioned list but aren't placed in
+            // any section (free items at the top of the list). Those entries
+            // contain only `memberID` + `modifiedOn`. Treating groupID as
+            // required would throw `keyNotFound` for the whole blob and drop
+            // all section info for that list.
+            let groupID: String?
             let memberID: String
             let modifiedOn: Double?
         }
