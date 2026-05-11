@@ -4,6 +4,7 @@ import Foundation
 
 public class MCPServer {
     private let remindersManager: RemindersManager
+    private let store: ReminderStore
     private let snapshotManager: SnapshotManager?
     private let snapshotEnabled: Bool
 
@@ -20,7 +21,12 @@ public class MCPServer {
             store = MockReminderStore()
             #endif
         }
-        self.remindersManager = RemindersManager(store: store)
+        self.store = store
+        // Discover SQLite enrichment stores. Returns [] (with one stderr
+        // warning) when the calling process lacks Full Disk Access — the
+        // manager degrades gracefully in that case.
+        let dbReaders = MockModeConfig.isEnabled ? [] : ReminderDBReader.discover()
+        self.remindersManager = RemindersManager(store: store, dbReaders: dbReaders)
 
         // Set audit logger source to MCP
         AuditLogger.shared.source = "mcp"
@@ -90,7 +96,7 @@ public class MCPServer {
             }
         } catch {
             logError("Error decoding request: \(error)")
-            sendErrorResponse(id: .int(-1), code: -32700, message: "Parse error: \(error.localizedDescription)")
+            sendErrorResponse(id: .null, code: -32700, message: "Parse error: \(error.localizedDescription)")
         }
     }
 
@@ -200,7 +206,7 @@ public class MCPServer {
             // query_reminders
             MCPResponse.Result.Tool(
                 name: "query_reminders",
-                description: "Search and filter reminders. Returns incomplete reminders from the default list by default. Supports list selection, text search, date ranges, status filtering, and JMESPath queries. Use help(\"query_reminders\") for full parameter docs.",
+                description: "Search and filter reminders. Returns incomplete reminders from the default list by default. Convention: structured params (list, status, searchText, per-field date ranges) filter at fetch time; the 'query' JMESPath expression filters/projects on the result. See docs/query-reference.md and help(\"query_reminders\") for full parameter docs.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -224,13 +230,29 @@ public class MCPServer {
                             "type": .string("string"),
                             "description": .string("Case-insensitive text search across reminder titles and notes")
                         ]),
-                        "dateFrom": .object([
+                        "createdFrom": .object([
                             "type": .string("string"),
-                            "description": .string("Start of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.")
+                            "description": .string("Filter by createdDate >= this ISO 8601 date (or YYYY-MM-DD).")
                         ]),
-                        "dateTo": .object([
+                        "createdTo": .object([
                             "type": .string("string"),
-                            "description": .string("End of date range (ISO 8601). Filters by dueDate for incomplete, completionDate for completed reminders.")
+                            "description": .string("Filter by createdDate <= this ISO 8601 date (or YYYY-MM-DD).")
+                        ]),
+                        "modifiedFrom": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by modifiedDate >= this ISO 8601 date (or YYYY-MM-DD).")
+                        ]),
+                        "modifiedTo": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by modifiedDate <= this ISO 8601 date (or YYYY-MM-DD).")
+                        ]),
+                        "dueFrom": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by dueDate >= this ISO 8601 date (or YYYY-MM-DD).")
+                        ]),
+                        "dueTo": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by dueDate <= this ISO 8601 date (or YYYY-MM-DD).")
                         ]),
                         "sortBy": .object([
                             "type": .string("string"),
@@ -240,7 +262,7 @@ public class MCPServer {
                         ]),
                         "query": .object([
                             "type": .string("string"),
-                            "description": .string("JMESPath expression for advanced filtering/projection. Applied after list, status, searchText, and date filters. When provided, outputDetail is ignored (always uses full fields as input).")
+                            "description": .string("JMESPath expression for advanced filtering/projection. Applied after list, status, searchText, and date filters. When provided, outputDetail is ignored (always uses full fields as input). Project-specific extensions: lower(string), upper(string).")
                         ]),
                         "outputDetail": .object([
                             "type": .string("string"),
@@ -248,12 +270,32 @@ public class MCPServer {
                             "default": .string("compact"),
                             "description": .string("Controls which fields are returned. 'minimal': id, title. 'compact' (default): most useful fields, nulls omitted. 'full': all fields, nulls shown. Ignored when 'query' (JMESPath) is provided. listName and isCompleted are contextually omitted in minimal/compact when implied by query params.")
                         ]),
-                        "limit": .object([
+                        "perPage": .object([
                             "type": .string("integer"),
                             "minimum": .int(1),
-                            "maximum": .int(200),
-                            "default": .int(50),
-                            "description": .string("Maximum results to return")
+                            "maximum": .int(1000),
+                            "description": .string("Results per page (1-1000). Omit to return all (auto-paginates at 200).")
+                        ]),
+                        "cursor": .object([
+                            "type": .string("string"),
+                            "description": .string("Opaque cursor from previous response's pageInfo.endCursor for next page.")
+                        ]),
+                        "hashtag": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by hashtag name (case-insensitive). Matches reminders that have this hashtag applied. Requires SQLite enrichment (Full Disk Access on the calling process).")
+                        ]),
+                        "parentId": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter to direct children of the given reminder UUID. Mutually exclusive with topLevelOnly. Requires SQLite enrichment.")
+                        ]),
+                        "topLevelOnly": .object([
+                            "type": .string("boolean"),
+                            "default": .bool(false),
+                            "description": .string("Return only reminders without a parent. Mutually exclusive with parentId. Requires SQLite enrichment.")
+                        ]),
+                        "sectionId": .object([
+                            "type": .string("string"),
+                            "description": .string("Filter by section (matches section UUID or display name, case-insensitive). Requires SQLite enrichment.")
                         ])
                     ]),
                     "additionalProperties": .bool(false)
@@ -640,6 +682,23 @@ public class MCPServer {
                     "additionalProperties": .bool(false)
                 ])
             ),
+
+            // list_hashtags
+            MCPResponse.Result.Tool(
+                name: "list_hashtags",
+                description: "Get the master hashtag inventory with usage counts, last-used and first-seen timestamps. Hashtags come from the Apple Reminders SQLite store (EventKit doesn't expose them). Returns an empty array when the calling process lacks Full Disk Access.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "includeUnused": .object([
+                            "type": .string("boolean"),
+                            "default": .bool(false),
+                            "description": .string("Include hashtags with zero current applications (default: only currently-used)")
+                        ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
+            ),
         ]
     }
 
@@ -663,22 +722,40 @@ public class MCPServer {
             let status = arguments["status"]?.value as? String
             let sortBy = arguments["sortBy"]?.value as? String
             let query = arguments["query"]?.value as? String
-            let limit = arguments["limit"]?.value as? Int
+            let perPage = arguments["perPage"]?.value as? Int
+            let cursor = arguments["cursor"]?.value as? String
             let searchText = arguments["searchText"]?.value as? String
-            let dateFrom = arguments["dateFrom"]?.value as? String
-            let dateTo = arguments["dateTo"]?.value as? String
+            let createdFrom = arguments["createdFrom"]?.value as? String
+            let createdTo = arguments["createdTo"]?.value as? String
+            let modifiedFrom = arguments["modifiedFrom"]?.value as? String
+            let modifiedTo = arguments["modifiedTo"]?.value as? String
+            let dueFrom = arguments["dueFrom"]?.value as? String
+            let dueTo = arguments["dueTo"]?.value as? String
             let outputDetail = arguments["outputDetail"]?.value as? String
+            let hashtag = arguments["hashtag"]?.value as? String
+            let parentId = arguments["parentId"]?.value as? String
+            let topLevelOnly = arguments["topLevelOnly"]?.value as? Bool ?? false
+            let sectionId = arguments["sectionId"]?.value as? String
 
             let result = try await remindersManager.queryReminders(
                 list: listDict == nil ? nil : listSelector,
                 status: status,
                 sortBy: sortBy,
                 query: query,
-                limit: limit,
+                perPage: perPage,
+                cursor: cursor,
                 searchText: searchText,
-                dateFrom: dateFrom,
-                dateTo: dateTo,
-                outputDetail: outputDetail
+                createdFrom: createdFrom,
+                createdTo: createdTo,
+                modifiedFrom: modifiedFrom,
+                modifiedTo: modifiedTo,
+                dueFrom: dueFrom,
+                dueTo: dueTo,
+                outputDetail: outputDetail,
+                hashtag: hashtag,
+                parentId: parentId,
+                topLevelOnly: topLevelOnly,
+                sectionId: sectionId
             )
 
             return try toJSON(result)
@@ -874,6 +951,18 @@ public class MCPServer {
             let topic = arguments["topic"]?.value as? String
             return getGuidance(topic: topic)
 
+        case "list_hashtags":
+            let includeUnused = arguments["includeUnused"]?.value as? Bool ?? false
+            let entries = remindersManager.listHashtags(includeUnused: includeUnused)
+            return try toJSON(entries)
+
+        case "_seed_mock_data":
+            guard let mockStore = store as? MockReminderStore else {
+                throw RemindersError("_seed_mock_data is only available in mock mode")
+            }
+            try mockStore.seedData(from: arguments)
+            return try toJSON(["seeded": true])
+
         default:
             throw RemindersError("Unknown tool: \(name)")
         }
@@ -955,7 +1044,7 @@ public class MCPServer {
                 "isCompleted": reminder.isCompleted,
                 "priority": reminder.priority,
                 "createdDate": reminder.createdDate,
-                "lastModifiedDate": reminder.lastModifiedDate
+                "modifiedDate": reminder.modifiedDate
             ]
             if let notes = reminder.notes {
                 dict["notes"] = notes
@@ -966,8 +1055,8 @@ public class MCPServer {
             if let dueDateIncludesTime = reminder.dueDateIncludesTime {
                 dict["dueDateIncludesTime"] = dueDateIncludesTime
             }
-            if let completionDate = reminder.completionDate {
-                dict["completionDate"] = completionDate
+            if let completedDate = reminder.completedDate {
+                dict["completedDate"] = completedDate
             }
             if let url = reminder.url {
                 dict["url"] = url

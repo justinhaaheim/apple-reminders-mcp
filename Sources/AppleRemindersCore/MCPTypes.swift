@@ -11,6 +11,7 @@ struct MCPRequest: Codable {
     enum RequestID: Codable {
         case string(String)
         case int(Int)
+        case null
 
         init(from decoder: Decoder) throws {
             let container = try decoder.singleValueContainer()
@@ -18,8 +19,10 @@ struct MCPRequest: Codable {
                 self = .string(string)
             } else if let int = try? container.decode(Int.self) {
                 self = .int(int)
+            } else if container.decodeNil() {
+                self = .null
             } else {
-                throw DecodingError.typeMismatch(RequestID.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "ID must be string or int"))
+                throw DecodingError.typeMismatch(RequestID.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "ID must be string, int, or null"))
             }
         }
 
@@ -30,6 +33,8 @@ struct MCPRequest: Codable {
                 try container.encode(string)
             case .int(let int):
                 try container.encode(int)
+            case .null:
+                try container.encodeNil()
             }
         }
     }

@@ -22,6 +22,7 @@ public enum HelpContent {
       export        Export reminders to a JSON file
       snapshot      Git-backed snapshot of all reminders
       audit         View audit log of mutation operations
+      hashtags      List the hashtag inventory (read-only SQLite enrichment)
       mcp           Start MCP server on stdio
 
     Global Options:
@@ -31,6 +32,11 @@ public enum HelpContent {
       --verbose      Show debug logging on stderr
       --version      Show version
       --help         Show help
+
+    SQLite enrichment: query, lists, and hashtags surface fields that
+    EventKit doesn't expose (hashtags, parentId, childIds, section). These
+    require Full Disk Access on the calling terminal — without it the
+    fields are null and a single stderr warning explains how to grant it.
 
     Use --help --verbose for detailed docs and examples.
     Use --help=skill for best practices and strategic guidance.
@@ -72,7 +78,7 @@ public enum HelpContent {
     Priority Values: none, low, medium, high
 
     Date Format: ISO 8601 with timezone, e.g. 2026-03-07T09:00:00-08:00
-      Date-only also works for --from/--to: 2026-03-07
+      Date-only also works for the per-field date flags: 2026-03-07
 
     Output Detail Levels (query command):
       --detail minimal   id, title, listName, isCompleted
@@ -84,16 +90,25 @@ public enum HelpContent {
       AR_MCP_MOCK_MODE=1            Use mock store
       AR_MCP_SNAPSHOT_ENABLED=1     Enable auto-snapshots in MCP server
       AR_MCP_SNAPSHOT_REPO=<path>   Snapshot repository path
+      AR_SNAPSHOT_ENABLED=1         Enable CLI auto-snapshots around mutations
+                                    (post-snapshot always; pre-snapshot only
+                                    if repo is uninitialized or last snapshot
+                                    is > 7 days old)
       AR_SNAPSHOT_REPO=<path>       Snapshot repository path (CLI)
 
     Examples:
       reminders                                             # Incomplete reminders from default list
       reminders query --all-lists --status all --detail full # Everything, full detail
       reminders query --list "Work" --search "standup"       # Search within a list
-      reminders query --sort dueDate --limit 10              # Upcoming due dates
+      reminders query --sort dueDate --per-page 10              # Upcoming due dates
+      reminders query "[?priority == 'high']" --pretty       # JMESPath filter
       reminders create "Buy milk" --list "Shopping"          # Create a reminder
       reminders update <id> --complete                       # Mark done
       reminders delete <id1> <id2>                           # Batch delete
+
+    Convention: structured CLI flags filter at fetch time; the JMESPath
+    [QUERY] positional argument filters/projects on the result.
+    Foundation reference: docs/query-reference.md
 
     Use --help=skill for best practices and strategic guidance.
     Use `reminders schema <command>` to inspect input/output schemas.
@@ -101,6 +116,14 @@ public enum HelpContent {
 
     public static let topLevelSkill = """
     reminders — Strategic Guidance
+
+    QUERY CONVENTION (most important):
+    • Structured CLI flags (--list, --status, --search, --created-from/-to,
+      --modified-from/-to, --due-from/-to, --sort, --per-page) filter at
+      fetch time. The positional [QUERY] JMESPath expression filters and
+      projects on the result. Order on the command line never changes
+      results — flags always run first.
+    • Foundation reference: docs/query-reference.md
 
     GENERAL PRINCIPLES:
     • Always query before updating or deleting. Get the reminder ID first.
@@ -113,7 +136,9 @@ public enum HelpContent {
     • Use --search for text matching before resorting to JMESPath.
     • Use --detail compact (default) for most work. Only use --detail full when you need alarms, recurrence, or URLs.
     • JMESPath queries operate on full fields regardless of --detail, so use them for complex filtering.
-    • Use --from and --to for date ranges instead of fetching all and filtering client-side.
+    • Use the per-field date flags for ranges instead of fetching all and filtering client-side.
+    • For case-insensitive matching in JMESPath, use the project's lower()/upper() functions:
+      `reminders query "[?contains(lower(title), 'meeting')]"`.
 
     SAFE MUTATIONS:
     • Always verify the list exists (via `reminders lists`) before creating reminders in a specific list.
@@ -122,15 +147,15 @@ public enum HelpContent {
     • Batch operations (create, update, delete) report partial failures — always check the response.
 
     COMMON WORKFLOWS:
-    • Daily review: `reminders query --all-lists --sort dueDate --from "$(date -I)" --pretty`
+    • Daily review: `reminders query --all-lists --due-from "$(date -I)" --sort dueDate --pretty`
     • Bulk complete: Query IDs first, then update each with --complete
     • Move reminder: `reminders update <id> --list "New List"`
 
     GOTCHAS:
     • The --list flag is case-insensitive but must match the full list name.
-    • Date-only format (2026-03-07) works for --from/--to but not for --due (which needs full ISO 8601 with time).
-    • Completed reminders have a completionDate; date range filtering uses completionDate for completed, dueDate for incomplete.
-    • JMESPath overrides --sort and --detail — it always operates on full data.
+    • Date-only format (2026-03-07) works for the per-field date flags but not for --due (which needs full ISO 8601 with time).
+    • There's no --completed-from/-to flag (EventKit predicate quirks); use JMESPath: `[?completedDate >= '2026-04-30']`.
+    • JMESPath overrides --sort and --detail — it always operates on full data and bypasses pagination.
 
     Use `reminders <command> --help` for API documentation.
     Use `reminders <command> --help --verbose` for comprehensive docs with examples.
@@ -139,9 +164,16 @@ public enum HelpContent {
     // MARK: - Query
 
     public static let queryConcise = """
-    reminders query [options]
+    reminders query [options] [<query>]
 
     Search and filter reminders. This is the default command.
+
+    Convention: structured CLI flags filter first; the JMESPath [<query>]
+    positional argument filters/projects on the result.
+
+    Arguments:
+      <query>               JMESPath expression (optional). Use quotes; precede with --
+                            if it starts with '-'.
 
     Options:
       --list <string>       Filter by list name (case-insensitive)
@@ -150,21 +182,46 @@ public enum HelpContent {
       --status <string>     incomplete (default), completed, or all
       --search <string>     Text search in titles and notes
       --sort <string>       newest (default), oldest, priority, dueDate
-      --limit <int>         Max results (default: 50, max: 200)
-      --from <date>         Date range start (ISO 8601 or YYYY-MM-DD)
-      --to <date>           Date range end (ISO 8601 or YYYY-MM-DD)
-      --jmespath <expr>     JMESPath query expression
+      --per-page <int>      Results per page (auto-paginates at 200 when omitted)
+      --cursor <string>     Opaque cursor from previous response's pageInfo.endCursor
+      --created-from <d>    Filter by createdDate >= date (ISO 8601 or YYYY-MM-DD)
+      --created-to <d>      Filter by createdDate <= date
+      --modified-from <d>   Filter by modifiedDate >= date
+      --modified-to <d>     Filter by modifiedDate <= date
+      --due-from <d>        Filter by dueDate >= date
+      --due-to <d>          Filter by dueDate <= date
       --detail <level>      minimal, compact (default), full
+      --hashtag <name>      Filter by hashtag (case-insensitive). DB enrichment.
+      --parent <uuid>       Filter to direct children of the given reminder
+      --top-level           Filter to reminders without a parent
+      --section <name|uuid> Filter by section (UUID or display name, ci)
+
+    DB enrichment (--hashtag, --parent, --top-level, --section): reads
+    Apple Reminders' SQLite store directly. Requires Full Disk Access on
+    the calling terminal. When unavailable, the filter is skipped with a
+    single stderr warning.
+
+    Foundation reference: docs/query-reference.md
 
     Use --help --verbose for detailed docs and examples.
     Use --help=skill for best practices and strategic guidance.
     """
 
     public static let queryVerbose = """
-    reminders query [options]
+    reminders query [options] [<query>]
 
     Search and filter reminders. This is the default command — running `reminders`
     with no subcommand is equivalent to `reminders query`.
+
+    Convention: structured CLI flags filter first (some push down into
+    EventKit predicates); the JMESPath [<query>] positional argument
+    filters/projects on the result. Order on the command line never
+    changes results — flags always run first.
+
+    Arguments:
+      <query>               JMESPath expression (optional). Quote it. If it starts
+                            with '-', precede with `--` to avoid ArgumentParser
+                            interpreting it as a flag.
 
     Options:
       --list <string>       Filter by list name (case-insensitive)
@@ -173,44 +230,74 @@ public enum HelpContent {
       --status <string>     incomplete (default), completed, or all
       --search <string>     Text search in titles and notes
       --sort <string>       newest (default), oldest, priority, dueDate
-      --limit <int>         Max results (default: 50, max: 200)
-      --from <date>         Date range start (ISO 8601 or YYYY-MM-DD)
-      --to <date>           Date range end (ISO 8601 or YYYY-MM-DD)
-      --jmespath <expr>     JMESPath query expression
+      --per-page <int>      Results per page (auto-paginates at 200 when omitted)
+      --cursor <string>     Opaque cursor from previous response's pageInfo.endCursor
+      --created-from <d>    Filter by createdDate >= date (ISO 8601 or YYYY-MM-DD)
+      --created-to <d>      Filter by createdDate <= date
+      --modified-from <d>   Filter by modifiedDate >= date
+      --modified-to <d>     Filter by modifiedDate <= date
+      --due-from <d>        Filter by dueDate >= date
+      --due-to <d>          Filter by dueDate <= date
       --detail <level>      minimal, compact (default), full
+      --hashtag <name>      Filter by hashtag (case-insensitive)
+      --parent <uuid>       Filter to direct children of the given reminder
+      --top-level           Filter to reminders without a parent
+      --section <name|uuid> Filter by section (UUID or display name, ci)
+
+    SQLite Enrichment (Full Disk Access required):
+      The reader opens the on-disk Apple Reminders Core Data store
+      read-only to surface hashtags, parent/child links, and sections —
+      none of which EventKit exposes. Output reminders gain hashtags,
+      parentId, childIds, and section fields. `reminders lists` gains a
+      sections array per list.
+
+      Without FDA on the calling terminal, those fields are null and
+      --hashtag / --parent / --top-level / --section are skipped with a
+      single stderr warning. EventKit remains authoritative for writes;
+      nothing is ever written to the SQLite store.
 
     Default Behavior (no options):
       Returns incomplete reminders from the default list, sorted by newest
-      created first, limited to 50 results, using compact output detail.
+      created first, using compact output detail. Auto-paginates at 200 results.
 
     Detail Levels:
       minimal   id, title only (plus listName if --all-lists, isCompleted if --status all)
-      compact   id, title, notes, dueDate, priority, createdDate, lastModifiedDate
+      compact   id, title, notes, dueDate, priority, createdDate, modifiedDate
                 (plus listName/isCompleted when contextually useful). Null fields omitted.
       full      All fields always included: id, title, notes, dueDate, priority,
-                isCompleted, completionDate, createdDate, lastModifiedDate, listId,
+                isCompleted, completedDate, createdDate, modifiedDate, listId,
                 listName, url, alarms, recurrenceRule. Null values shown explicitly.
 
     Date Range Filtering:
-      --from and --to filter by dueDate for incomplete reminders and by
-      completionDate for completed reminders. Date-only format (YYYY-MM-DD) is accepted.
+      Each per-field flag filters by the named field. Reminders missing the
+      field are excluded from that filter. Date-only (YYYY-MM-DD) is accepted.
+      There's no --completed-from/-to flag; for completedDate ranges, use
+      JMESPath: `[?completedDate >= '2026-04-30']`.
 
     JMESPath Queries:
-      --jmespath provides server-side filtering using JMESPath expressions.
-      When used, it overrides --sort and --detail — the query operates on full
-      fields as input. See https://jmespath.org for syntax.
+      The positional [<query>] runs JMESPath on the result of the CLI flag
+      filters. When provided, --sort, --detail, and pagination are bypassed —
+      sort with `sort_by(@, &field)`, slice with `[N:M]`. Project-specific
+      extensions: lower(string), upper(string) for case-insensitive matching.
+      See https://jmespath.org for syntax and docs/query-reference.md for the
+      full project reference (recipes + extensions).
 
     Examples:
-      reminders query                                          # Incomplete from default list
-      reminders query --all-lists --status all --detail full   # Everything
-      reminders query --list "Work" --search "standup"         # Search within a list
-      reminders query --sort dueDate --limit 10                # Upcoming due dates
-      reminders query --status completed --from "2026-03-01"   # Recently completed
-      reminders query --all-lists --jmespath "[?priority=='high'].title"
+      reminders query                                                      # Incomplete from default list
+      reminders query --all-lists --status all --detail full               # Everything
+      reminders query --list "Work" --search "standup"                     # Search within a list
+      reminders query --sort dueDate --per-page 10                         # Upcoming due dates
+      reminders query --status completed --modified-from 2026-03-01        # Recently modified+completed
+      reminders query --created-from 2026-04-30                            # Recently created
+      reminders query --due-from 2026-05-07 --due-to 2026-05-14            # Due this week
+      reminders query --all-lists "[?priority=='high'].title"              # JMESPath positional
+      reminders query --list "Work" "[?contains(lower(title), 'meeting')]" # Combine flags + JMESPath
 
     Piping with jq:
-      reminders query --list "Work" | jq -r '.[].id'
-      reminders query --all-lists --sort dueDate | jq -r '.[] | [.title, .dueDate // "none"] | @tsv'
+      reminders query --list "Work" | jq -r '.reminders[].id'
+      reminders query --all-lists --sort dueDate | jq -r '.reminders[] | [.title, .dueDate // "none"] | @tsv'
+
+    Foundation reference: docs/query-reference.md
 
     Use --help=skill for best practices and strategic guidance.
     """
@@ -218,14 +305,24 @@ public enum HelpContent {
     public static let querySkill = """
     reminders query — Strategic Guidance
 
+    CONVENTION (most important):
+    • Structured CLI flags filter at fetch time. The positional [<query>]
+      JMESPath expression filters and projects on the result. Flags always
+      run first, JMESPath always runs second — order on the command line
+      doesn't matter. Read docs/query-reference.md for the full picture.
+
     • Use --detail minimal when you only need IDs/titles (saves tokens).
     • Use --search before JMESPath — it's simpler and sufficient for most text matching.
-    • Use --from/--to for date ranges instead of fetching all and filtering client-side.
-    • JMESPath overrides --sort and --detail. It always operates on full field data.
+    • Use the per-field date flags (--created-from/-to, --modified-from/-to,
+      --due-from/-to) for ranges instead of fetching all and filtering client-side.
+    • JMESPath overrides --sort, --detail, and pagination. Sort with
+      `sort_by(@, &field)`; slice with `[N:M]`.
     • Default query (no args) is often sufficient — it returns incomplete reminders
       from the default list. Don't add flags unless you need to narrow or expand.
-    • For completed reminders, date filtering uses completionDate, not dueDate.
-    • --limit defaults to 50. If you expect many results, increase it or paginate.
+    • For completedDate ranges, use JMESPath: there's no --completed-from/-to flag.
+    • For case-insensitive matching, use lower()/upper() in JMESPath:
+      `reminders query "[?contains(lower(title), 'meeting')]"`.
+    • Results auto-paginate at 200. Use --per-page to control page size, --cursor for next page.
     """
 
     // MARK: - Create
@@ -425,7 +522,7 @@ public enum HelpContent {
     Batch Pattern:
       # Delete all completed reminders from a list
       reminders query --list "Work" --status completed --detail minimal | \\
-        jq -r '.[].id' | xargs reminders delete
+        jq -r '.reminders[].id' | xargs reminders delete
 
     Use --help=skill for best practices and strategic guidance.
     """
@@ -627,6 +724,12 @@ public enum HelpContent {
     • Use `snapshot diff` to verify what changed before committing to more changes.
     • Snapshots are lightweight git commits — take them frequently.
     • For MCP server auto-snapshots, set AR_MCP_SNAPSHOT_ENABLED=1.
+    • For CLI auto-snapshots around mutations (create/create-list/update/delete),
+      set AR_SNAPSHOT_ENABLED=1. Post-snapshot runs after every successful
+      mutation; pre-snapshot only runs when the repo is uninitialized or the
+      last snapshot is > 7 days old. Snapshot failures warn to stderr but
+      don't abort the mutation. Repo path resolves via AR_SNAPSHOT_REPO or
+      defaults to ~/.config/apple-reminders-data.
     """
 
     // MARK: - MCP

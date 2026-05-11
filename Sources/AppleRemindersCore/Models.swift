@@ -72,19 +72,43 @@ public struct ReminderOutput: Codable {
     public let priority: String  // "none", "low", "medium", "high"
     public let dueDate: String?
     public let dueDateIncludesTime: Bool?
-    public let completionDate: String?
+    public let completedDate: String?
     public let createdDate: String
-    public let lastModifiedDate: String
+    public let modifiedDate: String
     public let url: String?
     public let alarms: [AlarmOutput]?
     public let recurrenceRules: [RecurrenceRuleOutput]?
+
+    // SQLite-derived enrichment (populated when ReminderDBReader is
+    // available to the caller). nil means "DB enrichment unavailable";
+    // an empty value means "DB available, this reminder has none".
+    public var hashtags: [String]?
+
+    /// UUID of the parent reminder when this reminder is a subtask.
+    /// nil means either "top-level" or "DB enrichment unavailable" — the
+    /// two cases are functionally indistinguishable from a single field.
+    public var parentId: String?
+
+    /// UUIDs of direct children. nil when DB enrichment is unavailable;
+    /// `[]` when the reminder has no children. Order matches the user's
+    /// arrangement in Reminders.app (sorted by `ZICSDISPLAYORDER`).
+    public var childIds: [String]?
+
+    /// Within-list section ("kanban column"), if the reminder is in one.
+    /// `nil` either means "DB unavailable" or "not in a section" — same
+    /// ambiguity as parentId.
+    public var section: SectionInfo?
 
     public init(
         id: String, title: String, notes: String?,
         listId: String, listName: String, isCompleted: Bool,
         priority: String, dueDate: String?, dueDateIncludesTime: Bool?,
-        completionDate: String?, createdDate: String, lastModifiedDate: String,
-        url: String?, alarms: [AlarmOutput]?, recurrenceRules: [RecurrenceRuleOutput]?
+        completedDate: String?, createdDate: String, modifiedDate: String,
+        url: String?, alarms: [AlarmOutput]?, recurrenceRules: [RecurrenceRuleOutput]?,
+        hashtags: [String]? = nil,
+        parentId: String? = nil,
+        childIds: [String]? = nil,
+        section: SectionInfo? = nil
     ) {
         self.id = id
         self.title = title
@@ -95,12 +119,16 @@ public struct ReminderOutput: Codable {
         self.priority = priority
         self.dueDate = dueDate
         self.dueDateIncludesTime = dueDateIncludesTime
-        self.completionDate = completionDate
+        self.completedDate = completedDate
         self.createdDate = createdDate
-        self.lastModifiedDate = lastModifiedDate
+        self.modifiedDate = modifiedDate
         self.url = url
         self.alarms = alarms
         self.recurrenceRules = recurrenceRules
+        self.hashtags = hashtags
+        self.parentId = parentId
+        self.childIds = childIds
+        self.section = section
     }
 }
 
@@ -109,10 +137,16 @@ public struct ReminderListOutput: Codable {
     public let name: String
     public let isDefault: Bool
 
-    public init(id: String, name: String, isDefault: Bool) {
+    /// Within-list sections (kanban columns) defined in Reminders.app.
+    /// nil when DB enrichment is unavailable; `[]` when the list has no
+    /// sections; populated array when it does.
+    public var sections: [SectionInfo]?
+
+    public init(id: String, name: String, isDefault: Bool, sections: [SectionInfo]? = nil) {
         self.id = id
         self.name = name
         self.isDefault = isDefault
+        self.sections = sections
     }
 }
 
@@ -326,6 +360,63 @@ public struct UpdateReminderInput: Encodable {
         self.alarms = alarms
         self.recurrenceRule = recurrenceRule
     }
+}
+
+// MARK: - Pagination Types
+
+public struct PageInfo: Codable {
+    public let hasNextPage: Bool
+    public let endCursor: String?
+
+    public init(hasNextPage: Bool, endCursor: String?) {
+        self.hasNextPage = hasNextPage
+        self.endCursor = endCursor
+    }
+
+    public func toDict() -> [String: Any] {
+        var dict: [String: Any] = [
+            "hasNextPage": hasNextPage,
+        ]
+        if let endCursor = endCursor {
+            dict["endCursor"] = endCursor
+        } else {
+            dict["endCursor"] = NSNull()
+        }
+        return dict
+    }
+}
+
+// MARK: - Cursor Encoding/Decoding
+
+public enum CursorError: Error, LocalizedError {
+    case invalidCursor(String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .invalidCursor(let message):
+            return message
+        }
+    }
+}
+
+public func decodeCursor(_ cursor: String) throws -> Int {
+    guard let data = Data(base64Encoded: cursor) else {
+        throw CursorError.invalidCursor("Invalid cursor: not valid base64")
+    }
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let offset = json["offset"] as? Int else {
+        throw CursorError.invalidCursor("Invalid cursor: malformed cursor data")
+    }
+    if offset < 0 {
+        throw CursorError.invalidCursor("Invalid cursor: negative offset")
+    }
+    return offset
+}
+
+public func encodeCursor(offset: Int) throws -> String {
+    let json: [String: Any] = ["offset": offset]
+    let data = try JSONSerialization.data(withJSONObject: json)
+    return data.base64EncodedString()
 }
 
 // MARK: - Priority Conversion

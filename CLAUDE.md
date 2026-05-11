@@ -38,6 +38,8 @@ Apple Reminders Tools — A multi-target Swift project providing access to Apple
 
 **Test Safety**: Tests run with `AR_MCP_TEST_MODE=1` which restricts all write operations to lists prefixed with `[AR-MCP TEST]`. This prevents tests from modifying your real reminders.
 
+**SQLite test fixture**: `test/fixtures/jtest1-reminders-db/` contains a snapshot of a real Apple Reminders Core Data store layout (5 `Data-*.sqlite` files, ~4.2 MB total) captured from a dedicated test macOS account. Used by tests for the read-only SQLite enrichment path (epic `apple-reminders-mcp-rbf` — hashtags, parent/child, sections). All synthetic data, no PII. See [`test/fixtures/jtest1-reminders-db/README.md`](test/fixtures/jtest1-reminders-db/README.md).
+
 ## Architecture
 
 ### MCP Protocol
@@ -86,22 +88,54 @@ Sources/
 
 | Tool | Description |
 |------|-------------|
-| `query_reminders` | Search and filter reminders with JMESPath support |
-| `get_lists` | Get all reminder lists |
+| `query_reminders` | Search and filter reminders. Convention: structured params (list, status, searchText, per-field date ranges, hashtag, parentId/topLevelOnly, sectionId) filter at fetch time; the JMESPath `query` filters/projects on the result. Output reminders include `hashtags`, `parentId`, `childIds`, `section` when SQLite enrichment is available. See [`docs/query-reference.md`](docs/query-reference.md). |
+| `get_lists` | Get all reminder lists. Each list includes a `sections` array when SQLite enrichment is available. |
 | `create_list` | Create a new list |
 | `create_reminders` | Create one or more reminders (batch) |
 | `update_reminders` | Update reminders including mark complete/incomplete (batch) |
 | `delete_reminders` | Delete reminders (batch) |
 | `export_reminders` | Export reminders to JSON file for backup |
+| `list_hashtags` | Master hashtag inventory with usage counts (read-only SQLite enrichment) |
 | `help` | Get documentation for any tool (MCP meta-tool) |
 | `schema` | Get JSON input schema for any tool (MCP meta-tool) |
 | `guidance` | Get strategic best practices (MCP meta-tool) |
 
+### SQLite enrichment (read-only)
+
+A few fields — `hashtags`, `parentId`, `childIds`, `section` on reminders
+and `sections` on lists — are not exposed by EventKit. The MCP server /
+CLI reads them by opening the Apple Reminders Core Data SQLite store
+**read only** alongside the EventKit path. EventKit remains authoritative
+for all writes; the SQLite layer is purely an enrichment read-through.
+
+This requires Full Disk Access on the calling process / terminal. When
+unavailable, those fields are null and a single stderr warning explains
+how to grant access. See [`docs/sqlite-schema-notes.md`](docs/sqlite-schema-notes.md)
+for the on-disk format.
+
 ## CLI Usage
+
+**Query convention**: structured CLI flags (`--list`, `--status`, `--search`,
+`--created-from/-to`, `--modified-from/-to`, `--due-from/-to`, `--sort`,
+`--per-page`) filter at fetch time; the positional `[QUERY]` JMESPath
+expression filters and projects on the result. Order on the command line
+never changes results — flags always run first. Foundation reference:
+[`docs/query-reference.md`](docs/query-reference.md).
 
 ```bash
 # Query reminders (default command)
 reminders query --list "Work" --search "meeting" --status incomplete
+
+# JMESPath as positional argument
+reminders query --all-lists "[?priority == 'high']" --pretty
+
+# Per-field date ranges
+reminders query --due-from 2026-03-07 --due-to 2026-03-14 --sort dueDate
+reminders query --created-from 2026-04-30 --status all
+reminders query --modified-from 2026-05-01 --pretty
+
+# Case-insensitive matching via project-specific lower() / upper() functions
+reminders query "[?contains(lower(title), 'meeting')]" --pretty
 
 # List all reminder lists
 reminders lists
@@ -115,6 +149,16 @@ reminders update <id> --title "New title" --priority high
 
 # Delete reminders
 reminders delete <id1> <id2>
+
+# Hashtag inventory (SQLite enrichment; needs Full Disk Access)
+reminders hashtags --pretty
+reminders hashtags --all --pretty                  # Include zero-usage tags
+
+# Filter by enrichment fields
+reminders query --hashtag work --pretty
+reminders query --top-level --pretty               # Reminders with no parent
+reminders query --parent <reminder-uuid> --pretty  # Direct children
+reminders query --list "Groceries" --section "Breads & Cereals"
 
 # Export reminders
 reminders export --path ~/backup.json --include-completed
@@ -187,6 +231,18 @@ For auto-snapshots via MCP server, set environment variables:
 }
 ```
 
+For CLI auto-snapshots around mutations (`create`, `create-list`, `update`,
+`delete`), set `AR_SNAPSHOT_ENABLED=1` (and optionally `AR_SNAPSHOT_REPO`):
+
+```bash
+export AR_SNAPSHOT_ENABLED=1
+reminders update <id> --complete   # post-snapshot runs after the mutation
+```
+
+A pre-snapshot also runs when the repo is uninitialized or its last snapshot
+is more than 7 days old. Snapshot failures warn to stderr but never abort
+the mutation.
+
 ## Completed Enhancements
 
 - [x] Add alarm support (absolute + relative)
@@ -227,3 +283,5 @@ Follow the protocol in @docs/prompts/PROJECT_STATE_PROTOCOLS.md
 
 Be aware that messages from the user may contain speech-to-text (S2T) artifacts. S2T Guidelines: @docs/prompts/S2T_GUIDELINES.md
 
+
+@docs/prompts/BEADS.md

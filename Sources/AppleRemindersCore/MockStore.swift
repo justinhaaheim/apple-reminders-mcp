@@ -92,6 +92,68 @@ public class MockReminderStore: ReminderStore {
         defaultCalendarId = defaultCalendar.id
     }
 
+    // MARK: - Seed Data API
+
+    /// Inject seed data directly into the mock store via the _seed_mock_data MCP tool.
+    /// Accepts lists and reminders arrays from the tool arguments.
+    func seedData(from arguments: [String: AnyCodable]) throws {
+        // Seed lists
+        if let listsArray = arguments["lists"]?.value as? [[String: Any]] {
+            for listDict in listsArray {
+                guard let id = listDict["id"] as? String,
+                      let name = listDict["name"] as? String else {
+                    throw RemindersError("Seed list requires 'id' and 'name'")
+                }
+                let isDefault = listDict["isDefault"] as? Bool ?? false
+
+                if let existingIndex = calendars.firstIndex(where: { $0.id == id }) {
+                    calendars[existingIndex] = MockCalendar(id: id, name: name)
+                } else {
+                    calendars.append(MockCalendar(id: id, name: name))
+                }
+                if isDefault {
+                    defaultCalendarId = id
+                }
+            }
+        }
+
+        // Seed reminders
+        if let remindersArray = arguments["reminders"]?.value as? [[String: Any]] {
+            for dict in remindersArray {
+                guard let id = dict["id"] as? String,
+                      let title = dict["title"] as? String,
+                      let listId = dict["listId"] as? String else {
+                    throw RemindersError("Seed reminder requires 'id', 'title', and 'listId'")
+                }
+
+                let reminder = MockReminder(id: id, title: title, calendarId: listId, store: self)
+                reminder.notes = dict["notes"] as? String
+                if let priorityStr = dict["priority"] as? String {
+                    reminder.priority = Priority.fromString(priorityStr)?.internalValue ?? 0
+                }
+                if let urlString = dict["url"] as? String, let url = URL(string: urlString) {
+                    reminder.url = url
+                }
+                if let isCompleted = dict["isCompleted"] as? Bool, isCompleted {
+                    reminder.completionDate = Date()
+                }
+                if let dueDateStr = dict["dueDate"] as? String,
+                   let dueDate = Date.fromISO8601(dueDateStr) {
+                    reminder.dueDateComponents = Calendar.current.dateComponents(
+                        [.year, .month, .day, .hour, .minute],
+                        from: dueDate
+                    )
+                }
+
+                reminders.append(reminder)
+            }
+        }
+
+        let listCount = (arguments["lists"]?.value as? [[String: Any]])?.count ?? 0
+        let reminderCount = (arguments["reminders"]?.value as? [[String: Any]])?.count ?? 0
+        log("Seeded mock store: \(listCount) lists, \(reminderCount) reminders")
+    }
+
     public func requestAccess() async throws -> Bool {
         return true
     }
@@ -110,7 +172,12 @@ public class MockReminderStore: ReminderStore {
         return calendar
     }
 
-    public func fetchReminders(in calendars: [ReminderCalendar], status: ReminderStatus) async -> [Reminder] {
+    public func fetchReminders(
+        in calendars: [ReminderCalendar],
+        status: ReminderStatus,
+        dueDateStart: Date?,
+        dueDateEnd: Date?
+    ) async -> [Reminder] {
         let calendarIds = Set(calendars.map { $0.id })
 
         return reminders.filter { reminder in
@@ -118,12 +185,25 @@ public class MockReminderStore: ReminderStore {
 
             switch status {
             case .completed:
-                return reminder.isCompleted
+                guard reminder.isCompleted else { return false }
             case .incomplete:
-                return !reminder.isCompleted
+                guard !reminder.isCompleted else { return false }
             case .all:
-                return true
+                break
             }
+
+            // Mirror EventKit's predicateForIncompleteReminders(withDueDateStarting:ending:)
+            // semantics for parity. Only applied to incomplete reminders; otherwise the
+            // RemindersManager post-filters dueFrom/dueTo.
+            if status == .incomplete, dueDateStart != nil || dueDateEnd != nil {
+                guard var components = reminder.dueDateComponents else { return false }
+                if components.calendar == nil { components.calendar = Calendar.current }
+                guard let dueDate = components.date else { return false }
+                if let start = dueDateStart, dueDate < start { return false }
+                if let end = dueDateEnd, dueDate > end { return false }
+            }
+
+            return true
         }
     }
 

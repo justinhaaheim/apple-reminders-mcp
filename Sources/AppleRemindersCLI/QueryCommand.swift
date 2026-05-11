@@ -10,6 +10,12 @@ struct QueryCommand: AsyncParsableCommand {
 
     @OptionGroup var globals: GlobalOptions
 
+    @Argument(help: ArgumentHelp(
+        "JMESPath expression applied after CLI flag filters. Use quotes; precede with -- if it starts with '-'.",
+        valueName: "query"
+    ))
+    var query: String?
+
     @Option(name: .long, help: "Filter by list name")
     var list: String?
 
@@ -28,22 +34,71 @@ struct QueryCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Sort by: newest, oldest, priority, dueDate")
     var sort: String?
 
-    @Option(name: .long, help: "Maximum number of results (default: 50, max: 200)")
-    var limit: Int?
+    @Option(name: .long, help: "Results per page (auto-paginates at 200 when omitted)")
+    var perPage: Int?
 
-    @Option(name: .long, help: "Date range start (ISO 8601)")
-    var from: String?
+    @Option(name: .long, help: "Opaque cursor from previous response's pageInfo.endCursor for next page")
+    var cursor: String?
 
-    @Option(name: .long, help: "Date range end (ISO 8601)")
-    var to: String?
+    @Option(name: .long, help: "Filter by createdDate >= ISO 8601 date (or YYYY-MM-DD)")
+    var createdFrom: String?
 
-    @Option(name: .long, help: "JMESPath query expression")
-    var jmespath: String?
+    @Option(name: .long, help: "Filter by createdDate <= ISO 8601 date (or YYYY-MM-DD)")
+    var createdTo: String?
+
+    @Option(name: .long, help: "Filter by lastModifiedDate >= ISO 8601 date (or YYYY-MM-DD)")
+    var modifiedFrom: String?
+
+    @Option(name: .long, help: "Filter by lastModifiedDate <= ISO 8601 date (or YYYY-MM-DD)")
+    var modifiedTo: String?
+
+    @Option(name: .long, help: "Filter by dueDate >= ISO 8601 date (or YYYY-MM-DD)")
+    var dueFrom: String?
+
+    @Option(name: .long, help: "Filter by dueDate <= ISO 8601 date (or YYYY-MM-DD)")
+    var dueTo: String?
 
     @Option(name: .long, help: "Output detail level: minimal, compact, full")
     var detail: String?
 
+    @Option(name: .long, help: "Filter by hashtag (case-insensitive on canonical name)")
+    var hashtag: String?
+
+    @Option(name: .long, help: "Filter to direct children of the given reminder UUID (mutually exclusive with --top-level)")
+    var parent: String?
+
+    @Flag(name: .long, help: "Filter to top-level reminders only (mutually exclusive with --parent)")
+    var topLevel: Bool = false
+
+    @Option(name: .long, help: "Filter by section (matches section UUID or display name, case-insensitive)")
+    var section: String?
+
+    private static let validStatuses = ["incomplete", "completed", "all"]
+    private static let validSorts = ["newest", "oldest", "priority", "dueDate"]
+    private static let validDetails = ["minimal", "compact", "full"]
+
     func run() async throws {
+        // Validate enum-like options
+        if let status = status, !Self.validStatuses.contains(status) {
+            throw ValidationError("Invalid --status '\(status)'. Must be one of: \(Self.validStatuses.joined(separator: ", "))")
+        }
+        if let sort = sort, !Self.validSorts.contains(sort) {
+            throw ValidationError("Invalid --sort '\(sort)'. Must be one of: \(Self.validSorts.joined(separator: ", "))")
+        }
+        if let detail = detail, !Self.validDetails.contains(detail) {
+            throw ValidationError("Invalid --detail '\(detail)'. Must be one of: \(Self.validDetails.joined(separator: ", "))")
+        }
+
+        // Validate list selector mutual exclusivity
+        let listOptionCount = [list != nil, listId != nil, allLists].filter { $0 }.count
+        if listOptionCount > 1 {
+            throw ValidationError("Specify only one of --list, --list-id, or --all-lists")
+        }
+
+        if parent != nil && topLevel {
+            throw ValidationError("--parent and --top-level are mutually exclusive")
+        }
+
         let manager = try await createManager(options: globals)
 
         let listSelector: ListSelector?
@@ -61,12 +116,21 @@ struct QueryCommand: AsyncParsableCommand {
             list: listSelector,
             status: status,
             sortBy: sort,
-            query: jmespath,
-            limit: limit,
+            query: query,
+            perPage: perPage,
+            cursor: cursor,
             searchText: search,
-            dateFrom: from,
-            dateTo: to,
-            outputDetail: detail
+            createdFrom: createdFrom,
+            createdTo: createdTo,
+            modifiedFrom: modifiedFrom,
+            modifiedTo: modifiedTo,
+            dueFrom: dueFrom,
+            dueTo: dueTo,
+            outputDetail: detail,
+            hashtag: hashtag,
+            parentId: parent,
+            topLevelOnly: topLevel,
+            sectionId: section
         )
 
         try outputJSON(result, pretty: globals.pretty)

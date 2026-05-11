@@ -9,6 +9,33 @@ plugin skill (with frontmatter), see [`skills/reminders/SKILL.md`](skills/remind
 > **Binary**: `reminders` (built from this repo)
 > **Output**: All commands output JSON to stdout. Logs go to stderr.
 
+## SQLite enrichment (read-only)
+
+Some fields aren't exposed by EventKit and come from a direct read-only
+read of Apple's Reminders Core Data SQLite store:
+
+- On reminders: `hashtags`, `parentId`, `childIds`, `section`
+- On lists: `sections`
+- New command: `reminders hashtags`
+- New filters on `reminders query`: `--hashtag`, `--parent`, `--top-level`, `--section`
+- New MCP tool: `list_hashtags`
+
+Requires Full Disk Access on the calling terminal. Without it, the
+enrichment fields are `null` and the filters skip with a single stderr
+warning. EventKit remains authoritative for writes; the SQLite layer
+never writes.
+
+## Query convention
+
+Structured CLI flags (`--list`, `--status`, `--search`, `--created-from/-to`,
+`--modified-from/-to`, `--due-from/-to`, `--sort`, `--per-page`) filter at
+fetch time. The positional `[QUERY]` JMESPath expression filters and
+projects on the result. Order on the command line never changes results —
+flags always run first.
+
+For the full picture (recipes, JMESPath fundamentals, project-specific
+`lower()` / `upper()` extensions), see [`docs/query-reference.md`](docs/query-reference.md).
+
 ## Quick Reference
 
 ```bash
@@ -16,7 +43,7 @@ plugin skill (with frontmatter), see [`skills/reminders/SKILL.md`](skills/remind
 reminders query                                          # Incomplete reminders from default list
 reminders query --list "Work" --search "standup"         # Search within a list
 reminders query --all-lists --status all --detail full   # Everything, full detail
-reminders query --sort dueDate --limit 10                # Upcoming due dates
+reminders query --sort dueDate --per-page 10              # Upcoming due dates
 
 # Lists
 reminders lists                                          # All reminder lists
@@ -49,6 +76,14 @@ reminders export --path ~/backup.json --include-completed
 reminders snapshot                                       # Take a snapshot
 reminders snapshot status                                # Show repo info
 reminders snapshot diff                                  # Changes since last snapshot
+
+# SQLite enrichment (needs Full Disk Access)
+reminders hashtags --pretty                              # Master hashtag inventory
+reminders hashtags --all --pretty                        # Include zero-usage tags
+reminders query --hashtag work                           # Filter by hashtag (ci)
+reminders query --top-level                              # No parent
+reminders query --parent <reminder-uuid>                 # Direct children
+reminders query --list "Groceries" --section "Breads & Cereals"
 
 # MCP server
 reminders mcp                                            # Start JSON-RPC server on stdio
@@ -89,7 +124,8 @@ Control how much data is returned:
 
 All dates use ISO 8601 with timezone: `2026-03-07T09:00:00-08:00`
 
-Date-only format also works for `--from`/`--to`: `2026-03-07`
+Date-only format also works for the per-field date flags
+(`--created-from`/`-to`, `--modified-from`/`-to`, `--due-from`/`-to`): `2026-03-07`
 
 ### Clearable Fields
 
@@ -101,15 +137,23 @@ On update, some fields can be cleared (set to null) with `--clear-*` flags:
 
 ### JMESPath Queries
 
-Advanced filtering with `--jmespath`:
+JMESPath is the positional `[QUERY]` argument:
 
 ```bash
 # Get just titles of high-priority reminders
-reminders query --all-lists --detail full --jmespath "[?priority=='high'].title"
+reminders query --all-lists "[?priority=='high'].title"
 
 # Count by list
-reminders query --all-lists --jmespath "length([?listName=='Work'])"
+reminders query --all-lists "length([?listName=='Work'])"
+
+# Case-insensitive (project extension):
+reminders query "[?contains(lower(title), 'meeting')]"
 ```
+
+`--sort`, `--detail`, and pagination are bypassed when JMESPath is supplied
+— sort with `sort_by(@, &field)`, slice with `[N:M]`. See
+[`docs/query-reference.md`](docs/query-reference.md) for fundamentals,
+recipes, and the `lower()` / `upper()` extensions.
 
 ## Global Options
 
@@ -128,10 +172,10 @@ All commands support:
 
 ```bash
 # What's due today or overdue?
-reminders query --all-lists --status incomplete --from "$(date -I)" --sort dueDate --pretty
+reminders query --all-lists --status incomplete --due-from "$(date -I)" --sort dueDate --pretty
 
-# What did I complete recently?
-reminders query --all-lists --status completed --from "$(date -v-7d -I)" --sort newest --pretty
+# What did I complete recently? (no --completed-from flag — use JMESPath for completedDate)
+reminders query --all-lists --status completed --modified-from "$(date -v-7d -I)" --sort newest --pretty
 ```
 
 ### Task Management
@@ -149,11 +193,11 @@ for id in id1 id2 id3; do reminders update "$id" --complete; done
 
 ```bash
 # Get IDs of all incomplete Work reminders
-reminders query --list "Work" --detail minimal | jq -r '.[].id'
+reminders query --list "Work" --detail minimal | jq -r '.reminders[].id'
 
 # Pretty table of upcoming due dates
 reminders query --all-lists --sort dueDate --detail compact | \
-  jq -r '.[] | [.title, .dueDate // "no date", .priority] | @tsv'
+  jq -r '.reminders[] | [.title, .dueDate // "no date", .priority] | @tsv'
 ```
 
 ### Backup Workflow
@@ -174,10 +218,11 @@ reminders export --path ~/reminders-backup.json --include-completed --pretty
 
 ## Environment Variables
 
-| Variable                      | Description                                      |
-| ----------------------------- | ------------------------------------------------ |
-| `AR_MCP_TEST_MODE=1`          | Enable test mode (restrict writes to test lists) |
-| `AR_MCP_MOCK_MODE=1`          | Use mock store                                   |
-| `AR_MCP_SNAPSHOT_ENABLED=1`   | Enable auto-snapshots in MCP server              |
-| `AR_MCP_SNAPSHOT_REPO=<path>` | Snapshot repository path                         |
-| `AR_SNAPSHOT_REPO=<path>`     | Snapshot repository path (CLI)                   |
+| Variable                      | Description                                                                                                                  |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `AR_MCP_TEST_MODE=1`          | Enable test mode (restrict writes to test lists)                                                                             |
+| `AR_MCP_MOCK_MODE=1`          | Use mock store                                                                                                               |
+| `AR_MCP_SNAPSHOT_ENABLED=1`   | Enable auto-snapshots in MCP server                                                                                          |
+| `AR_MCP_SNAPSHOT_REPO=<path>` | Snapshot repository path                                                                                                     |
+| `AR_SNAPSHOT_ENABLED=1`       | Enable CLI auto-snapshots around mutations (post always; pre only if repo is uninitialized or last snapshot is > 7 days old) |
+| `AR_SNAPSHOT_REPO=<path>`     | Snapshot repository path (CLI)                                                                                               |

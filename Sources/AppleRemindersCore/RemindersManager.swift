@@ -4,11 +4,24 @@ import JMESPath
 // MARK: - Reminders Manager
 
 public class RemindersManager {
-    private let store: ReminderStore
+    public let store: ReminderStore
     private var hasAccess = false
 
-    public init(store: ReminderStore) {
+    /// Optional read-only DB readers used to enrich reminders with fields
+    /// that EventKit doesn't expose (hashtags, parent/child, sections).
+    /// Empty when the binary's caller lacks Full Disk Access or the
+    /// container is unreachable.
+    public var dbReaders: [ReminderDBReader]
+
+    public init(store: ReminderStore, dbReaders: [ReminderDBReader] = []) {
         self.store = store
+        self.dbReaders = dbReaders
+    }
+
+    /// True when at least one DB reader is wired up; callers can use this
+    /// to switch behaviour between "enrichment available" vs. "EventKit-only".
+    public var hasDBEnrichment: Bool {
+        return !dbReaders.isEmpty
     }
 
     // MARK: - Access
@@ -27,10 +40,24 @@ public class RemindersManager {
         let defaultCalendar = store.getDefaultCalendar()
 
         return calendars.map { calendar in
-            ReminderListOutput(
+            // When DB enrichment is available, attach the list's sections.
+            // Multiple stores might know about the same list (rare, e.g.
+            // shared-list replicas) — use the first non-empty result.
+            var sections: [SectionInfo]? = nil
+            if hasDBEnrichment {
+                sections = []
+                for reader in dbReaders {
+                    if let found = try? reader.sections(forListUUID: calendar.id), !found.isEmpty {
+                        sections = found
+                        break
+                    }
+                }
+            }
+            return ReminderListOutput(
                 id: calendar.id,
                 name: calendar.name,
-                isDefault: calendar.id == defaultCalendar?.id
+                isDefault: calendar.id == defaultCalendar?.id,
+                sections: sections
             )
         }
     }
@@ -162,7 +189,12 @@ public class RemindersManager {
         let normalized = id.uppercased().replacingOccurrences(of: "-", with: "")
 
         // Fetch all reminders to search for prefix match
-        let allReminders = await store.fetchReminders(in: store.getAllCalendars(), status: .all)
+        let allReminders = await store.fetchReminders(
+            in: store.getAllCalendars(),
+            status: .all,
+            dueDateStart: nil,
+            dueDateEnd: nil
+        )
         let matches = allReminders.filter { reminder in
             let normalizedStored = reminder.id.uppercased().replacingOccurrences(of: "-", with: "")
             return normalizedStored.hasPrefix(normalized)
@@ -206,12 +238,24 @@ public class RemindersManager {
         status: String?,
         sortBy: String?,
         query: String?,
-        limit: Int?,
+        perPage: Int?,
+        cursor: String?,
         searchText: String?,
-        dateFrom: String?,
-        dateTo: String?,
-        outputDetail: String?
+        createdFrom: String?,
+        createdTo: String?,
+        modifiedFrom: String?,
+        modifiedTo: String?,
+        dueFrom: String?,
+        dueTo: String?,
+        outputDetail: String?,
+        hashtag: String? = nil,
+        parentId: String? = nil,
+        topLevelOnly: Bool = false,
+        sectionId: String? = nil
     ) async throws -> Any {
+        if parentId != nil && topLevelOnly {
+            throw RemindersError("--parent and --top-level are mutually exclusive")
+        }
         let startTime = Date()
         log("Starting queryReminders")
 
@@ -230,7 +274,27 @@ public class RemindersManager {
             reminderStatus = .all
         }
 
-        var filteredReminders = await store.fetchReminders(in: calendars, status: reminderStatus)
+        // Parse all date filters up-front so we can fail fast on bad input.
+        let createdFromDate = try parseDateFilter(createdFrom, fieldName: "createdFrom")
+        let createdToDate = try parseDateFilter(createdTo, fieldName: "createdTo")
+        let modifiedFromDate = try parseDateFilter(modifiedFrom, fieldName: "modifiedFrom")
+        let modifiedToDate = try parseDateFilter(modifiedTo, fieldName: "modifiedTo")
+        let dueFromDate = try parseDateFilter(dueFrom, fieldName: "dueFrom")
+        let dueToDate = try parseDateFilter(dueTo, fieldName: "dueTo")
+
+        // Push due-date range into EventKit's incomplete predicate when status allows.
+        // For completed/all, the date range can't be expressed as a predicate (the
+        // completed-reminders predicate filters on completionDate, not dueDate), so
+        // we post-filter below.
+        let pushedDueStart: Date? = reminderStatus == .incomplete ? dueFromDate : nil
+        let pushedDueEnd: Date? = reminderStatus == .incomplete ? dueToDate : nil
+
+        var filteredReminders = await store.fetchReminders(
+            in: calendars,
+            status: reminderStatus,
+            dueDateStart: pushedDueStart,
+            dueDateEnd: pushedDueEnd
+        )
 
         let fetchTime = Date().timeIntervalSince(startTime)
         log("Fetched \(filteredReminders.count) reminders in \(Int(fetchTime * 1000))ms")
@@ -250,60 +314,122 @@ public class RemindersManager {
             log("searchText filter '\(searchText)' reduced to \(filteredReminders.count) reminders")
         }
 
-        // 2c. Apply date range filter on raw Reminder objects (avoids Date→String→Date round-trip)
-        if dateFrom != nil || dateTo != nil {
-            let fromDate: Date? = dateFrom != nil ? Date.fromISO8601(dateFrom!) : nil
-            let toDate: Date? = dateTo != nil ? Date.fromISO8601(dateTo!) : nil
-
-            if dateFrom != nil && fromDate == nil {
-                throw RemindersError("Invalid dateFrom format: '\(dateFrom!)'. Expected ISO 8601.")
-            }
-            if dateTo != nil && toDate == nil {
-                throw RemindersError("Invalid dateTo format: '\(dateTo!)'. Expected ISO 8601.")
-            }
-
+        // 2c. Apply per-field date range filters. createdFrom/createdTo and
+        // modifiedFrom/modifiedTo are always post-fetch filters. dueFrom/dueTo is
+        // post-filter for non-incomplete status (incomplete pushes down to predicate).
+        let needsDuePostFilter = reminderStatus != .incomplete && (dueFromDate != nil || dueToDate != nil)
+        if createdFromDate != nil || createdToDate != nil ||
+           modifiedFromDate != nil || modifiedToDate != nil ||
+           needsDuePostFilter {
             filteredReminders = filteredReminders.filter { reminder in
-                // For completed reminders, filter by completionDate
-                // For incomplete reminders, filter by dueDate from dueDateComponents
-                let reminderDate: Date?
-                if reminder.isCompleted {
-                    reminderDate = reminder.completionDate
-                } else {
+                if let creation = reminder.creationDate {
+                    if let from = createdFromDate, creation < from { return false }
+                    if let to = createdToDate, creation > to { return false }
+                } else if createdFromDate != nil || createdToDate != nil {
+                    return false
+                }
+
+                if let modified = reminder.lastModifiedDate {
+                    if let from = modifiedFromDate, modified < from { return false }
+                    if let to = modifiedToDate, modified > to { return false }
+                } else if modifiedFromDate != nil || modifiedToDate != nil {
+                    return false
+                }
+
+                if needsDuePostFilter {
                     var components = reminder.dueDateComponents
                     if components != nil && components!.calendar == nil {
                         components!.calendar = Calendar.current
                     }
-                    reminderDate = components?.date
+                    guard let dueDate = components?.date else { return false }
+                    if let from = dueFromDate, dueDate < from { return false }
+                    if let to = dueToDate, dueDate > to { return false }
                 }
 
-                guard let date = reminderDate else {
-                    return false  // No date = excluded from date range filter
-                }
-
-                if let from = fromDate, date < from {
-                    return false
-                }
-                if let to = toDate, date > to {
-                    return false
-                }
                 return true
             }
-            log("Date range filter reduced to \(filteredReminders.count) reminders")
+            log("Per-field date filters reduced to \(filteredReminders.count) reminders")
         }
 
         // Convert to output format
         var reminderOutputs = filteredReminders.map { convertToOutput($0) }
 
+        // 2d. Enrich with SQLite-derived fields (hashtags, etc.) before
+        //     applying any post-conversion filters or JMESPath. Single
+        //     batched query per reader; no-op when dbReaders is empty.
+        enrich(&reminderOutputs)
+
+        // 2e. Hashtag filter (DB-derived, post-fetch). Case-insensitive on
+        //     canonical name. Skipped silently when DB enrichment is
+        //     unavailable — degrade gracefully rather than error.
+        if let hashtag = hashtag, !hashtag.isEmpty {
+            if hasDBEnrichment {
+                let needle = hashtag.lowercased()
+                reminderOutputs = reminderOutputs.filter { reminder in
+                    guard let tags = reminder.hashtags else { return false }
+                    return tags.contains { $0.lowercased() == needle }
+                }
+                log("Hashtag filter '\(hashtag)' reduced to \(reminderOutputs.count) reminders")
+            } else {
+                ReminderDBReader.warnOnce(
+                    "hashtag-filter-no-enrichment",
+                    "--hashtag filter requested but DB enrichment is unavailable; returning unfiltered results. Grant Full Disk Access to enable hashtag filtering."
+                )
+            }
+        }
+
+        // 2f. Parent / top-level filter (DB-derived, post-fetch). Same
+        //     graceful-degrade contract as the hashtag filter.
+        if topLevelOnly {
+            if hasDBEnrichment {
+                reminderOutputs = reminderOutputs.filter { $0.parentId == nil }
+                log("--top-level filter reduced to \(reminderOutputs.count) reminders")
+            } else {
+                ReminderDBReader.warnOnce(
+                    "top-level-filter-no-enrichment",
+                    "--top-level filter requested but DB enrichment is unavailable; returning unfiltered results. Grant Full Disk Access to enable parent/child filtering."
+                )
+            }
+        } else if let parentId = parentId, !parentId.isEmpty {
+            if hasDBEnrichment {
+                reminderOutputs = reminderOutputs.filter { $0.parentId == parentId }
+                log("--parent \(parentId) filter reduced to \(reminderOutputs.count) reminders")
+            } else {
+                ReminderDBReader.warnOnce(
+                    "parent-filter-no-enrichment",
+                    "--parent filter requested but DB enrichment is unavailable; returning unfiltered results. Grant Full Disk Access to enable parent/child filtering."
+                )
+            }
+        }
+
+        // 2g. Section filter (DB-derived, post-fetch). Matches by section
+        //     UUID OR display name (case-insensitive). Same graceful-
+        //     degrade contract as the other DB filters.
+        if let sectionId = sectionId, !sectionId.isEmpty {
+            if hasDBEnrichment {
+                let needle = sectionId.lowercased()
+                reminderOutputs = reminderOutputs.filter { reminder in
+                    guard let section = reminder.section else { return false }
+                    return section.id.lowercased() == needle
+                        || section.name.lowercased() == needle
+                }
+                log("--section filter reduced to \(reminderOutputs.count) reminders")
+            } else {
+                ReminderDBReader.warnOnce(
+                    "section-filter-no-enrichment",
+                    "--section filter requested but DB enrichment is unavailable; returning unfiltered results. Grant Full Disk Access to enable section filtering."
+                )
+            }
+        }
+
         // 3. Apply JMESPath if provided — always uses full fields, outputDetail is ignored
+        //    When JMESPath is used, return full result with no pagination (users can use JMESPath slicing)
         if let jmesQuery = query, !jmesQuery.isEmpty {
             do {
                 let result = try applyJMESPath(reminderOutputs, query: jmesQuery)
-                // Apply limit after JMESPath
-                let maxResults = min(limit ?? 50, 200)
                 if let arrayResult = result as? [Any] {
-                    let limited = Array(arrayResult.prefix(maxResults))
-                    log("JMESPath returned \(arrayResult.count) items, limited to \(limited.count)")
-                    return limited
+                    log("JMESPath returned \(arrayResult.count) items")
+                    return arrayResult
                 }
                 return result
             } catch {
@@ -315,28 +441,97 @@ public class RemindersManager {
         let sortOrder = sortBy ?? "newest"
         reminderOutputs = applySorting(reminderOutputs, sortBy: sortOrder)
 
-        // 5. Apply limit
-        let maxResults = min(limit ?? 50, 200)
-        if reminderOutputs.count > maxResults {
-            reminderOutputs = Array(reminderOutputs.prefix(maxResults))
+        // 5. Pagination
+        let totalCount = reminderOutputs.count
+        let autoPageSize = 200
+        let maxPageSize = 1000
+
+        // Validate perPage bounds
+        if let pp = perPage {
+            if pp < 1 {
+                throw RemindersError("perPage must be at least 1, got \(pp)")
+            }
+            if pp > maxPageSize {
+                throw RemindersError("perPage must be at most \(maxPageSize), got \(pp)")
+            }
         }
 
+        // Decode cursor to get offset
+        let offset: Int
+        if let cursorString = cursor {
+            offset = try decodeCursor(cursorString)
+        } else {
+            offset = 0
+        }
+
+        // Determine page size
+        let pageSize: Int
+        if let pp = perPage {
+            pageSize = pp
+        } else if totalCount > autoPageSize {
+            pageSize = autoPageSize
+        } else {
+            pageSize = totalCount
+        }
+
+        // Slice results
+        let sliceStart = min(offset, totalCount)
+        let sliceEnd = min(offset + pageSize, totalCount)
+        let pageReminders = Array(reminderOutputs[sliceStart..<sliceEnd])
+
+        let hasNextPage = sliceEnd < totalCount
+        let endCursor: String? = hasNextPage ? try encodeCursor(offset: sliceEnd) : nil
+
+        let pageInfo = PageInfo(
+            hasNextPage: hasNextPage,
+            endCursor: endCursor
+        )
+
         let totalTime = Date().timeIntervalSince(startTime)
-        log("Total query took \(Int(totalTime * 1000))ms, returning \(reminderOutputs.count) reminders")
+        log("Total query took \(Int(totalTime * 1000))ms, returning \(pageReminders.count) of \(totalCount) reminders")
 
         // 6. Apply outputDetail field filtering
         let detail = outputDetail ?? "compact"
         let isSingleList = list == nil || list?.all != true
-        return formatReminders(reminderOutputs, outputDetail: detail, isSingleList: isSingleList, statusFilter: reminderStatus)
+        let formattedReminders = formatReminders(pageReminders, outputDetail: detail, isSingleList: isSingleList, statusFilter: reminderStatus)
+
+        // 7. Build wrapper response
+        //
+        // `enriched`: true when at least one DB reader was available during
+        // this query, meaning DB-derived fields (hashtags, parentId,
+        // childIds, section) reflect real data — `null` means "absent",
+        // `[]` means "none". When `enriched` is false, those fields are
+        // always nil/unset and should be treated as "unknown."
+        //
+        // TODO(apple-reminders-mcp-qgb): revisit whether the per-field
+        // nil-vs-unknown ambiguity needs structural distinction (e.g.
+        // moving DB-derived fields under a nested `enriched` object).
+        // Tracked as a P4 question bead.
+        let response: [String: Any] = [
+            "reminders": formattedReminders,
+            "totalCount": totalCount,
+            "pageInfo": pageInfo.toDict(),
+            "enriched": hasDBEnrichment,
+        ]
+        return response
+    }
+
+    private func parseDateFilter(_ value: String?, fieldName: String) throws -> Date? {
+        guard let value = value, !value.isEmpty else { return nil }
+        guard let date = Date.fromISO8601(value) else {
+            throw RemindersError("Invalid \(fieldName) format: '\(value)'. Expected ISO 8601 (e.g. '2026-04-30' or '2026-04-30T17:00:00-08:00').")
+        }
+        return date
     }
 
     private func applyJMESPath(_ reminders: [ReminderOutput], query: String) throws -> Any {
         // Convert reminders to JSON data
         let jsonData = try JSONEncoder().encode(reminders)
 
-        // Compile and run JMESPath expression
+        // Compile and run JMESPath expression with project-specific runtime
+        // (registers lower() and upper() extensions).
         let expression = try JMESExpression.compile(query)
-        let result = try expression.search(json: jsonData)
+        let result = try expression.search(json: jsonData, runtime: makeJMESRuntime())
         return result ?? []
     }
 
@@ -344,7 +539,8 @@ public class RemindersManager {
     private static let minimalFields: Set<String> = ["id", "title", "listName", "isCompleted"]
     private static let compactFields: Set<String> = [
         "id", "title", "notes", "listName", "isCompleted",
-        "dueDate", "priority", "createdDate", "lastModifiedDate"
+        "dueDate", "priority", "createdDate", "modifiedDate",
+        "hashtags", "parentId", "childIds", "section"
     ]
     // "full" uses all fields — no filtering needed
 
@@ -429,9 +625,9 @@ public class RemindersManager {
             "priority": reminder.priority,
             "dueDate": reminder.dueDate as Any? ?? NSNull(),
             "dueDateIncludesTime": reminder.dueDateIncludesTime as Any? ?? NSNull(),
-            "completionDate": reminder.completionDate as Any? ?? NSNull(),
+            "completedDate": reminder.completedDate as Any? ?? NSNull(),
             "createdDate": reminder.createdDate,
-            "lastModifiedDate": reminder.lastModifiedDate,
+            "modifiedDate": reminder.modifiedDate,
             "url": reminder.url as Any? ?? NSNull(),
         ]
 
@@ -447,6 +643,33 @@ public class RemindersManager {
             dict["recurrenceRules"] = rules.map { $0.toDict() }
         } else {
             dict["recurrenceRules"] = NSNull()
+        }
+
+        // Hashtags: array (possibly empty) when DB enrichment populated
+        // the field, NSNull when DB enrichment is unavailable. The
+        // distinction matters: empty means "this reminder has no tags",
+        // null means "we don't know."
+        if let hashtags = reminder.hashtags {
+            dict["hashtags"] = hashtags
+        } else {
+            dict["hashtags"] = NSNull()
+        }
+
+        // parentId / childIds: same enrichment contract as hashtags.
+        dict["parentId"] = reminder.parentId as Any? ?? NSNull()
+        if let childIds = reminder.childIds {
+            dict["childIds"] = childIds
+        } else {
+            dict["childIds"] = NSNull()
+        }
+
+        // Section: dict with id+name when populated, NSNull otherwise.
+        if let section = reminder.section {
+            var sec: [String: Any] = ["id": section.id, "name": section.name]
+            if let canonical = section.canonicalName { sec["canonicalName"] = canonical }
+            dict["section"] = sec
+        } else {
+            dict["section"] = NSNull()
         }
 
         return dict
@@ -529,9 +752,9 @@ public class RemindersManager {
                 return components.date?.toISO8601WithTimezone()
             }(),
             dueDateIncludesTime: reminder.dueDateComponents != nil ? !reminder.isAllDay : nil,
-            completionDate: reminder.completionDate?.toISO8601WithTimezone(),
+            completedDate: reminder.completionDate?.toISO8601WithTimezone(),
             createdDate: reminder.creationDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
-            lastModifiedDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
+            modifiedDate: reminder.lastModifiedDate?.toISO8601WithTimezone() ?? Date().toISO8601WithTimezone(),
             url: reminder.url?.absoluteString,
             alarms: alarmOutputs,
             recurrenceRules: recurrenceOutputs
@@ -557,6 +780,12 @@ public class RemindersManager {
     }
 
     private func createSingleReminder(_ input: CreateReminderInput) throws -> ReminderOutput {
+        // Validate non-empty title
+        let trimmedTitle = input.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedTitle.isEmpty {
+            throw RemindersError("Reminder title cannot be empty")
+        }
+
         let calendar = try resolveListForCreate(input.list)
 
         // Test mode validation
@@ -570,7 +799,7 @@ public class RemindersManager {
         // Create reminder via the protocol
         let reminder = try store.createReminder(in: calendar)
 
-        var mutableReminder = reminder
+        let mutableReminder = reminder
         mutableReminder.title = input.title
 
         if let notes = input.notes {
@@ -654,7 +883,7 @@ public class RemindersManager {
     }
 
     private func updateSingleReminder(_ input: UpdateReminderInput) async throws -> ReminderOutput {
-        var reminder = try await resolveReminder(id: input.id)
+        let reminder = try await resolveReminder(id: input.id)
 
         // Capture before-state for audit logging
         let beforeState = encodeToDict(convertToOutput(reminder))
@@ -959,7 +1188,12 @@ public class RemindersManager {
 
         // Fetch reminders
         let status: ReminderStatus = includeCompleted ? .all : .incomplete
-        let reminders = await store.fetchReminders(in: calendarsToExport, status: status)
+        let reminders = await store.fetchReminders(
+            in: calendarsToExport,
+            status: status,
+            dueDateStart: nil,
+            dueDateEnd: nil
+        )
 
         // Convert to output format
         let reminderOutputs = reminders.map { convertToOutput($0) }
@@ -1018,6 +1252,126 @@ public class RemindersManager {
             fileSizeBytes: jsonData.count,
             note: path == nil ? "File is in temp directory. Move it to a permanent location to keep it." : nil
         )
+    }
+
+    // MARK: - DB Enrichment
+
+    /// Populates SQLite-derived fields on each reminder output by querying
+    /// the configured `dbReaders`. A no-op when no readers are wired up.
+    /// All readers are queried and their results merged — a reminder lives
+    /// in exactly one CloudKit zone / store, so at most one reader will
+    /// have data for any given UUID.
+    public func enrich(_ outputs: inout [ReminderOutput]) {
+        guard hasDBEnrichment, !outputs.isEmpty else { return }
+
+        let uuids = outputs.map { $0.id }
+        // Distinct list IDs in this result set — drives the section
+        // membership lookup so we read each list's blob at most once.
+        let listUUIDs = Array(Set(outputs.map { $0.listId }))
+        var hashtagsByUUID: [String: [String]] = [:]
+        var parentByUUID: [String: String] = [:]
+        var childrenByUUID: [String: [String]] = [:]
+        var sectionByUUID: [String: SectionInfo] = [:]
+        for reader in dbReaders {
+            do {
+                let chunk = try reader.hashtags(forReminderUUIDs: uuids)
+                for (uuid, tags) in chunk { hashtagsByUUID[uuid] = tags }
+            } catch {
+                ReminderDBReader.warnOnce(
+                    "enrich.hashtags.\(reader.storeURL.lastPathComponent)",
+                    "Hashtag enrichment failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+            do {
+                let parents = try reader.parents(forReminderUUIDs: uuids)
+                for (uuid, parent) in parents { parentByUUID[uuid] = parent }
+            } catch {
+                ReminderDBReader.warnOnce(
+                    "enrich.parents.\(reader.storeURL.lastPathComponent)",
+                    "Parent enrichment failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+            do {
+                let kids = try reader.children(forReminderUUIDs: uuids)
+                for (uuid, ids) in kids { childrenByUUID[uuid] = ids }
+            } catch {
+                ReminderDBReader.warnOnce(
+                    "enrich.children.\(reader.storeURL.lastPathComponent)",
+                    "Children enrichment failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+            do {
+                let sections = try reader.reminderSectionMap(forListUUIDs: listUUIDs)
+                for (uuid, info) in sections { sectionByUUID[uuid] = info }
+            } catch {
+                ReminderDBReader.warnOnce(
+                    "enrich.sections.\(reader.storeURL.lastPathComponent)",
+                    "Section enrichment failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+        }
+
+        for i in outputs.indices {
+            let uuid = outputs[i].id
+            outputs[i].hashtags = hashtagsByUUID[uuid] ?? []
+            outputs[i].parentId = parentByUUID[uuid]
+            outputs[i].childIds = childrenByUUID[uuid] ?? []
+            outputs[i].section = sectionByUUID[uuid]
+        }
+    }
+
+    /// Returns the master hashtag inventory aggregated across all
+    /// configured DB readers. When DB enrichment is unavailable, returns
+    /// an empty array (callers that need to distinguish "unavailable" from
+    /// "no hashtags" should check `hasDBEnrichment` first).
+    public func listHashtags(includeUnused: Bool = false) -> [HashtagInfo] {
+        var combined: [String: HashtagInfo] = [:]
+        for reader in dbReaders {
+            do {
+                let entries = try reader.hashtagInventory(includeUnused: includeUnused)
+                for entry in entries {
+                    if let existing = combined[entry.canonicalName] {
+                        // Merge usage counts and pick the most recent dates
+                        // when a hashtag exists in multiple stores (rare, but
+                        // possible for shared lists).
+                        let merged = HashtagInfo(
+                            name: existing.name,
+                            canonicalName: existing.canonicalName,
+                            usageCount: existing.usageCount + entry.usageCount,
+                            lastUsed: latest(existing.lastUsed, entry.lastUsed),
+                            firstSeen: earliest(existing.firstSeen, entry.firstSeen)
+                        )
+                        combined[entry.canonicalName] = merged
+                    } else {
+                        combined[entry.canonicalName] = entry
+                    }
+                }
+            } catch {
+                ReminderDBReader.warnOnce(
+                    "listHashtags.\(reader.storeURL.lastPathComponent)",
+                    "Hashtag inventory failed for \(reader.storeURL.lastPathComponent): \(error.localizedDescription)"
+                )
+            }
+        }
+        return combined.values.sorted { $0.canonicalName < $1.canonicalName }
+    }
+
+    private func latest(_ a: Date?, _ b: Date?) -> Date? {
+        switch (a, b) {
+        case (nil, nil): return nil
+        case (.some(let x), nil): return x
+        case (nil, .some(let y)): return y
+        case (.some(let x), .some(let y)): return x > y ? x : y
+        }
+    }
+
+    private func earliest(_ a: Date?, _ b: Date?) -> Date? {
+        switch (a, b) {
+        case (nil, nil): return nil
+        case (.some(let x), nil): return x
+        case (nil, .some(let y)): return y
+        case (.some(let x), .some(let y)): return x < y ? x : y
+        }
     }
 
     // MARK: - Audit Helpers
