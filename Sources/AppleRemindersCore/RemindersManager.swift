@@ -799,7 +799,7 @@ public class RemindersManager {
         // Create reminder via the protocol
         let reminder = try store.createReminder(in: calendar)
 
-        var mutableReminder = reminder
+        let mutableReminder = reminder
         mutableReminder.title = input.title
 
         if let notes = input.notes {
@@ -883,7 +883,7 @@ public class RemindersManager {
     }
 
     private func updateSingleReminder(_ input: UpdateReminderInput) async throws -> ReminderOutput {
-        var reminder = try await resolveReminder(id: input.id)
+        let reminder = try await resolveReminder(id: input.id)
 
         // Capture before-state for audit logging
         let beforeState = encodeToDict(convertToOutput(reminder))
