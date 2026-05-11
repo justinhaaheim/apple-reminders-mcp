@@ -96,6 +96,8 @@ There's no per-field `completedDate` flag — the EventKit predicate doesn't exp
 
 Enrichment fields (`hashtags`, `parentId`, `childIds`, `section`) appear in `compact` and `full` when SQLite enrichment is available. They're omitted from `compact` when null (DB unavailable) and shown explicitly in `full`.
 
+The response envelope carries `"enriched": true | false` at the top level. `true` means DB enrichment was available for this query — per-reminder enrichment fields reflect real data (`null` means "no value", `[]` means "none"). `false` means enrichment was unavailable; those per-reminder fields are unset/null regardless of underlying state and should be treated as "unknown."
+
 When you supply a JMESPath expression, `--detail` is ignored — JMESPath always operates on the full payload (so it can see all fields), and the output is whatever the expression returns.
 
 ### SQLite enrichment filters

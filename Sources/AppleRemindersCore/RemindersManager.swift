@@ -496,10 +496,22 @@ public class RemindersManager {
         let formattedReminders = formatReminders(pageReminders, outputDetail: detail, isSingleList: isSingleList, statusFilter: reminderStatus)
 
         // 7. Build wrapper response
+        //
+        // `enriched`: true when at least one DB reader was available during
+        // this query, meaning DB-derived fields (hashtags, parentId,
+        // childIds, section) reflect real data — `null` means "absent",
+        // `[]` means "none". When `enriched` is false, those fields are
+        // always nil/unset and should be treated as "unknown."
+        //
+        // TODO(apple-reminders-mcp-qgb): revisit whether the per-field
+        // nil-vs-unknown ambiguity needs structural distinction (e.g.
+        // moving DB-derived fields under a nested `enriched` object).
+        // Tracked as a P4 question bead.
         let response: [String: Any] = [
             "reminders": formattedReminders,
             "totalCount": totalCount,
             "pageInfo": pageInfo.toDict(),
+            "enriched": hasDBEnrichment,
         ]
         return response
     }
