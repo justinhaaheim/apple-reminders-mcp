@@ -85,18 +85,28 @@ public class MCPServer {
     private func handleRequest(_ line: String) async {
         guard let data = line.data(using: .utf8) else { return }
 
+        let request: MCPRequest
         do {
-            let request = try JSONDecoder().decode(MCPRequest.self, from: data)
-            do {
-                let response = try await processRequest(request)
-                sendResponse(response)
-            } catch {
-                logError("Error processing request: \(error)")
-                sendErrorResponse(id: request.id, code: -32603, message: error.localizedDescription)
-            }
+            request = try JSONDecoder().decode(MCPRequest.self, from: data)
         } catch {
+            // No safe way to respond — we can't know what id the peer expects, and
+            // some MCP clients reject the JSON-RPC `id: null` parse-error shape.
             logError("Error decoding request: \(error)")
-            sendErrorResponse(id: .null, code: -32700, message: "Parse error: \(error.localizedDescription)")
+            return
+        }
+
+        // JSON-RPC 2.0 notifications have no `id` and MUST NOT be answered.
+        guard let id = request.id else {
+            log("Received notification: \(request.method)")
+            return
+        }
+
+        do {
+            let response = try await processRequest(request, id: id)
+            sendResponse(response)
+        } catch {
+            logError("Error processing request: \(error)")
+            sendErrorResponse(id: id, code: -32603, message: error.localizedDescription)
         }
     }
 
@@ -109,7 +119,7 @@ public class MCPServer {
         sendResponse(errorResponse)
     }
 
-    private func processRequest(_ request: MCPRequest) async throws -> MCPResponse {
+    private func processRequest(_ request: MCPRequest, id: MCPRequest.RequestID) async throws -> MCPResponse {
         switch request.method {
         case "initialize":
             let instructions = """
@@ -124,7 +134,7 @@ public class MCPServer {
             """
 
             return MCPResponse(
-                id: request.id,
+                id: id,
                 result: MCPResponse.Result(
                     content: nil,
                     tools: nil,
@@ -144,7 +154,7 @@ public class MCPServer {
 
         case "tools/list":
             return MCPResponse(
-                id: request.id,
+                id: id,
                 result: MCPResponse.Result(
                     content: nil,
                     tools: getTools(),
@@ -166,7 +176,7 @@ public class MCPServer {
             do {
                 let resultText = try await callTool(toolName, arguments: params.arguments ?? [:])
                 return MCPResponse(
-                    id: request.id,
+                    id: id,
                     result: MCPResponse.Result(
                         content: [MCPResponse.Result.Content(type: "text", text: resultText)],
                         tools: nil,
@@ -182,7 +192,7 @@ public class MCPServer {
                 // Return tool errors with isError: true
                 let errorMessage = error.localizedDescription
                 return MCPResponse(
-                    id: request.id,
+                    id: id,
                     result: MCPResponse.Result(
                         content: [MCPResponse.Result.Content(type: "text", text: errorMessage)],
                         tools: nil,

@@ -4,7 +4,8 @@ import Foundation
 
 struct MCPRequest: Codable {
     let jsonrpc: String
-    let id: RequestID
+    // Absent for JSON-RPC notifications; present for requests.
+    let id: RequestID?
     let method: String
     let params: Params?
 
