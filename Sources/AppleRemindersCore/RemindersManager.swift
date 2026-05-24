@@ -235,7 +235,8 @@ public class RemindersManager {
 
     public func queryReminders(
         list: ListSelector?,
-        status: String?,
+        includeCompleted: Bool = false,
+        completedOnly: Bool = false,
         sortBy: String?,
         query: String?,
         perPage: Int?,
@@ -256,6 +257,9 @@ public class RemindersManager {
         if parentId != nil && topLevelOnly {
             throw RemindersError("--parent and --top-level are mutually exclusive")
         }
+        if includeCompleted && completedOnly {
+            throw RemindersError("includeCompleted and completedOnly are mutually exclusive")
+        }
         let startTime = Date()
         log("Starting queryReminders")
 
@@ -263,15 +267,15 @@ public class RemindersManager {
         let calendars = try resolveList(list)
         log("Resolved \(calendars.count) calendar(s)")
 
-        // 2. Fetch reminders with status filter
+        // 2. Fetch reminders with status filter. Default is incomplete only;
+        //    --include-completed widens to both; --completed-only narrows to completed.
         let reminderStatus: ReminderStatus
-        switch status ?? "incomplete" {
-        case "completed":
+        if completedOnly {
             reminderStatus = .completed
-        case "incomplete":
-            reminderStatus = .incomplete
-        default:
+        } else if includeCompleted {
             reminderStatus = .all
+        } else {
+            reminderStatus = .incomplete
         }
 
         // Parse all date filters up-front so we can fail fast on bad input.
@@ -622,7 +626,7 @@ public class RemindersManager {
             "listId": reminder.listId,
             "listName": reminder.listName,
             "isCompleted": reminder.isCompleted,
-            "priority": reminder.priority,
+            "priority": reminder.priority as Any? ?? NSNull(),
             "dueDate": reminder.dueDate as Any? ?? NSNull(),
             "dueDateIncludesTime": reminder.dueDateIncludesTime as Any? ?? NSNull(),
             "completedDate": reminder.completedDate as Any? ?? NSNull(),
@@ -699,12 +703,12 @@ public class RemindersManager {
         }
     }
 
-    private func prioritySortOrder(_ priority: String) -> Int {
+    private func prioritySortOrder(_ priority: String?) -> Int {
         switch priority {
         case "high": return 0
         case "medium": return 1
         case "low": return 2
-        default: return 3  // "none"
+        default: return 3  // nil / unset
         }
     }
 
@@ -745,7 +749,7 @@ public class RemindersManager {
             listId: reminder.calendarId,
             listName: reminder.getCalendarName(from: store),
             isCompleted: reminder.isCompleted,
-            priority: Priority.fromInternal(reminder.priority).rawValue,
+            priority: Priority.fromInternal(reminder.priority)?.rawValue,
             dueDate: {
                 guard var components = reminder.dueDateComponents else { return nil }
                 if components.calendar == nil { components.calendar = Calendar.current }
@@ -819,7 +823,7 @@ public class RemindersManager {
 
         if let priorityString = input.priority {
             guard let priority = Priority.fromString(priorityString) else {
-                throw RemindersError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
+                throw RemindersError("Invalid priority: '\(priorityString)'. Must be one of: low, medium, high. Omit to leave unset.")
             }
             mutableReminder.priority = priority.internalValue
         }
@@ -944,12 +948,17 @@ public class RemindersManager {
             }
         }
 
-        // Update priority
-        if let priorityString = input.priority {
-            guard let priority = Priority.fromString(priorityString) else {
-                throw RemindersError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
+        // Update priority (can be cleared with null)
+        if let priorityValue = input.priority {
+            switch priorityValue {
+            case .clear:
+                reminder.priority = 0
+            case .value(let priorityString):
+                guard let priority = Priority.fromString(priorityString) else {
+                    throw RemindersError("Invalid priority: '\(priorityString)'. Must be one of: low, medium, high. Use null to clear.")
+                }
+                reminder.priority = priority.internalValue
             }
-            reminder.priority = priority.internalValue
         }
 
         // Handle completion - completedDate takes precedence over completed

@@ -75,7 +75,7 @@ public enum HelpContent {
       --all-lists       Query across all lists
       (omitted)         Uses the default list
 
-    Priority Values: none, low, medium, high
+    Priority Values: low, medium, high (omit for no priority)
 
     Date Format: ISO 8601 with timezone, e.g. 2026-03-07T09:00:00-08:00
       Date-only also works for the per-field date flags: 2026-03-07
@@ -98,10 +98,10 @@ public enum HelpContent {
 
     Examples:
       reminders                                             # Incomplete reminders from default list
-      reminders query --all-lists --status all --detail full # Everything, full detail
       reminders query --list "Work" --search "standup"       # Search within a list
-      reminders query --sort dueDate --per-page 10              # Upcoming due dates
+      reminders query --sort dueDate --per-page 10           # Upcoming due dates
       reminders query "[?priority == 'high']" --pretty       # JMESPath filter
+      reminders query --include-completed --detail full      # Widen to also include completed
       reminders create "Buy milk" --list "Shopping"          # Create a reminder
       reminders update <id> --complete                       # Mark done
       reminders delete <id1> <id2>                           # Batch delete
@@ -118,7 +118,7 @@ public enum HelpContent {
     reminders — Strategic Guidance
 
     QUERY CONVENTION (most important):
-    • Structured CLI flags (--list, --status, --search, --created-from/-to,
+    • Structured CLI flags (--list, --include-completed, --search, --created-from/-to,
       --modified-from/-to, --due-from/-to, --sort, --per-page) filter at
       fetch time. The positional [QUERY] JMESPath expression filters and
       projects on the result. Order on the command line never changes
@@ -128,7 +128,9 @@ public enum HelpContent {
     GENERAL PRINCIPLES:
     • Always query before updating or deleting. Get the reminder ID first.
     • Use --detail minimal to save tokens when you only need IDs and titles.
-    • Use --all-lists unless the user specifies a particular list.
+    • The default scope is the user's default list and incomplete reminders only.
+      Don't widen with --all-lists or --include-completed unless the user
+      explicitly asks for cross-list or completed/archived items.
     • Use --pretty when showing output to the user, omit it when processing programmatically.
 
     EFFICIENT QUERYING:
@@ -178,8 +180,9 @@ public enum HelpContent {
     Options:
       --list <string>       Filter by list name (case-insensitive)
       --list-id <string>    Filter by list ID
-      --all-lists           Search across all lists
-      --status <string>     incomplete (default), completed, or all
+      --all-lists           Search across all lists (only when user asks)
+      --include-completed   Include completed reminders alongside incomplete (default: incomplete only)
+      --completed-only      Return only completed reminders (mutually exclusive with --include-completed)
       --search <string>     Text search in titles and notes
       --sort <string>       newest (default), oldest, priority, dueDate
       --per-page <int>      Results per page (auto-paginates at 200 when omitted)
@@ -226,8 +229,9 @@ public enum HelpContent {
     Options:
       --list <string>       Filter by list name (case-insensitive)
       --list-id <string>    Filter by list ID
-      --all-lists           Search across all lists
-      --status <string>     incomplete (default), completed, or all
+      --all-lists           Search across all lists (only when user asks for cross-list results)
+      --include-completed   Include completed reminders alongside incomplete (default: incomplete only)
+      --completed-only      Return only completed reminders (mutually exclusive with --include-completed)
       --search <string>     Text search in titles and notes
       --sort <string>       newest (default), oldest, priority, dueDate
       --per-page <int>      Results per page (auto-paginates at 200 when omitted)
@@ -261,7 +265,7 @@ public enum HelpContent {
       created first, using compact output detail. Auto-paginates at 200 results.
 
     Detail Levels:
-      minimal   id, title only (plus listName if --all-lists, isCompleted if --status all)
+      minimal   id, title only (plus listName if --all-lists, isCompleted if --include-completed)
       compact   id, title, notes, dueDate, priority, createdDate, modifiedDate
                 (plus listName/isCompleted when contextually useful). Null fields omitted.
       full      All fields always included: id, title, notes, dueDate, priority,
@@ -284,13 +288,14 @@ public enum HelpContent {
 
     Examples:
       reminders query                                                      # Incomplete from default list
-      reminders query --all-lists --status all --detail full               # Everything
       reminders query --list "Work" --search "standup"                     # Search within a list
       reminders query --sort dueDate --per-page 10                         # Upcoming due dates
-      reminders query --status completed --modified-from 2026-03-01        # Recently modified+completed
+      reminders query --completed-only --modified-from 2026-03-01          # Recently modified+completed
+      reminders query --include-completed --detail full                    # Both statuses, full detail
       reminders query --created-from 2026-04-30                            # Recently created
       reminders query --due-from 2026-05-07 --due-to 2026-05-14            # Due this week
-      reminders query --all-lists "[?priority=='high'].title"              # JMESPath positional
+      reminders query "[?priority=='high'].title"                          # JMESPath on default list
+      reminders query --all-lists "[?priority=='high'].title"              # JMESPath across all lists
       reminders query --list "Work" "[?contains(lower(title), 'meeting')]" # Combine flags + JMESPath
 
     Piping with jq:
@@ -318,7 +323,8 @@ public enum HelpContent {
     • JMESPath overrides --sort, --detail, and pagination. Sort with
       `sort_by(@, &field)`; slice with `[N:M]`.
     • Default query (no args) is often sufficient — it returns incomplete reminders
-      from the default list. Don't add flags unless you need to narrow or expand.
+      from the default list. Don't widen with --all-lists or --include-completed
+      unless the user explicitly asks for cross-list or completed/archived items.
     • For completedDate ranges, use JMESPath: there's no --completed-from/-to flag.
     • For case-insensitive matching, use lower()/upper() in JMESPath:
       `reminders query "[?contains(lower(title), 'meeting')]"`.
@@ -340,7 +346,7 @@ public enum HelpContent {
       --list-id <string>          Target list ID
       --notes <string>            Body text
       --due <iso-8601>            Due date (e.g. 2026-03-07T09:00:00-08:00)
-      --priority <string>         none (default), low, medium, high
+      --priority <string>         low, medium, high (omit for no priority)
       --url <string>              URL to attach
       --alarm-relative <seconds>  Alarm offset before due date (e.g. 900 = 15 min)
       --alarm-date <iso-8601>     Absolute alarm date
@@ -364,7 +370,7 @@ public enum HelpContent {
       --list-id <string>          Target list ID
       --notes <string>            Body text
       --due <iso-8601>            Due date (full ISO 8601 with time and timezone)
-      --priority <string>         none (default), low, medium, high
+      --priority <string>         low, medium, high (omit for no priority)
       --url <string>              URL to attach
       --alarm-relative <seconds>  Alarm offset in seconds before due date (e.g. 900 = 15 min)
       --alarm-date <iso-8601>     Absolute alarm date/time
@@ -420,7 +426,8 @@ public enum HelpContent {
       --list-id <string>    Move to list by ID
       --due <iso-8601>      New due date
       --clear-due-date      Remove due date
-      --priority <string>   none, low, medium, high
+      --priority <string>   low, medium, high
+      --clear-priority      Remove priority
       --complete            Mark as complete
       --incomplete          Mark as incomplete
       --url <string>        New URL
@@ -447,7 +454,8 @@ public enum HelpContent {
       --list-id <string>    Move to list by ID
       --due <iso-8601>      New due date (full ISO 8601 with time and timezone)
       --clear-due-date      Remove due date (set to null)
-      --priority <string>   none, low, medium, high
+      --priority <string>   low, medium, high
+      --clear-priority      Remove priority (set to null)
       --complete            Mark as complete
       --incomplete          Mark as incomplete (uncomplete)
       --url <string>        New URL
@@ -459,12 +467,12 @@ public enum HelpContent {
       empty string, the latter removes them entirely (sets to null).
 
     Examples:
-      reminders update ABC123 --complete                         # Mark done
-      reminders update ABC123 --incomplete                       # Unmark
-      reminders update ABC123 --title "Updated title"            # Change title
+      reminders update ABC123 --complete                              # Mark done
+      reminders update ABC123 --incomplete                            # Unmark
+      reminders update ABC123 --title "Updated title"                 # Change title
       reminders update ABC123 --priority high --due "2026-03-10T14:00:00-08:00"
-      reminders update ABC123 --list "Personal"                  # Move to list
-      reminders update ABC123 --clear-due-date --clear-notes     # Remove fields
+      reminders update ABC123 --list "Personal"                       # Move to list
+      reminders update ABC123 --clear-due-date --clear-notes --clear-priority  # Remove fields
 
     Use --help=skill for best practices and strategic guidance.
     """
@@ -475,9 +483,10 @@ public enum HelpContent {
     • Always query first to get the reminder ID. Abbreviated ID prefixes are accepted
       (e.g., '550e840' instead of the full UUID). If ambiguous, you'll be told to use more characters.
     • Only pass the fields you want to change. Omitted fields are preserved as-is.
-    • Use --clear-notes / --clear-due-date / --clear-url to explicitly remove values.
+    • Use --clear-notes / --clear-due-date / --clear-url / --clear-priority to explicitly remove values.
       Don't pass empty strings — use the clear flags.
     • --complete and --incomplete are mutually exclusive.
+    • --priority and --clear-priority are mutually exclusive.
     • Moving a reminder to a different list (--list) preserves all other fields.
     • For batch updates, use the MCP server's update_reminders tool instead.
     """
@@ -521,7 +530,7 @@ public enum HelpContent {
 
     Batch Pattern:
       # Delete all completed reminders from a list
-      reminders query --list "Work" --status completed --detail minimal | \\
+      reminders query --list "Work" --completed-only --detail minimal | \\
         jq -r '.reminders[].id' | xargs reminders delete
 
     Use --help=skill for best practices and strategic guidance.

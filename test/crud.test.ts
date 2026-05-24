@@ -68,7 +68,7 @@ describe('CRUD operations (isolated to test list)', () => {
 
     const result = await client.callTool('query_reminders', {
       list: {name: testListName},
-      status: 'incomplete',
+      // default is incomplete-only
     });
 
     const reminders = extractReminders<{id: string; title: string}>(result);

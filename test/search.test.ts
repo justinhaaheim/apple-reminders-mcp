@@ -111,17 +111,17 @@ describe('Query operations', () => {
     test('filters reminders with any priority set', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        query: "[?priority != 'none']",
+        query: '[?priority != null]',
       });
 
       // JMESPath returns raw array
       expect(Array.isArray(result)).toBe(true);
-      const reminders = result as Array<{priority: string}>;
+      const reminders = result as Array<{priority: string | null}>;
       // Should have "Finish report" (high) and "Buy birthday gift" (medium)
       expect(reminders.length).toBe(2);
 
       for (const reminder of reminders) {
-        expect(reminder.priority).not.toBe('none');
+        expect(reminder.priority).not.toBeNull();
       }
     });
 
@@ -155,7 +155,7 @@ describe('Query operations', () => {
       // Search for completed reminders
       const completedResult = await client.callTool('query_reminders', {
         list: {name: testListName},
-        status: 'completed',
+        completedOnly: true,
       });
 
       const completed = extractReminders<{title: string}>(completedResult);
@@ -210,11 +210,11 @@ describe('Query operations', () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
         perPage: 1,
-        status: 'incomplete',
+        // default is incomplete-only
       });
 
       const reminders = extractReminders<Record<string, unknown>>(result);
-      // isCompleted should be omitted since we queried incomplete
+      // isCompleted should be omitted since we queried incomplete (the default)
       expect(reminders[0].isCompleted).toBeUndefined();
     });
 
@@ -268,16 +268,16 @@ describe('Query operations', () => {
       expect(reminders[0].createdDate).toBeUndefined();
     });
 
-    test('compact includes isCompleted when status is "all"', async () => {
+    test('compact includes isCompleted when includeCompleted is true', async () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
         perPage: 1,
-        status: 'all',
+        includeCompleted: true,
         outputDetail: 'compact',
       });
 
       const reminders = extractReminders<Record<string, unknown>>(result);
-      // isCompleted should be present since status is "all" (value isn't implied)
+      // isCompleted should be present since both statuses are returned (value isn't implied)
       expect(reminders[0].isCompleted).toBeDefined();
       expect(typeof reminders[0].isCompleted).toBe('boolean');
     });
@@ -412,14 +412,15 @@ describe('Query operations', () => {
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
         sortBy: 'priority',
-        status: 'incomplete',
       });
 
-      const reminders = extractReminders<{priority: string}>(result);
+      const reminders = extractReminders<{priority: string | null | undefined}>(
+        result,
+      );
 
       // High priority should come first
-      if (reminders.length > 0 && reminders[0].priority !== 'none') {
-        // First non-none priority should be high
+      if (reminders.length > 0 && reminders[0].priority != null) {
+        // First reminder with a priority should be high
         const priorities = reminders.map((r) => r.priority);
         const highIndex = priorities.indexOf('high');
         const mediumIndex = priorities.indexOf('medium');
@@ -555,11 +556,11 @@ describe('Query operations', () => {
     });
 
     test('dueFrom and dueTo filter by dueDate', async () => {
-      // status: 'all' because an earlier test ("filters completed reminders")
+      // includeCompleted because an earlier test ("filters completed reminders")
       // may have marked 'Call dentist' complete.
       const result = await client.callTool('query_reminders', {
         list: {name: testListName},
-        status: 'all',
+        includeCompleted: true,
         dueFrom: '2026-01-15',
         dueTo: '2026-01-31',
       });

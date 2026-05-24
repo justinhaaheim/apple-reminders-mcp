@@ -216,13 +216,13 @@ public class MCPServer {
             // query_reminders
             MCPResponse.Result.Tool(
                 name: "query_reminders",
-                description: "Search and filter reminders. Returns incomplete reminders from the default list by default. Convention: structured params (list, status, searchText, per-field date ranges) filter at fetch time; the 'query' JMESPath expression filters/projects on the result. See docs/query-reference.md and help(\"query_reminders\") for full parameter docs.",
+                description: "Search and filter reminders. Returns incomplete reminders from the default list by default. Convention: structured params (list, includeCompleted/completedOnly, searchText, per-field date ranges) filter at fetch time; the 'query' JMESPath expression filters/projects on the result. See docs/query-reference.md and help(\"query_reminders\") for full parameter docs.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
                         "list": .object([
                             "type": .string("object"),
-                            "description": .string("Which list to search. Omit for default list."),
+                            "description": .string("Which list to search. Omit for default list. Set all=true only when the user explicitly asks for cross-list results."),
                             "properties": .object([
                                 "name": .object(["type": .string("string"), "description": .string("List name (case-insensitive match)")]),
                                 "id": .object(["type": .string("string"), "description": .string("Exact list ID")]),
@@ -230,11 +230,15 @@ public class MCPServer {
                             ]),
                             "additionalProperties": .bool(false)
                         ]),
-                        "status": .object([
-                            "type": .string("string"),
-                            "enum": .array([.string("incomplete"), .string("completed"), .string("all")]),
-                            "default": .string("incomplete"),
-                            "description": .string("Filter by completion status")
+                        "includeCompleted": .object([
+                            "type": .string("boolean"),
+                            "default": .bool(false),
+                            "description": .string("Include completed reminders alongside incomplete ones. Default is incomplete only; only widen when the user explicitly asks for completed/archived items. Mutually exclusive with completedOnly.")
+                        ]),
+                        "completedOnly": .object([
+                            "type": .string("boolean"),
+                            "default": .bool(false),
+                            "description": .string("Return only completed reminders. Mutually exclusive with includeCompleted.")
                         ]),
                         "searchText": .object([
                             "type": .string("string"),
@@ -382,8 +386,8 @@ public class MCPServer {
                                     ]),
                                     "priority": .object([
                                         "type": .string("string"),
-                                        "enum": .array([.string("none"), .string("low"), .string("medium"), .string("high")]),
-                                        "description": .string("Priority level")
+                                        "enum": .array([.string("low"), .string("medium"), .string("high")]),
+                                        "description": .string("Priority level. Omit for no priority.")
                                     ]),
                                     "url": .object([
                                         "type": .string("string"),
@@ -515,8 +519,8 @@ public class MCPServer {
                                     ]),
                                     "priority": .object([
                                         "type": .string("string"),
-                                        "enum": .array([.string("none"), .string("low"), .string("medium"), .string("high")]),
-                                        "description": .string("New priority level")
+                                        "enum": .array([.string("low"), .string("medium"), .string("high")]),
+                                        "description": .string("New priority level. Set to null to clear (remove the priority).")
                                     ]),
                                     "completed": .object([
                                         "type": .string("boolean"),
@@ -729,7 +733,8 @@ public class MCPServer {
         case "query_reminders":
             let listDict = arguments["list"]?.value as? [String: Any]
             let listSelector = ListSelector(from: listDict)
-            let status = arguments["status"]?.value as? String
+            let includeCompleted = arguments["includeCompleted"]?.value as? Bool ?? false
+            let completedOnly = arguments["completedOnly"]?.value as? Bool ?? false
             let sortBy = arguments["sortBy"]?.value as? String
             let query = arguments["query"]?.value as? String
             let perPage = arguments["perPage"]?.value as? Int
@@ -749,7 +754,8 @@ public class MCPServer {
 
             let result = try await remindersManager.queryReminders(
                 list: listDict == nil ? nil : listSelector,
-                status: status,
+                includeCompleted: includeCompleted,
+                completedOnly: completedOnly,
                 sortBy: sortBy,
                 query: query,
                 perPage: perPage,
@@ -885,7 +891,7 @@ public class MCPServer {
                     notes: parseClearable(dict["notes"]),
                     list: ListSelector(from: dict["list"] as? [String: Any]),
                     dueDate: parseClearable(dict["dueDate"]),
-                    priority: dict["priority"] as? String,
+                    priority: parseClearable(dict["priority"]),
                     completed: dict["completed"] as? Bool,
                     completedDate: parseClearable(dict["completedDate"]),
                     url: parseClearable(dict["url"]),
@@ -1052,10 +1058,12 @@ public class MCPServer {
                 "listId": reminder.listId,
                 "listName": reminder.listName,
                 "isCompleted": reminder.isCompleted,
-                "priority": reminder.priority,
                 "createdDate": reminder.createdDate,
                 "modifiedDate": reminder.modifiedDate
             ]
+            if let priority = reminder.priority {
+                dict["priority"] = priority
+            }
             if let notes = reminder.notes {
                 dict["notes"] = notes
             }

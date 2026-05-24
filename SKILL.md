@@ -27,11 +27,15 @@ never writes.
 
 ## Query convention
 
-Structured CLI flags (`--list`, `--status`, `--search`, `--created-from/-to`,
-`--modified-from/-to`, `--due-from/-to`, `--sort`, `--per-page`) filter at
-fetch time. The positional `[QUERY]` JMESPath expression filters and
-projects on the result. Order on the command line never changes results —
-flags always run first.
+Structured CLI flags (`--list`, `--include-completed`, `--completed-only`,
+`--search`, `--created-from/-to`, `--modified-from/-to`, `--due-from/-to`,
+`--sort`, `--per-page`) filter at fetch time. The positional `[QUERY]`
+JMESPath expression filters and projects on the result. Order on the
+command line never changes results — flags always run first.
+
+Defaults are intentionally narrow: incomplete reminders from the default
+list. Only widen with `--include-completed`, `--completed-only`, or
+`--all-lists` when the user explicitly asks for that broader scope.
 
 For the full picture (recipes, JMESPath fundamentals, project-specific
 `lower()` / `upper()` extensions), see [`docs/query-reference.md`](docs/query-reference.md).
@@ -42,8 +46,8 @@ For the full picture (recipes, JMESPath fundamentals, project-specific
 # Query (default command — just running `reminders` is the same as `reminders query`)
 reminders query                                          # Incomplete reminders from default list
 reminders query --list "Work" --search "standup"         # Search within a list
-reminders query --all-lists --status all --detail full   # Everything, full detail
-reminders query --sort dueDate --per-page 10              # Upcoming due dates
+reminders query --include-completed --detail full        # Both statuses, full detail
+reminders query --sort dueDate --per-page 10             # Upcoming due dates
 
 # Lists
 reminders lists                                          # All reminder lists
@@ -102,11 +106,14 @@ Most commands accept list selectors:
 
 ### Status Filtering
 
-The `query` command filters by status:
+The `query` command defaults to incomplete only. Widen with one of:
 
-- `--status incomplete` — (default) Only incomplete reminders
-- `--status completed` — Only completed reminders
-- `--status all` — Both
+- `--include-completed` — both incomplete and completed
+- `--completed-only` — only completed (mutually exclusive with `--include-completed`)
+- _(omitted)_ — only incomplete (default)
+
+Don't widen unprompted. If the user says "all my reminders matching X"
+they almost always mean "all open ones matching X."
 
 ### Output Detail Levels
 
@@ -118,7 +125,9 @@ Control how much data is returned:
 
 ### Priority Values
 
-`none`, `low`, `medium`, `high`
+`low`, `medium`, `high`. Omit the flag (or pass `null` via MCP) for no priority.
+
+On query output, unset priority appears as `null` (compact: omitted; full: explicit `null`).
 
 ### Date Format
 
@@ -134,6 +143,10 @@ On update, some fields can be cleared (set to null) with `--clear-*` flags:
 - `--clear-notes`
 - `--clear-due-date`
 - `--clear-url`
+- `--clear-priority`
+
+On the MCP `update_reminders` tool, the same fields accept `null` directly
+(e.g. `{"id": "...", "priority": null}` to clear priority).
 
 ### JMESPath Queries
 
@@ -171,11 +184,14 @@ All commands support:
 ### Daily Review
 
 ```bash
-# What's due today or overdue?
-reminders query --all-lists --status incomplete --due-from "$(date -I)" --sort dueDate --pretty
+# What's due today or overdue? (default list, default incomplete-only)
+reminders query --due-from "$(date -I)" --sort dueDate --pretty
+
+# Cross-list version (only when user asks for cross-list scope):
+reminders query --all-lists --due-from "$(date -I)" --sort dueDate --pretty
 
 # What did I complete recently? (no --completed-from flag — use JMESPath for completedDate)
-reminders query --all-lists --status completed --modified-from "$(date -v-7d -I)" --sort newest --pretty
+reminders query --completed-only --modified-from "$(date -v-7d -I)" --sort newest --pretty
 ```
 
 ### Task Management
@@ -195,9 +211,9 @@ for id in id1 id2 id3; do reminders update "$id" --complete; done
 # Get IDs of all incomplete Work reminders
 reminders query --list "Work" --detail minimal | jq -r '.reminders[].id'
 
-# Pretty table of upcoming due dates
-reminders query --all-lists --sort dueDate --detail compact | \
-  jq -r '.reminders[] | [.title, .dueDate // "no date", .priority] | @tsv'
+# Pretty table of upcoming due dates (default list; add --all-lists only on request)
+reminders query --sort dueDate --detail compact | \
+  jq -r '.reminders[] | [.title, .dueDate // "no date", .priority // "none"] | @tsv'
 ```
 
 ### Backup Workflow
