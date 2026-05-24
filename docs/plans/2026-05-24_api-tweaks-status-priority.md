@@ -33,22 +33,39 @@ No deprecation aliases. The user is the only meaningful consumer today and this 
 - [x] Plan approved
 - [x] Scratchpad created
 - [x] Beads epic created (`apple-reminders-mcp-ko3`)
-- [ ] Sub-beads created
-- [ ] Core: Priority + ReminderOutput
-- [ ] Core: UpdateReminderInput.priority → Clearable
-- [ ] Core: RemindersManager (status handling, output, create/update priority, prioritySortOrder)
-- [ ] MCP: schemas + arg parsing
-- [ ] CLI: QueryCommand
-- [ ] CLI: UpdateCommand (+ --clear-priority)
-- [ ] CLI: CreateCommand
-- [ ] HelpContent
-- [ ] Tests: TS test fixes
-- [ ] Tests: schema snapshot regen
-- [ ] Docs: CLAUDE.md, SKILL.md, query-reference.md, skills/reminders/SKILL.md, ROADMAP.md
-- [ ] Memory: feedback memory generalization
-- [ ] Verify: build, signal, tests
-- [ ] Smoke: CLI + MCP
-- [ ] Commit + close beads
+- [x] Sub-beads created
+- [x] Core: Priority + ReminderOutput
+- [x] Core: UpdateReminderInput.priority → Clearable
+- [x] Core: RemindersManager (status handling, output, create/update priority, prioritySortOrder)
+- [x] MCP: schemas + arg parsing
+- [x] CLI: QueryCommand
+- [x] CLI: UpdateCommand (+ --clear-priority)
+- [x] CLI: CreateCommand
+- [x] HelpContent
+- [x] Tests: TS test fixes (search.test.ts, crud.test.ts, readonly.test.ts drive-by)
+- [x] Tests: schema snapshot regen
+- [x] Docs: CLAUDE.md, SKILL.md, query-reference.md, skills/reminders/SKILL.md, ROADMAP.md
+- [x] Memory: feedback memory generalization
+- [x] Verify: build, signal, tests (145 pass)
+- [x] Smoke: CLI (--include-completed/--completed-only, mutual exclusion, priority null in output, --clear-priority validation)
+- [x] Commit + close beads (commit cba4baf)
+
+## Outcome
+
+Counts on the user's real data confirm the new flags work:
+
+| Query                                                 | Count                        |
+| ----------------------------------------------------- | ---------------------------- |
+| `reminders query` (default: incomplete, default list) | 1,469                        |
+| `reminders query --include-completed`                 | 2,481                        |
+| `reminders query --completed-only`                    | 1,012                        |
+| `[?priority != null]` JMESPath                        | works (replaces `!= 'none'`) |
+
+Output: `--detail full` emits `"priority": null` for unset reminders;
+compact/minimal omit the field.
+
+Mutual exclusion errors verified: `--include-completed --completed-only`,
+`--priority X --clear-priority`.
 
 ## Key file map
 
