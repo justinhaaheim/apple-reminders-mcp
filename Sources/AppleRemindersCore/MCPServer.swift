@@ -519,8 +519,7 @@ public class MCPServer {
                                     ]),
                                     "priority": .object([
                                         "type": .string("string"),
-                                        "enum": .array([.string("low"), .string("medium"), .string("high")]),
-                                        "description": .string("New priority level. Set to null to clear (remove the priority).")
+                                        "description": .string("New priority level: low, medium, or high. Set to null to clear (remove the priority).")
                                     ]),
                                     "completed": .object([
                                         "type": .string("boolean"),
