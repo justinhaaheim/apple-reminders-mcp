@@ -385,9 +385,9 @@ public class MCPServer {
                                         "description": .string("Whether the due date includes a specific time. Set false for all-day reminders. Default: true.")
                                     ]),
                                     "priority": .object([
-                                        "type": .string("string"),
-                                        "enum": .array([.string("low"), .string("medium"), .string("high")]),
-                                        "description": .string("Priority level. Omit for no priority.")
+                                        "type": .array([.string("string"), .string("null")]),
+                                        "enum": .array([.null, .string("low"), .string("medium"), .string("high")]),
+                                        "description": .string("Priority level. Omit or pass null for no priority.")
                                     ]),
                                     "url": .object([
                                         "type": .string("string"),

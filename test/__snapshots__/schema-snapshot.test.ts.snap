@@ -237,13 +237,17 @@ exports[`MCP schema snapshots tool schemas create_reminders 1`] = `
               "type": "string",
             },
             "priority": {
-              "description": "Priority level. Omit for no priority.",
+              "description": "Priority level. Omit or pass null for no priority.",
               "enum": [
+                null,
                 "low",
                 "medium",
                 "high",
               ],
-              "type": "string",
+              "type": [
+                "string",
+                "null",
+              ],
             },
             "recurrenceRule": {
               "additionalProperties": false,
