@@ -415,8 +415,17 @@ exports[`MCP schema snapshots tool schemas update_reminders 1`] = `
               "type": "string",
             },
             "priority": {
-              "description": "New priority level: low, medium, or high. Set to null to clear (remove the priority).",
-              "type": "string",
+              "description": "New priority level. Set to null to clear (remove the priority).",
+              "enum": [
+                null,
+                "low",
+                "medium",
+                "high",
+              ],
+              "type": [
+                "string",
+                "null",
+              ],
             },
             "recurrenceRule": {
               "additionalProperties": false,

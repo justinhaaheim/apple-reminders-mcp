@@ -518,8 +518,9 @@ public class MCPServer {
                                         "description": .string("Whether the due date includes a specific time. Set false for all-day reminders.")
                                     ]),
                                     "priority": .object([
-                                        "type": .string("string"),
-                                        "description": .string("New priority level: low, medium, or high. Set to null to clear (remove the priority).")
+                                        "type": .array([.string("string"), .string("null")]),
+                                        "enum": .array([.null, .string("low"), .string("medium"), .string("high")]),
+                                        "description": .string("New priority level. Set to null to clear (remove the priority).")
                                     ]),
                                     "completed": .object([
                                         "type": .string("boolean"),
