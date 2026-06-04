@@ -449,6 +449,87 @@ public enum Priority: String, CaseIterable {
     public static func fromString(_ string: String) -> Priority? {
         return Priority(rawValue: string.lowercased())
     }
+
+    /// Apple's native integer priority constants (as used by EventKit and
+    /// Reminders.app) mapped to our canonical buckets. Strict: only 0, 1, 5,
+    /// and 9 are valid here. (Contrast `fromInternal`, which buckets the full
+    /// 1–9 range when *reading* a stored value.)
+    public static func fromAppleInteger(_ value: Int) -> NormalizedPriority? {
+        switch value {
+        case 0: return .unset
+        case 1: return .level(.high)
+        case 5: return .level(.medium)
+        case 9: return .level(.low)
+        default: return nil
+        }
+    }
+}
+
+// MARK: - Priority Boundary Parsing
+
+/// The result of normalizing a user-supplied priority value at an API
+/// boundary (MCP tool call / CLI). Distinguishes "explicitly no priority"
+/// from "a concrete level".
+public enum NormalizedPriority: Equatable {
+    case unset            // integer 0 or null → clear / leave unset
+    case level(Priority)  // low / medium / high
+}
+
+private func invalidPriorityMessage(received raw: Any) -> String {
+    let received = (raw as? String).map { "\"\($0)\"" } ?? "\(raw)"
+    return "Invalid priority (received: \(received)). Must be one of \"low\", \"medium\", \"high\", or null to clear. Apple's native integer constants are also accepted: 0=none, 1=high, 5=medium, 9=low."
+}
+
+private func priorityIntegerValue(from raw: Any) -> Int? {
+    if raw is Bool { return nil }
+    if let int = raw as? Int { return int }
+    if let double = raw as? Double, double.rounded() == double { return Int(double) }
+    return nil
+}
+
+/// Normalizes a *present, non-null* priority value supplied at an API
+/// boundary. Accepts the canonical strings ("low"/"medium"/"high") and
+/// Apple's native integer constants (0/1/5/9); throws `RemindersError` for
+/// anything else so callers fail loud instead of silently dropping the field.
+public func normalizePriorityValue(_ raw: Any) throws -> NormalizedPriority {
+    if let string = raw as? String {
+        guard let priority = Priority.fromString(string) else {
+            throw RemindersError(invalidPriorityMessage(received: string))
+        }
+        return .level(priority)
+    }
+    // JSON booleans decode to Swift Bool and must never be read as 1 / 0.
+    if raw is Bool {
+        throw RemindersError(invalidPriorityMessage(received: raw))
+    }
+    if let intValue = priorityIntegerValue(from: raw) {
+        guard let normalized = Priority.fromAppleInteger(intValue) else {
+            throw RemindersError(invalidPriorityMessage(received: intValue))
+        }
+        return normalized
+    }
+    throw RemindersError(invalidPriorityMessage(received: raw))
+}
+
+/// Maps a raw create-call `priority` field into the input string. Absent,
+/// null, or integer 0 → nil (no priority).
+public func createPriorityString(from raw: Any?) throws -> String? {
+    guard let raw = raw, !(raw is NSNull) else { return nil }
+    switch try normalizePriorityValue(raw) {
+    case .unset: return nil
+    case .level(let priority): return priority.rawValue
+    }
+}
+
+/// Maps a raw update-call `priority` field into a Clearable. Absent → nil
+/// (leave unchanged); null or integer 0 → .clear.
+public func updatePriorityClearable(from raw: Any?) throws -> Clearable<String>? {
+    guard let raw = raw else { return nil }
+    if raw is NSNull { return .clear }
+    switch try normalizePriorityValue(raw) {
+    case .unset: return .clear
+    case .level(let priority): return .value(priority.rawValue)
+    }
 }
 
 // MARK: - Date Formatting

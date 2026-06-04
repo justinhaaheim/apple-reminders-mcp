@@ -385,9 +385,18 @@ public class MCPServer {
                                         "description": .string("Whether the due date includes a specific time. Set false for all-day reminders. Default: true.")
                                     ]),
                                     "priority": .object([
-                                        "type": .array([.string("string"), .string("null")]),
-                                        "enum": .array([.null, .string("low"), .string("medium"), .string("high")]),
-                                        "description": .string("Priority level. Omit or pass null for no priority.")
+                                        "description": .string("Priority level. Accepts \"low\", \"medium\", \"high\", or null for no priority. (Also accepts Apple's native integers: 0=none, 1=high, 5=medium, 9=low.)"),
+                                        "oneOf": .array([
+                                            .object([
+                                                "type": .string("string"),
+                                                "enum": .array([.string("low"), .string("medium"), .string("high")])
+                                            ]),
+                                            .object([
+                                                "type": .string("integer"),
+                                                "enum": .array([.int(0), .int(1), .int(5), .int(9)])
+                                            ]),
+                                            .object(["type": .string("null")])
+                                        ])
                                     ]),
                                     "url": .object([
                                         "type": .string("string"),
@@ -518,9 +527,18 @@ public class MCPServer {
                                         "description": .string("Whether the due date includes a specific time. Set false for all-day reminders.")
                                     ]),
                                     "priority": .object([
-                                        "type": .array([.string("string"), .string("null")]),
-                                        "enum": .array([.null, .string("low"), .string("medium"), .string("high")]),
-                                        "description": .string("New priority level. Set to null to clear (remove the priority).")
+                                        "description": .string("New priority level. Accepts \"low\", \"medium\", \"high\", or null to clear. (Also accepts Apple's native integers: 0=none, 1=high, 5=medium, 9=low; 0 clears.)"),
+                                        "oneOf": .array([
+                                            .object([
+                                                "type": .string("string"),
+                                                "enum": .array([.string("low"), .string("medium"), .string("high")])
+                                            ]),
+                                            .object([
+                                                "type": .string("integer"),
+                                                "enum": .array([.int(0), .int(1), .int(5), .int(9)])
+                                            ]),
+                                            .object(["type": .string("null")])
+                                        ])
                                     ]),
                                     "completed": .object([
                                         "type": .string("boolean"),
@@ -818,7 +836,7 @@ public class MCPServer {
                     notes: dict["notes"] as? String,
                     list: ListSelector(from: dict["list"] as? [String: Any]),
                     dueDate: dict["dueDate"] as? String,
-                    priority: dict["priority"] as? String,
+                    priority: try createPriorityString(from: dict["priority"]),
                     url: dict["url"] as? String,
                     dueDateIncludesTime: dict["dueDateIncludesTime"] as? Bool,
                     alarms: alarmInputs,
@@ -891,7 +909,7 @@ public class MCPServer {
                     notes: parseClearable(dict["notes"]),
                     list: ListSelector(from: dict["list"] as? [String: Any]),
                     dueDate: parseClearable(dict["dueDate"]),
-                    priority: parseClearable(dict["priority"]),
+                    priority: try updatePriorityClearable(from: dict["priority"]),
                     completed: dict["completed"] as? Bool,
                     completedDate: parseClearable(dict["completedDate"]),
                     url: parseClearable(dict["url"]),

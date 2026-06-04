@@ -237,16 +237,28 @@ exports[`MCP schema snapshots tool schemas create_reminders 1`] = `
               "type": "string",
             },
             "priority": {
-              "description": "Priority level. Omit or pass null for no priority.",
-              "enum": [
-                null,
-                "low",
-                "medium",
-                "high",
-              ],
-              "type": [
-                "string",
-                "null",
+              "description": "Priority level. Accepts "low", "medium", "high", or null for no priority. (Also accepts Apple's native integers: 0=none, 1=high, 5=medium, 9=low.)",
+              "oneOf": [
+                {
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                  ],
+                  "type": "string",
+                },
+                {
+                  "enum": [
+                    0,
+                    1,
+                    5,
+                    9,
+                  ],
+                  "type": "integer",
+                },
+                {
+                  "type": "null",
+                },
               ],
             },
             "recurrenceRule": {
@@ -419,16 +431,28 @@ exports[`MCP schema snapshots tool schemas update_reminders 1`] = `
               "type": "string",
             },
             "priority": {
-              "description": "New priority level. Set to null to clear (remove the priority).",
-              "enum": [
-                null,
-                "low",
-                "medium",
-                "high",
-              ],
-              "type": [
-                "string",
-                "null",
+              "description": "New priority level. Accepts "low", "medium", "high", or null to clear. (Also accepts Apple's native integers: 0=none, 1=high, 5=medium, 9=low; 0 clears.)",
+              "oneOf": [
+                {
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                  ],
+                  "type": "string",
+                },
+                {
+                  "enum": [
+                    0,
+                    1,
+                    5,
+                    9,
+                  ],
+                  "type": "integer",
+                },
+                {
+                  "type": "null",
+                },
               ],
             },
             "recurrenceRule": {
