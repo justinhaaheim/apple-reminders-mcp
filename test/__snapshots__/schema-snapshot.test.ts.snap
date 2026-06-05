@@ -558,6 +558,43 @@ exports[`MCP schema snapshots tool schemas delete_reminders 1`] = `
 }
 `;
 
+exports[`MCP schema snapshots tool schemas delete_list 1`] = `
+{
+  "description": "Permanently delete a reminder list and all reminders it contains. This action cannot be undone. Specify the list by 'id' (preferred) or 'name'. The default list cannot be deleted. A non-empty list is refused unless force:true is passed.",
+  "inputSchema": {
+    "additionalProperties": false,
+    "oneOf": [
+      {
+        "required": [
+          "id",
+        ],
+      },
+      {
+        "required": [
+          "name",
+        ],
+      },
+    ],
+    "properties": {
+      "force": {
+        "description": "Required to delete a list that still contains reminders. Default false: a non-empty list is refused along with its reminder count.",
+        "type": "boolean",
+      },
+      "id": {
+        "description": "List ID (preferred — unambiguous).",
+        "type": "string",
+      },
+      "name": {
+        "description": "List name (case-insensitive). Rejected if multiple lists share the name; use id instead.",
+        "type": "string",
+      },
+    },
+    "type": "object",
+  },
+  "name": "delete_list",
+}
+`;
+
 exports[`MCP schema snapshots tool schemas export_reminders 1`] = `
 {
   "description": "Export reminders to a JSON file for backup. Writes data to a file instead of returning it in context. Optional path, list filter, and includeCompleted parameters.",
@@ -602,6 +639,7 @@ exports[`MCP schema snapshots tool schemas tool count has not changed 1`] = `
 [
   "create_list",
   "create_reminders",
+  "delete_list",
   "delete_reminders",
   "export_reminders",
   "get_lists",

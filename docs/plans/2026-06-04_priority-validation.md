@@ -45,3 +45,19 @@ JSON is decoded via `JSONDecoder` (AnyCodable), so values are REAL Swift types
 ## Next
 
 - Epic B (apple-reminders-mcp-9ei): delete_list tool.
+
+---
+
+# Epic apple-reminders-mcp-9ei — delete_list tool (started 2026-06-05)
+
+- [x] 9ei.1 core: `ReminderStore.deleteCalendar` (EventKit `removeCalendar`;
+      Mock removes calendar + its reminders). Manager `deleteList(selector:force:)`
+      with ambiguity error, default-list protection, test-mode guard, non-empty
+      refusal unless force (reports count), audit log.
+- [x] 9ei.2 MCP `delete_list` tool: oneOf id/name + force; success →
+      `{deleted:[id], failed:[]}`; all failures throw (isError).
+- [ ] 9ei.3 (P4) CLI `reminders delete-list` parity — OPTIONAL, not yet done.
+
+Tests: `test/delete-list.test.ts` (6 cases), readonly count 11→12,
+schema-snapshot delete_list added. 157 pass. Verified live: empty delete,
+force guard ("contains 1 reminder"), default-list refusal.

@@ -625,6 +625,34 @@ public class MCPServer {
                 ])
             ),
 
+            // delete_list
+            MCPResponse.Result.Tool(
+                name: "delete_list",
+                description: "Permanently delete a reminder list and all reminders it contains. This action cannot be undone. Specify the list by 'id' (preferred) or 'name'. The default list cannot be deleted. A non-empty list is refused unless force:true is passed.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "id": .object([
+                            "type": .string("string"),
+                            "description": .string("List ID (preferred — unambiguous).")
+                        ]),
+                        "name": .object([
+                            "type": .string("string"),
+                            "description": .string("List name (case-insensitive). Rejected if multiple lists share the name; use id instead.")
+                        ]),
+                        "force": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Required to delete a list that still contains reminders. Default false: a non-empty list is refused along with its reminder count.")
+                        ])
+                    ]),
+                    "oneOf": .array([
+                        .object(["required": .array([.string("id")])]),
+                        .object(["required": .array([.string("name")])])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
+            ),
+
             // export_reminders
             MCPResponse.Result.Tool(
                 name: "export_reminders",
@@ -946,6 +974,20 @@ public class MCPServer {
 
             let failedOutput = failed.map { ["id": $0.id, "error": $0.error] }
             let response: [String: Any] = ["deleted": deleted, "failed": failedOutput]
+            return try toJSON(response)
+
+        case "delete_list":
+            let selector = ListSelector(
+                name: arguments["name"]?.value as? String,
+                id: arguments["id"]?.value as? String
+            )
+            let force = arguments["force"]?.value as? Bool ?? false
+
+            let deletedId = try await remindersManager.deleteList(selector: selector, force: force)
+            await autoSnapshot(reason: "delete_list")
+
+            // Mirror delete_reminders' shape so batch-style callers stay uniform.
+            let response: [String: Any] = ["deleted": [deletedId], "failed": []]
             return try toJSON(response)
 
         case "export_reminders":

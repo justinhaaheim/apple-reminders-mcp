@@ -73,6 +73,12 @@ describe('MCP schema snapshots', () => {
       expect(tool).toMatchSnapshot();
     });
 
+    test('delete_list', async () => {
+      const tools = await client.listToolsWithSchemas();
+      const tool = tools.find((t) => t.name === 'delete_list');
+      expect(tool).toMatchSnapshot();
+    });
+
     test('export_reminders', async () => {
       const tools = await client.listToolsWithSchemas();
       const tool = tools.find((t) => t.name === 'export_reminders');

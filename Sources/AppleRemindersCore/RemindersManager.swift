@@ -174,6 +174,100 @@ public class RemindersManager {
         return output
     }
 
+    /// Resolves a selector to exactly one list for deletion. Unlike
+    /// `resolveListForCreate`, a name that matches multiple lists is an
+    /// error (we never guess which one to destroy) — callers must use the
+    /// unambiguous id instead.
+    private func resolveSingleListForDeletion(_ selector: ListSelector) throws -> ReminderCalendar {
+        if selector.all == true {
+            throw RemindersError("Cannot delete 'all' lists. Specify a single list by 'id' or 'name'.")
+        }
+
+        let setCount = [selector.id != nil, selector.name != nil].filter { $0 }.count
+        guard setCount == 1 else {
+            throw RemindersError("delete_list requires exactly one of 'id' or 'name'.")
+        }
+
+        let allCalendars = store.getAllCalendars()
+
+        if let id = selector.id {
+            guard let match = allCalendars.first(where: { $0.id == id }) else {
+                throw RemindersError("No list found with ID: '\(id)'")
+            }
+            return match
+        }
+
+        let name = selector.name ?? ""
+        let matches = allCalendars.filter { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        switch matches.count {
+        case 0:
+            let available = allCalendars.map { $0.name }.joined(separator: ", ")
+            throw RemindersError("No list found with name: '\(name)'. Available lists: \(available).")
+        case 1:
+            return matches[0]
+        default:
+            let ids = matches.map { $0.id }.joined(separator: ", ")
+            throw RemindersError(
+                "Multiple lists named '\(name)' (\(matches.count)). Delete by 'id' instead. Matching ids: \(ids)"
+            )
+        }
+    }
+
+    /// Permanently delete a list and every reminder it contains. Irreversible.
+    /// Refuses to delete the default list, refuses an ambiguous name, and
+    /// refuses a non-empty list unless `force` is true (reporting the count).
+    /// Returns the deleted list's id.
+    public func deleteList(selector: ListSelector, force: Bool) async throws -> String {
+        let calendar = try resolveSingleListForDeletion(selector)
+
+        // Default-list protection (Apple's UI enforces this too).
+        if let defaultCalendar = store.getDefaultCalendar(), defaultCalendar.id == calendar.id {
+            throw RemindersError(
+                "Cannot delete the default list ('\(calendar.name)'). The default list for new reminders cannot be removed."
+            )
+        }
+
+        // Test mode validation (mirrors deleteSingleReminder).
+        if TestModeConfig.isEnabled && !TestModeConfig.isTestList(calendar.name) {
+            throw RemindersError(
+                "TEST MODE: Cannot delete list '\(calendar.name)'. " +
+                "List name must start with '\(TestModeConfig.testListPrefix)'"
+            )
+        }
+
+        // Non-empty safety guard: refuse unless force is set.
+        let contained = await store.fetchReminders(
+            in: [calendar],
+            status: .all,
+            dueDateStart: nil,
+            dueDateEnd: nil
+        )
+        if !contained.isEmpty && !force {
+            throw RemindersError(
+                "List '\(calendar.name)' contains \(contained.count) reminder(s). " +
+                "This action cannot be undone. Pass force:true to delete the list and everything in it."
+            )
+        }
+
+        let beforeState: [String: Any] = [
+            "id": calendar.id,
+            "name": calendar.name,
+            "reminderCount": contained.count,
+        ]
+
+        try store.deleteCalendar(calendar)
+        log("Deleted reminder list '\(calendar.name)' (\(contained.count) reminder(s))")
+
+        AuditLogger.shared.logDelete(
+            action: "delete_list",
+            args: ["id": calendar.id, "name": calendar.name, "force": force],
+            result: .success,
+            beforeState: beforeState
+        )
+
+        return calendar.id
+    }
+
     // MARK: - ID Resolution
 
     /// Resolves a potentially abbreviated reminder ID to a full Reminder object.
