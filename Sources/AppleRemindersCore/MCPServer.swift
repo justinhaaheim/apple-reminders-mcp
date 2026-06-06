@@ -1054,6 +1054,7 @@ public class MCPServer {
         "create_reminders": "create",
         "update_reminders": "update",
         "delete_reminders": "delete",
+        "delete_list": "delete-list",
         "export_reminders": "export",
     ]
 

@@ -625,6 +625,60 @@ public enum HelpContent {
     • List names cannot be empty strings.
     """
 
+    // MARK: - Delete List
+
+    public static let deleteListConcise = """
+    reminders delete-list <name> | --list-id <id> [--force]
+
+    Permanently delete a reminder list and everything in it. Cannot be undone.
+
+    Arguments:
+      <name>          List name (case-insensitive). Use --list-id if ambiguous.
+
+    Options:
+      --list-id <id>  List ID (preferred — unambiguous)
+      --force         Required when the list still contains reminders
+
+    Returns {deleted: [id], failed: []} as JSON.
+
+    Use --help --verbose for detailed docs and examples.
+    Use --help=skill for best practices and strategic guidance.
+    """
+
+    public static let deleteListVerbose = """
+    reminders delete-list <name> | --list-id <id> [--force]
+
+    Permanently delete a reminder list and all reminders it contains. This
+    action cannot be undone.
+
+    Specify exactly one of a positional list name or --list-id. The default
+    list cannot be deleted. A name that matches multiple lists is rejected —
+    use --list-id in that case. A list that still contains reminders is
+    refused (with its reminder count) unless --force is passed.
+
+    Output:
+      Returns {deleted: [<list-id>], failed: []}, mirroring `delete`.
+
+    Examples:
+      reminders delete-list "Old Project"
+      reminders delete-list --list-id "x-apple-..." --pretty
+      reminders delete-list "Scratch" --force          # non-empty list
+
+    Use --help=skill for best practices and strategic guidance.
+    """
+
+    public static let deleteListSkill = """
+    reminders delete-list — Strategic Guidance
+
+    • Prefer --list-id: it is unambiguous and survives renames. A name that
+      matches multiple lists is rejected rather than guessed.
+    • The default list for new reminders cannot be deleted.
+    • --force is required for a non-empty list; without it the command reports
+      the reminder count and refuses, so you don't nuke data by accident.
+    • Deletion is permanent — take a snapshot (`reminders snapshot`) first if
+      you might want the data back.
+    """
+
     // MARK: - Export
 
     public static let exportConcise = """
@@ -872,6 +926,7 @@ public enum HelpContent {
         case "delete": return deleteConcise
         case "lists": return listsConcise
         case "create-list": return createListConcise
+        case "delete-list": return deleteListConcise
         case "export": return exportConcise
         case "snapshot": return snapshotConcise
         case "audit": return auditConcise
@@ -890,6 +945,7 @@ public enum HelpContent {
         case "delete": return deleteVerbose
         case "lists": return listsVerbose
         case "create-list": return createListVerbose
+        case "delete-list": return deleteListVerbose
         case "export": return exportVerbose
         case "snapshot": return snapshotVerbose
         case "audit": return auditVerbose
@@ -908,6 +964,7 @@ public enum HelpContent {
         case "delete": return deleteSkill
         case "lists": return listsSkill
         case "create-list": return createListSkill
+        case "delete-list": return deleteListSkill
         case "export": return exportSkill
         case "snapshot": return snapshotSkill
         case "audit": return auditSkill

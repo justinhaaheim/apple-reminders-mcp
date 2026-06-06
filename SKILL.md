@@ -72,6 +72,10 @@ reminders delete <id1> <id2> <id3>                       # Batch delete
 # Create list
 reminders create-list "Project Alpha"
 
+# Delete list (and all reminders in it) — needs --force when non-empty
+reminders delete-list "Project Alpha"
+reminders delete-list --list-id "x-apple-..." --force
+
 # Export
 reminders export                                         # To temp file
 reminders export --path ~/backup.json --include-completed

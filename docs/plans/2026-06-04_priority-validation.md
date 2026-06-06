@@ -56,8 +56,13 @@ JSON is decoded via `JSONDecoder` (AnyCodable), so values are REAL Swift types
       refusal unless force (reports count), audit log.
 - [x] 9ei.2 MCP `delete_list` tool: oneOf id/name + force; success →
       `{deleted:[id], failed:[]}`; all failures throw (isError).
-- [ ] 9ei.3 (P4) CLI `reminders delete-list` parity — OPTIONAL, not yet done.
+- [x] 9ei.3 (P4) CLI `reminders delete-list` parity: name arg or --list-id,
+      --force; output `{deleted:[id], failed:[]}`. Help content + toolToCommandMap
+      wired. CLI fresh-mock-per-invocation only seeds default list, so CLI tests
+      cover guard/validation paths; happy/force/ambiguity covered via shared
+      manager in the MCP suite.
 
-Tests: `test/delete-list.test.ts` (6 cases), readonly count 11→12,
-schema-snapshot delete_list added. 157 pass. Verified live: empty delete,
-force guard ("contains 1 reminder"), default-list refusal.
+**Epic 9ei CLOSED 2026-06-06.** Tests: `test/delete-list.test.ts` (6, MCP) +
+`test/cli-delete-list.test.ts` (4, CLI), readonly count 11→12, schema-snapshot
+delete_list added. 161 pass. Verified live (MCP + CLI). Docs updated
+(CLAUDE.md tools table + CLI usage, SKILL.md quick ref).

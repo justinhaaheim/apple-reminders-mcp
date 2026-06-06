@@ -94,6 +94,7 @@ Sources/
 | `create_reminders` | Create one or more reminders (batch) |
 | `update_reminders` | Update reminders including mark complete/incomplete (batch) |
 | `delete_reminders` | Delete reminders (batch) |
+| `delete_list` | Delete a reminder list and all reminders it contains. Refuses the default list and an ambiguous name; a non-empty list needs `force: true`. Returns `{deleted, failed}`. |
 | `export_reminders` | Export reminders to JSON file for backup |
 | `list_hashtags` | Master hashtag inventory with usage counts (read-only SQLite enrichment) |
 | `help` | Get documentation for any tool (MCP meta-tool) |
@@ -152,6 +153,10 @@ reminders update <id> --title "New title" --priority high
 
 # Delete reminders
 reminders delete <id1> <id2>
+
+# Delete a list (and everything in it) — needs --force when non-empty
+reminders delete-list "Old Project"
+reminders delete-list --list-id "x-apple-..." --force
 
 # Hashtag inventory (SQLite enrichment; needs Full Disk Access)
 reminders hashtags --pretty
