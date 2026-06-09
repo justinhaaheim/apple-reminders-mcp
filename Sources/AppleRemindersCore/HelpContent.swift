@@ -75,7 +75,7 @@ public enum HelpContent {
       --all-lists       Query across all lists
       (omitted)         Uses the default list
 
-    Priority Values: low, medium, high (omit for no priority)
+    Priority Values: low, medium, high, none (0/1/5/9 also accepted; omit = no priority)
 
     Date Format: ISO 8601 with timezone, e.g. 2026-03-07T09:00:00-08:00
       Date-only also works for the per-field date flags: 2026-03-07
@@ -346,7 +346,7 @@ public enum HelpContent {
       --list-id <string>          Target list ID
       --notes <string>            Body text
       --due <iso-8601>            Due date (e.g. 2026-03-07T09:00:00-08:00)
-      --priority <string>         low, medium, high (omit for no priority)
+      --priority <string>         low, medium, high, none (0/1/5/9 also accepted; omit = no priority)
       --url <string>              URL to attach
       --alarm-relative <seconds>  Alarm offset before due date (e.g. 900 = 15 min)
       --alarm-date <iso-8601>     Absolute alarm date
@@ -370,7 +370,7 @@ public enum HelpContent {
       --list-id <string>          Target list ID
       --notes <string>            Body text
       --due <iso-8601>            Due date (full ISO 8601 with time and timezone)
-      --priority <string>         low, medium, high (omit for no priority)
+      --priority <string>         low, medium, high, none (0/1/5/9 also accepted; omit = no priority)
       --url <string>              URL to attach
       --alarm-relative <seconds>  Alarm offset in seconds before due date (e.g. 900 = 15 min)
       --alarm-date <iso-8601>     Absolute alarm date/time

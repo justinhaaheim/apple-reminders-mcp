@@ -34,7 +34,7 @@ struct UpdateCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Clear due date")
     var clearDueDate: Bool = false
 
-    @Option(name: .long, help: "New priority: low, medium, high")
+    @Option(name: .long, help: "New priority: low, medium, high, or none (Apple ints 0/1/5/9 also accepted; or use --clear-priority)")
     var priority: String?
 
     @Flag(name: .long, help: "Clear priority (remove it)")

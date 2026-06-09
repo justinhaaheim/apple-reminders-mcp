@@ -25,7 +25,7 @@ struct CreateCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Due date (ISO 8601)")
     var due: String?
 
-    @Option(name: .long, help: "Priority: low, medium, high (omit for no priority)")
+    @Option(name: .long, help: "Priority: low, medium, high, or none (Apple ints 0/1/5/9 also accepted; omit = no priority)")
     var priority: String?
 
     @Option(name: .long, help: "URL to attach")

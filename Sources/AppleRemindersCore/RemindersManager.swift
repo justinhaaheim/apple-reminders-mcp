@@ -915,11 +915,9 @@ public class RemindersManager {
             }
         }
 
-        if let priorityString = input.priority {
-            guard let priority = Priority.fromString(priorityString) else {
-                throw RemindersError("Invalid priority: '\(priorityString)'. Must be one of: low, medium, high. Omit to leave unset.")
-            }
-            mutableReminder.priority = priority.internalValue
+        if let priorityToken = input.priority {
+            // Shared validator: low/medium/high/none/0/1/5/9; nil = no priority.
+            mutableReminder.priority = (try Priority.parse(priorityToken))?.internalValue ?? 0
         }
 
         if let urlString = input.url {
@@ -1047,11 +1045,9 @@ public class RemindersManager {
             switch priorityValue {
             case .clear:
                 reminder.priority = 0
-            case .value(let priorityString):
-                guard let priority = Priority.fromString(priorityString) else {
-                    throw RemindersError("Invalid priority: '\(priorityString)'. Must be one of: low, medium, high. Use null to clear.")
-                }
-                reminder.priority = priority.internalValue
+            case .value(let priorityToken):
+                // "none"/"0"/null clear; low/medium/high/1/5/9 set the level.
+                reminder.priority = (try Priority.parse(priorityToken))?.internalValue ?? 0
             }
         }
 

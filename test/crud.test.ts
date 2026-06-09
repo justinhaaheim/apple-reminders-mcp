@@ -144,19 +144,49 @@ describe('CRUD operations (isolated to test list)', () => {
     expect((cleared as Array<{priority?: string}>)[0].priority).toBeUndefined();
   });
 
-  test('rejects an out-of-range integer priority with a loud error', async () => {
+  test('accepts "none" on create and canonicalizes to no priority', async () => {
+    const result = await client.callTool('create_reminders', {
+      reminders: [
+        {title: 'None priority', list: {name: testListName}, priority: 'none'},
+      ],
+    });
+
+    expect(Array.isArray(result)).toBe(true);
+    // "none" is accepted as input but canonicalizes to no-priority (null/omitted).
+    expect((result as Array<{priority?: string}>)[0].priority).toBeUndefined();
+  });
+
+  test('accepts "none" on update to clear an existing priority', async () => {
+    const createResult = await client.callTool('create_reminders', {
+      reminders: [
+        {title: 'None update', list: {name: testListName}, priority: 'high'},
+      ],
+    });
+    const reminderId = (createResult as Array<{id: string}>)[0].id;
+
+    const cleared = await client.callTool('update_reminders', {
+      reminders: [{id: reminderId, priority: 'none'}],
+    });
+    expect((cleared as Array<{priority?: string}>)[0].priority).toBeUndefined();
+  });
+
+  test('reports an out-of-range integer priority as a per-item failure', async () => {
     const result = await client.callTool('create_reminders', {
       reminders: [
         {title: 'Bad priority', list: {name: testListName}, priority: 2},
       ],
     });
 
-    expect(result._isError).toBe(true);
-    expect(result.error as string).toContain('Invalid priority');
-    expect(result.error as string).toContain('received: 2');
+    // Not silent and not a whole-batch abort: invalid values surface in the
+    // failed[] array, the same way a bad dueDate or unknown list does.
+    const failed = result.failed as Array<{index: number; error: string}>;
+    expect(Array.isArray(failed)).toBe(true);
+    expect(failed.length).toBe(1);
+    expect(failed[0].error).toContain('Invalid priority');
+    expect(result.created).toEqual([]);
   });
 
-  test('rejects an unknown priority string on update with a loud error', async () => {
+  test('reports an unknown priority string on update as a per-item failure', async () => {
     const createResult = await client.callTool('create_reminders', {
       reminders: [{title: 'Bad priority update', list: {name: testListName}}],
     });
@@ -166,19 +196,21 @@ describe('CRUD operations (isolated to test list)', () => {
       reminders: [{id: reminderId, priority: 'urgent'}],
     });
 
-    expect(result._isError).toBe(true);
-    expect(result.error as string).toContain('Invalid priority');
+    const failed = result.failed as Array<{id: string; error: string}>;
+    expect(Array.isArray(failed)).toBe(true);
+    expect(failed[0].error).toContain('Invalid priority');
   });
 
-  test('rejects a boolean priority (does not coerce true → 1)', async () => {
+  test('reports a boolean priority as a per-item failure (no true → 1 coercion)', async () => {
     const result = await client.callTool('create_reminders', {
       reminders: [
         {title: 'Bool priority', list: {name: testListName}, priority: true},
       ],
     });
 
-    expect(result._isError).toBe(true);
-    expect(result.error as string).toContain('Invalid priority');
+    const failed = result.failed as Array<{index: number; error: string}>;
+    expect(Array.isArray(failed)).toBe(true);
+    expect(failed[0].error).toContain('Invalid priority');
   });
 
   test('completes a reminder', async () => {

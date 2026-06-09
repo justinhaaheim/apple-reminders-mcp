@@ -864,7 +864,7 @@ public class MCPServer {
                     notes: dict["notes"] as? String,
                     list: ListSelector(from: dict["list"] as? [String: Any]),
                     dueDate: dict["dueDate"] as? String,
-                    priority: try createPriorityString(from: dict["priority"]),
+                    priority: priorityToken(from: dict["priority"]),
                     url: dict["url"] as? String,
                     dueDateIncludesTime: dict["dueDateIncludesTime"] as? Bool,
                     alarms: alarmInputs,
@@ -937,7 +937,7 @@ public class MCPServer {
                     notes: parseClearable(dict["notes"]),
                     list: ListSelector(from: dict["list"] as? [String: Any]),
                     dueDate: parseClearable(dict["dueDate"]),
-                    priority: try updatePriorityClearable(from: dict["priority"]),
+                    priority: priorityClearable(from: dict["priority"]),
                     completed: dict["completed"] as? Bool,
                     completedDate: parseClearable(dict["completedDate"]),
                     url: parseClearable(dict["url"]),
@@ -1109,6 +1109,26 @@ public class MCPServer {
         if raw is NSNull { return .clear }
         if let value = raw as? T { return .value(value) }
         return nil
+    }
+
+    /// Extracts a raw create-priority token from a JSON value. Absent or null
+    /// → nil (no priority). Other scalars are stringified (int 1 → "1") and
+    /// validated by `Priority.parse` in the manager, so an invalid value
+    /// surfaces as a per-item failure instead of being silently dropped.
+    private func priorityToken(from raw: Any?) -> String? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        if let string = raw as? String { return string }
+        return "\(raw)"
+    }
+
+    /// Extracts a Clearable update-priority token. Absent → nil (unchanged);
+    /// null → .clear; otherwise the stringified token (the manager treats
+    /// "none"/"0" as a clear via `Priority.parse`).
+    private func priorityClearable(from raw: Any?) -> Clearable<String>? {
+        guard let raw = raw else { return nil }
+        if raw is NSNull { return .clear }
+        if let string = raw as? String { return .value(string) }
+        return .value("\(raw)")
     }
 
     private func encodableArray(_ reminders: [ReminderOutput]) -> [[String: Any]] {
