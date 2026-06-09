@@ -384,20 +384,9 @@ public class MCPServer {
                                         "type": .string("boolean"),
                                         "description": .string("Whether the due date includes a specific time. Set false for all-day reminders. Default: true.")
                                     ]),
-                                    "priority": .object([
-                                        "description": .string("Priority level. Accepts \"low\", \"medium\", \"high\", or null for no priority. (Also accepts Apple's native integers: 0=none, 1=high, 5=medium, 9=low.)"),
-                                        "oneOf": .array([
-                                            .object([
-                                                "type": .string("string"),
-                                                "enum": .array([.string("low"), .string("medium"), .string("high")])
-                                            ]),
-                                            .object([
-                                                "type": .string("integer"),
-                                                "enum": .array([.int(0), .int(1), .int(5), .int(9)])
-                                            ]),
-                                            .object(["type": .string("null")])
-                                        ])
-                                    ]),
+                                    "priority": prioritySchema(
+                                        description: "Priority level. Canonical values: \"low\", \"medium\", \"high\", or null for no priority. \"none\" and Apple's native integers 0/1/5/9 are also accepted and normalize to those (0 / \"none\" / null = no priority)."
+                                    ),
                                     "url": .object([
                                         "type": .string("string"),
                                         "description": .string("URL to associate with the reminder")
@@ -526,20 +515,9 @@ public class MCPServer {
                                         "type": .string("boolean"),
                                         "description": .string("Whether the due date includes a specific time. Set false for all-day reminders.")
                                     ]),
-                                    "priority": .object([
-                                        "description": .string("New priority level. Accepts \"low\", \"medium\", \"high\", or null to clear. (Also accepts Apple's native integers: 0=none, 1=high, 5=medium, 9=low; 0 clears.)"),
-                                        "oneOf": .array([
-                                            .object([
-                                                "type": .string("string"),
-                                                "enum": .array([.string("low"), .string("medium"), .string("high")])
-                                            ]),
-                                            .object([
-                                                "type": .string("integer"),
-                                                "enum": .array([.int(0), .int(1), .int(5), .int(9)])
-                                            ]),
-                                            .object(["type": .string("null")])
-                                        ])
-                                    ]),
+                                    "priority": prioritySchema(
+                                        description: "New priority level. Canonical values: \"low\", \"medium\", \"high\", or null to clear. \"none\" and Apple's native integers 0/1/5/9 are also accepted (0 / \"none\" / null all clear)."
+                                    ),
                                     "completed": .object([
                                         "type": .string("boolean"),
                                         "description": .string("Set true to complete, false to uncomplete")
@@ -1109,6 +1087,27 @@ public class MCPServer {
         if raw is NSNull { return .clear }
         if let value = raw as? T { return .value(value) }
         return nil
+    }
+
+    /// The shared `priority` parameter schema. Canonical values are low/
+    /// medium/high or null; "none" and Apple integers 0/1/5/9 are also accepted
+    /// (see Priority.parse) but intentionally not enumerated here. Used by both
+    /// create_reminders and update_reminders so the two schemas never drift.
+    private func prioritySchema(description: String) -> JSONValue {
+        .object([
+            "description": .string(description),
+            "oneOf": .array([
+                .object([
+                    "type": .string("string"),
+                    "enum": .array([.string("low"), .string("medium"), .string("high")])
+                ]),
+                .object([
+                    "type": .string("integer"),
+                    "enum": .array([.int(0), .int(1), .int(5), .int(9)])
+                ]),
+                .object(["type": .string("null")])
+            ])
+        ])
     }
 
     /// Extracts a raw create-priority token from a JSON value. Absent or null

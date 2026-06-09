@@ -103,23 +103,37 @@ public class RemindersManager {
         throw RemindersError("Invalid list selector")
     }
 
-    public func resolveListForCreate(_ selector: ListSelector?) throws -> ReminderCalendar {
+    private enum DuplicateNamePolicy {
+        case useFirst  // create: take the first match
+        case reject    // delete: never guess which list to destroy
+    }
+
+    /// Shared single-list resolver. Create allows a nil selector (→ default
+    /// list) and takes the first match on a duplicate name; delete requires an
+    /// explicit selector and rejects an ambiguous name. Centralizes id/name
+    /// matching and the not-found messages so the two paths can't drift.
+    private func resolveSingleList(
+        _ selector: ListSelector?,
+        allowDefault: Bool,
+        duplicateName: DuplicateNamePolicy
+    ) throws -> ReminderCalendar {
         guard let selector = selector, !selector.isEmpty else {
-            // No selector → default list
+            guard allowDefault else {
+                throw RemindersError("A list must be specified by 'id' or 'name'.")
+            }
             guard let defaultCalendar = store.getDefaultCalendar() else {
                 throw RemindersError("No default list found")
             }
             return defaultCalendar
         }
 
-        // Validate: only name or id allowed (not all)
         if selector.all == true {
-            throw RemindersError("Cannot create reminder in 'all' lists. Specify a single list by name or ID.")
+            throw RemindersError("Cannot use 'all' here. Specify a single list by 'id' or 'name'.")
         }
 
         let setCount = [selector.id != nil, selector.name != nil].filter { $0 }.count
-        if setCount != 1 {
-            throw RemindersError("List selector must specify exactly one of: 'id' or 'name'")
+        guard setCount == 1 else {
+            throw RemindersError("List selector must specify exactly one of: 'id' or 'name'.")
         }
 
         let allCalendars = store.getAllCalendars()
@@ -131,17 +145,29 @@ public class RemindersManager {
             return match
         }
 
-        if let name = selector.name {
-            guard let match = allCalendars.first(where: {
-                $0.name.caseInsensitiveCompare(name) == .orderedSame
-            }) else {
-                let available = allCalendars.map { $0.name }.joined(separator: ", ")
-                throw RemindersError("No list found with name: '\(name)'. Available lists: \(available).")
+        let name = selector.name ?? ""
+        let matches = allCalendars.filter { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        switch matches.count {
+        case 0:
+            let available = allCalendars.map { $0.name }.joined(separator: ", ")
+            throw RemindersError("No list found with name: '\(name)'. Available lists: \(available).")
+        case 1:
+            return matches[0]
+        default:
+            switch duplicateName {
+            case .useFirst:
+                return matches[0]
+            case .reject:
+                let ids = matches.map { $0.id }.joined(separator: ", ")
+                throw RemindersError(
+                    "Multiple lists named '\(name)' (\(matches.count)). Delete by 'id' instead. Matching ids: \(ids)"
+                )
             }
-            return match
         }
+    }
 
-        throw RemindersError("Invalid list selector")
+    public func resolveListForCreate(_ selector: ListSelector?) throws -> ReminderCalendar {
+        return try resolveSingleList(selector, allowDefault: true, duplicateName: .useFirst)
     }
 
     public func createList(name: String) throws -> ReminderListOutput {
@@ -174,51 +200,12 @@ public class RemindersManager {
         return output
     }
 
-    /// Resolves a selector to exactly one list for deletion. Unlike
-    /// `resolveListForCreate`, a name that matches multiple lists is an
-    /// error (we never guess which one to destroy) — callers must use the
-    /// unambiguous id instead.
-    private func resolveSingleListForDeletion(_ selector: ListSelector) throws -> ReminderCalendar {
-        if selector.all == true {
-            throw RemindersError("Cannot delete 'all' lists. Specify a single list by 'id' or 'name'.")
-        }
-
-        let setCount = [selector.id != nil, selector.name != nil].filter { $0 }.count
-        guard setCount == 1 else {
-            throw RemindersError("delete_list requires exactly one of 'id' or 'name'.")
-        }
-
-        let allCalendars = store.getAllCalendars()
-
-        if let id = selector.id {
-            guard let match = allCalendars.first(where: { $0.id == id }) else {
-                throw RemindersError("No list found with ID: '\(id)'")
-            }
-            return match
-        }
-
-        let name = selector.name ?? ""
-        let matches = allCalendars.filter { $0.name.caseInsensitiveCompare(name) == .orderedSame }
-        switch matches.count {
-        case 0:
-            let available = allCalendars.map { $0.name }.joined(separator: ", ")
-            throw RemindersError("No list found with name: '\(name)'. Available lists: \(available).")
-        case 1:
-            return matches[0]
-        default:
-            let ids = matches.map { $0.id }.joined(separator: ", ")
-            throw RemindersError(
-                "Multiple lists named '\(name)' (\(matches.count)). Delete by 'id' instead. Matching ids: \(ids)"
-            )
-        }
-    }
-
     /// Permanently delete a list and every reminder it contains. Irreversible.
     /// Refuses to delete the default list, refuses an ambiguous name, and
     /// refuses a non-empty list unless `force` is true (reporting the count).
     /// Returns the deleted list's id.
     public func deleteList(selector: ListSelector, force: Bool) async throws -> String {
-        let calendar = try resolveSingleListForDeletion(selector)
+        let calendar = try resolveSingleList(selector, allowDefault: false, duplicateName: .reject)
 
         // Default-list protection (Apple's UI enforces this too).
         if let defaultCalendar = store.getDefaultCalendar(), defaultCalendar.id == calendar.id {

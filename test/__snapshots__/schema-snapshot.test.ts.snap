@@ -237,7 +237,7 @@ exports[`MCP schema snapshots tool schemas create_reminders 1`] = `
               "type": "string",
             },
             "priority": {
-              "description": "Priority level. Accepts "low", "medium", "high", or null for no priority. (Also accepts Apple's native integers: 0=none, 1=high, 5=medium, 9=low.)",
+              "description": "Priority level. Canonical values: "low", "medium", "high", or null for no priority. "none" and Apple's native integers 0/1/5/9 are also accepted and normalize to those (0 / "none" / null = no priority).",
               "oneOf": [
                 {
                   "enum": [
@@ -431,7 +431,7 @@ exports[`MCP schema snapshots tool schemas update_reminders 1`] = `
               "type": "string",
             },
             "priority": {
-              "description": "New priority level. Accepts "low", "medium", "high", or null to clear. (Also accepts Apple's native integers: 0=none, 1=high, 5=medium, 9=low; 0 clears.)",
+              "description": "New priority level. Canonical values: "low", "medium", "high", or null to clear. "none" and Apple's native integers 0/1/5/9 are also accepted (0 / "none" / null all clear).",
               "oneOf": [
                 {
                   "enum": [
