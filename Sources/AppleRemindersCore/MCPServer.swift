@@ -839,11 +839,11 @@ public class MCPServer {
 
                 inputs.append(CreateReminderInput(
                     title: title,
-                    notes: dict["notes"] as? String,
-                    list: ListSelector(from: dict["list"] as? [String: Any]),
-                    dueDate: dict["dueDate"] as? String,
+                    notes: try requireStringOrNil(dict["notes"], field: "notes"),
+                    list: try parseListSelector(dict["list"]),
+                    dueDate: try requireStringOrNil(dict["dueDate"], field: "dueDate"),
                     priority: priorityToken(from: dict["priority"]),
-                    url: dict["url"] as? String,
+                    url: try requireStringOrNil(dict["url"], field: "url"),
                     dueDateIncludesTime: dict["dueDateIncludesTime"] as? Bool,
                     alarms: alarmInputs,
                     recurrenceRule: recurrenceInput
@@ -911,14 +911,14 @@ public class MCPServer {
 
                 inputs.append(UpdateReminderInput(
                     id: id,
-                    title: dict["title"] as? String,
-                    notes: parseClearable(dict["notes"]),
-                    list: ListSelector(from: dict["list"] as? [String: Any]),
-                    dueDate: parseClearable(dict["dueDate"]),
+                    title: try requireStringOrNil(dict["title"], field: "title"),
+                    notes: try parseClearable(dict["notes"], field: "notes"),
+                    list: try parseListSelector(dict["list"]),
+                    dueDate: try parseClearable(dict["dueDate"], field: "dueDate"),
                     priority: priorityClearable(from: dict["priority"]),
-                    completed: dict["completed"] as? Bool,
-                    completedDate: parseClearable(dict["completedDate"]),
-                    url: parseClearable(dict["url"]),
+                    completed: try requireBoolOrNil(dict["completed"], field: "completed"),
+                    completedDate: try parseClearable(dict["completedDate"], field: "completedDate"),
+                    url: try parseClearable(dict["url"], field: "url"),
                     dueDateIncludesTime: dict["dueDateIncludesTime"] as? Bool,
                     alarms: alarmsClearable,
                     recurrenceRule: recurrenceClearable
@@ -1082,11 +1082,51 @@ public class MCPServer {
     }
 
     /// Parses a JSON value into a Clearable: NSNull → .clear, castable T → .value(T), absent key → nil
-    private func parseClearable<T>(_ raw: Any?) -> Clearable<T>? {
+    /// Parses a Clearable field. Absent → nil (leave unchanged); null → .clear;
+    /// correct type → .value. A present-but-wrong-type value THROWS rather than
+    /// being silently dropped — a silent no-op reads as success to the caller.
+    private func parseClearable<T>(_ raw: Any?, field: String) throws -> Clearable<T>? {
         guard let raw = raw else { return nil }
         if raw is NSNull { return .clear }
         if let value = raw as? T { return .value(value) }
-        return nil
+        throw RemindersError(
+            "Field '\(field)' must be a \(T.self) or null, but received: \(raw)."
+        )
+    }
+
+    /// Extracts an optional string field, throwing on a present-but-wrong-type
+    /// value instead of silently dropping it. Absent or null → nil.
+    private func requireStringOrNil(_ raw: Any?, field: String) throws -> String? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        guard let string = raw as? String else {
+            throw RemindersError("Field '\(field)' must be a string or null, but received: \(raw).")
+        }
+        return string
+    }
+
+    /// Extracts an optional boolean field, throwing on a present-but-wrong-type
+    /// value (e.g. `completed: 1` or `completed: "true"`) instead of silently
+    /// dropping it. Absent or null → nil.
+    private func requireBoolOrNil(_ raw: Any?, field: String) throws -> Bool? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        guard let bool = raw as? Bool else {
+            throw RemindersError("Field '\(field)' must be a boolean or null, but received: \(raw).")
+        }
+        return bool
+    }
+
+    /// Parses a list selector object. Absent or null → nil (caller's default).
+    /// A present-but-non-object value (e.g. the bare string "Work" instead of
+    /// {"name":"Work"}) THROWS — otherwise it would silently fall back to the
+    /// default list and write to the wrong place.
+    private func parseListSelector(_ raw: Any?, field: String = "list") throws -> ListSelector? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        guard let dict = raw as? [String: Any] else {
+            throw RemindersError(
+                "Field '\(field)' must be an object like {\"name\": \"...\"} or {\"id\": \"...\"}, but received: \(raw)."
+            )
+        }
+        return ListSelector(from: dict)
     }
 
     /// The shared `priority` parameter schema. Canonical values are low/
