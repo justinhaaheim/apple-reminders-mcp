@@ -913,7 +913,7 @@ public enum HelpContent {
     /// All command names that have custom help content.
     public static let supportedCommands: Set<String> = [
         "query", "create", "update", "delete", "lists",
-        "create-list", "export", "snapshot", "audit", "mcp",
+        "create-list", "delete-list", "export", "snapshot", "audit", "mcp",
     ]
 
     /// Get concise help for a command (or top-level if nil).
