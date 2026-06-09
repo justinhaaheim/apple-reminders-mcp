@@ -64,4 +64,32 @@ describe('input validation (no silent type drops)', () => {
     // Clears notes and succeeds — returns the updated reminder array.
     expect(Array.isArray(result)).toBe(true);
   });
+
+  test('JMESPath comparing priority to a non-canonical value fails loudly', async () => {
+    const result = await client.callTool('query_reminders', {
+      list: {name: testListName},
+      query: "[?priority == 'none']",
+    });
+    // Would silently return [] otherwise — instead it errors with a hint.
+    expect(result._isError).toBe(true);
+    expect(result.error as string).toContain('priority');
+  });
+
+  test('JMESPath with a valid priority literal still works', async () => {
+    const result = await client.callTool('query_reminders', {
+      list: {name: testListName},
+      query: "[?priority == 'high']",
+    });
+    expect(result._isError).toBeUndefined();
+    expect(Array.isArray(result)).toBe(true);
+  });
+
+  test('JMESPath comparing priority to null is allowed', async () => {
+    const result = await client.callTool('query_reminders', {
+      list: {name: testListName},
+      query: '[?priority == null]',
+    });
+    expect(result._isError).toBeUndefined();
+    expect(Array.isArray(result)).toBe(true);
+  });
 });

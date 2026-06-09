@@ -510,6 +510,7 @@ public class RemindersManager {
         // 3. Apply JMESPath if provided — always uses full fields, outputDetail is ignored
         //    When JMESPath is used, return full result with no pagination (users can use JMESPath slicing)
         if let jmesQuery = query, !jmesQuery.isEmpty {
+            try validatePriorityLiteralsInQuery(jmesQuery)
             do {
                 let result = try applyJMESPath(reminderOutputs, query: jmesQuery)
                 if let arrayResult = result as? [Any] {
@@ -607,6 +608,36 @@ public class RemindersManager {
             throw RemindersError("Invalid \(fieldName) format: '\(value)'. Expected ISO 8601 (e.g. '2026-04-30' or '2026-04-30T17:00:00-08:00').")
         }
         return date
+    }
+
+    /// Conservatively guards against a JMESPath comparison of `priority`
+    /// against a string literal it can never equal (output priority is
+    /// null | "low" | "medium" | "high"). For example `[?priority == 'none']`
+    /// would silently return `[]`; instead we throw with a hint so the caller
+    /// fixes the query rather than trusting an empty result. Only single-quoted
+    /// literals (JMESPath string-literal syntax) compared directly to the
+    /// `priority` field are flagged — every other expression is left untouched.
+    private func validatePriorityLiteralsInQuery(_ query: String) throws {
+        let valid: Set<String> = ["low", "medium", "high"]
+        let patterns = [
+            "\\bpriority\\b\\s*[=!]=\\s*'([^']*)'",   // priority == 'x'
+            "'([^']*)'\\s*[=!]=\\s*\\bpriority\\b",   // 'x' == priority
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(query.startIndex..., in: query)
+            for match in regex.matches(in: query, options: [], range: range) {
+                guard let literalRange = Range(match.range(at: 1), in: query) else { continue }
+                let literal = String(query[literalRange])
+                if !valid.contains(literal) {
+                    throw RemindersError(
+                        "JMESPath compares priority to '\(literal)', which it can never equal — "
+                            + "priority is null, \"low\", \"medium\", or \"high\". For \"no priority\" "
+                            + "compare to null (e.g. [?priority == null]); for a level use 'low', 'medium', or 'high'."
+                    )
+                }
+            }
+        }
     }
 
     private func applyJMESPath(_ reminders: [ReminderOutput], query: String) throws -> Any {

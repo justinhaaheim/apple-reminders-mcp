@@ -66,3 +66,33 @@ JSON is decoded via `JSONDecoder` (AnyCodable), so values are REAL Swift types
 `test/cli-delete-list.test.ts` (4, CLI), readonly count 11→12, schema-snapshot
 delete_list added. 161 pass. Verified live (MCP + CLI). Docs updated
 (CLAUDE.md tools table + CLI usage, SKILL.md quick ref).
+
+---
+
+# Epic apple-reminders-mcp-wil — API hardening from PR review (2026-06-09)
+
+From the PR review of this branch. Goals: unify priority (finding #1), dedup
+(#5/#6), and eliminate silent failures (user mandate).
+
+- [x] wil.1 `Priority.parse(token) -> Priority?` is the single shared validator
+      (CLI + MCP). Accepts low/medium/high, **none**, and Apple ints 0/1/5/9
+      (also as strings). Canonical output stays null|low|medium|high. Manager is
+      the validation point; invalid → per-item failed (loud). Removed the old
+      MCP-boundary normalizer family.
+- [x] wil.2 shared `resolveSingleList(allowDefault:duplicateName:)` (create vs
+      delete) + `prioritySchema(description:)` helper (create vs update).
+- [x] wil.3 loud type validation at the boundary: `parseClearable` throws on
+      present-but-wrong-type; new requireStringOrNil/requireBoolOrNil/
+      parseListSelector. A bare-string `list` now errors instead of silently
+      writing to the default list.
+- [x] wil.4 `validatePriorityLiteralsInQuery`: a JMESPath like
+      `[?priority == 'none']` now errors (would silently return []) with a hint
+      to use `priority == null`.
+
+**Epic wil CLOSED 2026-06-09.** Commits ba388a7 (wil.1), d0e18a7 (wil.2),
+ab9274b (wil.3), + wil.4. 180 pass, signal clean. New tests: cli-priority,
+input-validation; crud updated to per-item-failure semantics.
+
+Key principle reinforced: silent no-ops are the worst failure mode (an LLM reads
+a non-error response as success), so every present-but-invalid input now fails
+loud — error, per-item failure, or validation — never a silent drop.
