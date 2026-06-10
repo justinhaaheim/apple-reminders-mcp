@@ -92,4 +92,28 @@ describe('input validation (no silent type drops)', () => {
     expect(result._isError).toBeUndefined();
     expect(Array.isArray(result)).toBe(true);
   });
+
+  test('query rejects a non-integer perPage instead of ignoring it', async () => {
+    const result = await client.callTool('query_reminders', {
+      list: {name: testListName},
+      perPage: '10',
+    });
+    expect(result._isError).toBe(true);
+    expect(result.error as string).toContain("Field 'perPage'");
+  });
+
+  test('query rejects a non-object list selector instead of defaulting silently', async () => {
+    const result = await client.callTool('query_reminders', {list: 'Work'});
+    expect(result._isError).toBe(true);
+    expect(result.error as string).toContain("Field 'list'");
+  });
+
+  test('query rejects a non-boolean includeCompleted instead of ignoring it', async () => {
+    const result = await client.callTool('query_reminders', {
+      list: {name: testListName},
+      includeCompleted: 'yes',
+    });
+    expect(result._isError).toBe(true);
+    expect(result.error as string).toContain("Field 'includeCompleted'");
+  });
 });

@@ -755,29 +755,28 @@ public class MCPServer {
             return try toJSON(createdList)
 
         case "query_reminders":
-            let listDict = arguments["list"]?.value as? [String: Any]
-            let listSelector = ListSelector(from: listDict)
-            let includeCompleted = arguments["includeCompleted"]?.value as? Bool ?? false
-            let completedOnly = arguments["completedOnly"]?.value as? Bool ?? false
-            let sortBy = arguments["sortBy"]?.value as? String
-            let query = arguments["query"]?.value as? String
-            let perPage = arguments["perPage"]?.value as? Int
-            let cursor = arguments["cursor"]?.value as? String
-            let searchText = arguments["searchText"]?.value as? String
-            let createdFrom = arguments["createdFrom"]?.value as? String
-            let createdTo = arguments["createdTo"]?.value as? String
-            let modifiedFrom = arguments["modifiedFrom"]?.value as? String
-            let modifiedTo = arguments["modifiedTo"]?.value as? String
-            let dueFrom = arguments["dueFrom"]?.value as? String
-            let dueTo = arguments["dueTo"]?.value as? String
-            let outputDetail = arguments["outputDetail"]?.value as? String
-            let hashtag = arguments["hashtag"]?.value as? String
-            let parentId = arguments["parentId"]?.value as? String
-            let topLevelOnly = arguments["topLevelOnly"]?.value as? Bool ?? false
-            let sectionId = arguments["sectionId"]?.value as? String
+            let listSelector = try parseListSelector(arguments["list"]?.value)
+            let includeCompleted = try requireBoolOrNil(arguments["includeCompleted"]?.value, field: "includeCompleted") ?? false
+            let completedOnly = try requireBoolOrNil(arguments["completedOnly"]?.value, field: "completedOnly") ?? false
+            let sortBy = try requireStringOrNil(arguments["sortBy"]?.value, field: "sortBy")
+            let query = try requireStringOrNil(arguments["query"]?.value, field: "query")
+            let perPage = try requireIntOrNil(arguments["perPage"]?.value, field: "perPage")
+            let cursor = try requireStringOrNil(arguments["cursor"]?.value, field: "cursor")
+            let searchText = try requireStringOrNil(arguments["searchText"]?.value, field: "searchText")
+            let createdFrom = try requireStringOrNil(arguments["createdFrom"]?.value, field: "createdFrom")
+            let createdTo = try requireStringOrNil(arguments["createdTo"]?.value, field: "createdTo")
+            let modifiedFrom = try requireStringOrNil(arguments["modifiedFrom"]?.value, field: "modifiedFrom")
+            let modifiedTo = try requireStringOrNil(arguments["modifiedTo"]?.value, field: "modifiedTo")
+            let dueFrom = try requireStringOrNil(arguments["dueFrom"]?.value, field: "dueFrom")
+            let dueTo = try requireStringOrNil(arguments["dueTo"]?.value, field: "dueTo")
+            let outputDetail = try requireStringOrNil(arguments["outputDetail"]?.value, field: "outputDetail")
+            let hashtag = try requireStringOrNil(arguments["hashtag"]?.value, field: "hashtag")
+            let parentId = try requireStringOrNil(arguments["parentId"]?.value, field: "parentId")
+            let topLevelOnly = try requireBoolOrNil(arguments["topLevelOnly"]?.value, field: "topLevelOnly") ?? false
+            let sectionId = try requireStringOrNil(arguments["sectionId"]?.value, field: "sectionId")
 
             let result = try await remindersManager.queryReminders(
-                list: listDict == nil ? nil : listSelector,
+                list: listSelector,
                 includeCompleted: includeCompleted,
                 completedOnly: completedOnly,
                 sortBy: sortBy,
@@ -969,12 +968,17 @@ public class MCPServer {
             return try toJSON(response)
 
         case "export_reminders":
-            let path = arguments["path"]?.value as? String
-            let includeCompleted = arguments["includeCompleted"]?.value as? Bool ?? true
+            let path = try requireStringOrNil(arguments["path"]?.value, field: "path")
+            let includeCompleted = try requireBoolOrNil(arguments["includeCompleted"]?.value, field: "includeCompleted") ?? true
 
             // Parse lists array if provided
             var listSelectors: [ListSelector]? = nil
-            if let listsArray = arguments["lists"]?.value as? [[String: Any]] {
+            if let listsRaw = arguments["lists"]?.value, !(listsRaw is NSNull) {
+                guard let listsArray = listsRaw as? [[String: Any]] else {
+                    throw RemindersError(
+                        "Field 'lists' must be an array of objects like [{\"name\": \"...\"}], but received: \(listsRaw)."
+                    )
+                }
                 listSelectors = listsArray.map { ListSelector(from: $0) }
             }
 
@@ -1002,11 +1006,11 @@ public class MCPServer {
             return try getToolSchema(toolName: toolName)
 
         case "guidance":
-            let topic = arguments["topic"]?.value as? String
+            let topic = try requireStringOrNil(arguments["topic"]?.value, field: "topic")
             return getGuidance(topic: topic)
 
         case "list_hashtags":
-            let includeUnused = arguments["includeUnused"]?.value as? Bool ?? false
+            let includeUnused = try requireBoolOrNil(arguments["includeUnused"]?.value, field: "includeUnused") ?? false
             let entries = remindersManager.listHashtags(includeUnused: includeUnused)
             return try toJSON(entries)
 
@@ -1113,6 +1117,18 @@ public class MCPServer {
             throw RemindersError("Field '\(field)' must be a boolean or null, but received: \(raw).")
         }
         return bool
+    }
+
+    /// Extracts an optional integer field, throwing on a present-but-wrong-type
+    /// value (e.g. perPage: "10") instead of silently dropping it. Absent or
+    /// null → nil. (A JSON boolean decodes to Swift Bool, which does not cast to
+    /// Int, so it is rejected here too.)
+    private func requireIntOrNil(_ raw: Any?, field: String) throws -> Int? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        guard let int = raw as? Int, !(raw is Bool) else {
+            throw RemindersError("Field '\(field)' must be an integer or null, but received: \(raw).")
+        }
+        return int
     }
 
     /// Parses a list selector object. Absent or null → nil (caller's default).
