@@ -811,29 +811,19 @@ public class MCPServer {
                 }
                 // Parse alarm inputs
                 var alarmInputs: [AlarmInput]? = nil
-                if let alarmsArray = dict["alarms"] as? [[String: Any]] {
-                    alarmInputs = alarmsArray.map { alarmDict in
-                        AlarmInput(
-                            type: alarmDict["type"] as? String ?? "relative",
-                            date: alarmDict["date"] as? String,
-                            offset: alarmDict["offset"] as? Int
-                        )
+                if let alarmsRaw = dict["alarms"], !(alarmsRaw is NSNull) {
+                    guard let alarmsArray = alarmsRaw as? [Any] else {
+                        throw RemindersError("Field 'alarms' must be an array of alarm objects, but received: \(alarmsRaw).")
+                    }
+                    alarmInputs = try alarmsArray.enumerated().map {
+                        try parseAlarmInput(from: $0.element, index: $0.offset)
                     }
                 }
 
                 // Parse recurrence rule input
                 var recurrenceInput: RecurrenceRuleInput? = nil
-                if let ruleDict = dict["recurrenceRule"] as? [String: Any] {
-                    recurrenceInput = RecurrenceRuleInput(
-                        frequency: ruleDict["frequency"] as? String ?? "daily",
-                        interval: ruleDict["interval"] as? Int,
-                        daysOfWeek: ruleDict["daysOfWeek"] as? [Int],
-                        daysOfMonth: ruleDict["daysOfMonth"] as? [Int],
-                        monthsOfYear: ruleDict["monthsOfYear"] as? [Int],
-                        weekPosition: ruleDict["weekPosition"] as? Int,
-                        endDate: ruleDict["endDate"] as? String,
-                        endCount: ruleDict["endCount"] as? Int
-                    )
+                if let ruleRaw = dict["recurrenceRule"], !(ruleRaw is NSNull) {
+                    recurrenceInput = try parseRecurrenceRuleInput(from: ruleRaw)
                 }
 
                 inputs.append(CreateReminderInput(
@@ -843,7 +833,7 @@ public class MCPServer {
                     dueDate: try requireStringOrNil(dict["dueDate"], field: "dueDate"),
                     priority: priorityToken(from: dict["priority"]),
                     url: try requireStringOrNil(dict["url"], field: "url"),
-                    dueDateIncludesTime: dict["dueDateIncludesTime"] as? Bool,
+                    dueDateIncludesTime: try requireBoolOrNil(dict["dueDateIncludesTime"], field: "dueDateIncludesTime"),
                     alarms: alarmInputs,
                     recurrenceRule: recurrenceInput
                 ))
@@ -878,13 +868,12 @@ public class MCPServer {
                 if let alarmsRaw = dict["alarms"] {
                     if alarmsRaw is NSNull {
                         alarmsClearable = .clear
-                    } else if let alarmsArray = alarmsRaw as? [[String: Any]] {
-                        alarmsClearable = .value(alarmsArray.map { alarmDict in
-                            AlarmInput(
-                                type: alarmDict["type"] as? String ?? "relative",
-                                date: alarmDict["date"] as? String,
-                                offset: alarmDict["offset"] as? Int
-                            )
+                    } else {
+                        guard let alarmsArray = alarmsRaw as? [Any] else {
+                            throw RemindersError("Field 'alarms' must be an array of alarm objects or null, but received: \(alarmsRaw).")
+                        }
+                        alarmsClearable = .value(try alarmsArray.enumerated().map {
+                            try parseAlarmInput(from: $0.element, index: $0.offset)
                         })
                     }
                 }
@@ -894,17 +883,8 @@ public class MCPServer {
                 if let ruleRaw = dict["recurrenceRule"] {
                     if ruleRaw is NSNull {
                         recurrenceClearable = .clear
-                    } else if let ruleDict = ruleRaw as? [String: Any] {
-                        recurrenceClearable = .value(RecurrenceRuleInput(
-                            frequency: ruleDict["frequency"] as? String ?? "daily",
-                            interval: ruleDict["interval"] as? Int,
-                            daysOfWeek: ruleDict["daysOfWeek"] as? [Int],
-                            daysOfMonth: ruleDict["daysOfMonth"] as? [Int],
-                            monthsOfYear: ruleDict["monthsOfYear"] as? [Int],
-                            weekPosition: ruleDict["weekPosition"] as? Int,
-                            endDate: ruleDict["endDate"] as? String,
-                            endCount: ruleDict["endCount"] as? Int
-                        ))
+                    } else {
+                        recurrenceClearable = .value(try parseRecurrenceRuleInput(from: ruleRaw))
                     }
                 }
 
@@ -918,7 +898,7 @@ public class MCPServer {
                     completed: try requireBoolOrNil(dict["completed"], field: "completed"),
                     completedDate: try parseClearable(dict["completedDate"], field: "completedDate"),
                     url: try parseClearable(dict["url"], field: "url"),
-                    dueDateIncludesTime: dict["dueDateIncludesTime"] as? Bool,
+                    dueDateIncludesTime: try requireBoolOrNil(dict["dueDateIncludesTime"], field: "dueDateIncludesTime"),
                     alarms: alarmsClearable,
                     recurrenceRule: recurrenceClearable
                 ))
@@ -1143,6 +1123,50 @@ public class MCPServer {
             )
         }
         return ListSelector(from: dict)
+    }
+
+    /// Extracts an optional array-of-integers field (e.g. recurrence
+    /// daysOfWeek), throwing on a present-but-wrong-type value instead of
+    /// silently dropping it. Absent or null → nil.
+    private func requireIntArrayOrNil(_ raw: Any?, field: String) throws -> [Int]? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        guard let array = raw as? [Int] else {
+            throw RemindersError("Field '\(field)' must be an array of integers or null, but received: \(raw).")
+        }
+        return array
+    }
+
+    /// Parses one alarm object, throwing on a non-object or a wrong-typed
+    /// sub-field rather than silently dropping/defaulting it. Value validation
+    /// (relative vs absolute, required offset/date) stays in RemindersManager.
+    private func parseAlarmInput(from raw: Any, index: Int) throws -> AlarmInput {
+        guard let dict = raw as? [String: Any] else {
+            throw RemindersError("Field 'alarms' entry at index \(index) must be an object, but received: \(raw).")
+        }
+        return AlarmInput(
+            type: try requireStringOrNil(dict["type"], field: "alarms[\(index)].type") ?? "relative",
+            date: try requireStringOrNil(dict["date"], field: "alarms[\(index)].date"),
+            offset: try requireIntOrNil(dict["offset"], field: "alarms[\(index)].offset")
+        )
+    }
+
+    /// Parses a recurrence-rule object, throwing on a non-object or a
+    /// wrong-typed sub-field. Frequency/interval value validation stays in
+    /// RemindersManager.
+    private func parseRecurrenceRuleInput(from raw: Any) throws -> RecurrenceRuleInput {
+        guard let dict = raw as? [String: Any] else {
+            throw RemindersError("Field 'recurrenceRule' must be an object, but received: \(raw).")
+        }
+        return RecurrenceRuleInput(
+            frequency: try requireStringOrNil(dict["frequency"], field: "recurrenceRule.frequency") ?? "daily",
+            interval: try requireIntOrNil(dict["interval"], field: "recurrenceRule.interval"),
+            daysOfWeek: try requireIntArrayOrNil(dict["daysOfWeek"], field: "recurrenceRule.daysOfWeek"),
+            daysOfMonth: try requireIntArrayOrNil(dict["daysOfMonth"], field: "recurrenceRule.daysOfMonth"),
+            monthsOfYear: try requireIntArrayOrNil(dict["monthsOfYear"], field: "recurrenceRule.monthsOfYear"),
+            weekPosition: try requireIntOrNil(dict["weekPosition"], field: "recurrenceRule.weekPosition"),
+            endDate: try requireStringOrNil(dict["endDate"], field: "recurrenceRule.endDate"),
+            endCount: try requireIntOrNil(dict["endCount"], field: "recurrenceRule.endCount")
+        )
     }
 
     /// The shared `priority` parameter schema. Canonical values are low/

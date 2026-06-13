@@ -116,4 +116,70 @@ describe('input validation (no silent type drops)', () => {
     expect(result._isError).toBe(true);
     expect(result.error as string).toContain("Field 'includeCompleted'");
   });
+
+  test('create rejects a non-array alarms', async () => {
+    const result = await client.callTool('create_reminders', {
+      reminders: [{title: 'x', list: {name: testListName}, alarms: 'soon'}],
+    });
+    expect(result._isError).toBe(true);
+    expect(result.error as string).toContain("Field 'alarms'");
+  });
+
+  test('create rejects a non-object alarm entry', async () => {
+    const result = await client.callTool('create_reminders', {
+      reminders: [{title: 'x', list: {name: testListName}, alarms: ['soon']}],
+    });
+    expect(result._isError).toBe(true);
+    expect(result.error as string).toContain('entry at index 0');
+  });
+
+  test('create rejects a non-integer alarm offset instead of dropping it', async () => {
+    const result = await client.callTool('create_reminders', {
+      reminders: [
+        {
+          title: 'x',
+          list: {name: testListName},
+          alarms: [{type: 'relative', offset: '900'}],
+        },
+      ],
+    });
+    expect(result._isError).toBe(true);
+    expect(result.error as string).toContain('alarms[0].offset');
+  });
+
+  test('create rejects a wrong-typed recurrence interval instead of dropping it', async () => {
+    const result = await client.callTool('create_reminders', {
+      reminders: [
+        {
+          title: 'x',
+          list: {name: testListName},
+          recurrenceRule: {frequency: 'weekly', interval: 'two'},
+        },
+      ],
+    });
+    expect(result._isError).toBe(true);
+    expect(result.error as string).toContain('recurrenceRule.interval');
+  });
+
+  test('create rejects a non-array recurrence daysOfWeek instead of dropping it', async () => {
+    const result = await client.callTool('create_reminders', {
+      reminders: [
+        {
+          title: 'x',
+          list: {name: testListName},
+          recurrenceRule: {frequency: 'weekly', daysOfWeek: 'monday'},
+        },
+      ],
+    });
+    expect(result._isError).toBe(true);
+    expect(result.error as string).toContain('recurrenceRule.daysOfWeek');
+  });
+
+  test('update rejects a non-boolean dueDateIncludesTime instead of ignoring it', async () => {
+    const result = await client.callTool('update_reminders', {
+      reminders: [{id: reminderId, dueDateIncludesTime: 'yes'}],
+    });
+    expect(result._isError).toBe(true);
+    expect(result.error as string).toContain('dueDateIncludesTime');
+  });
 });
