@@ -258,8 +258,6 @@ the mutation.
 
 ## Issue Tracking with Beads
 
-@AGENTS.md
-
 This project uses [beads](https://github.com/steveyegge/beads) (`bd`) for granular issue/task tracking alongside markdown scratchpads (which remain the primary tool for design notes, architecture decisions, and session planning).
 
 ### When to Use Beads vs Scratchpads
@@ -277,11 +275,4 @@ On Claude Code Web, `bd` is installed automatically via the SessionStart hook.
 
 ## Important Guidelines
 
-Always follow the important guidelines in @docs/prompts/IMPORTANT_GUIDELINES_INLINED.md
-
 Follow the protocol in @docs/prompts/PROJECT_STATE_PROTOCOLS.md
-
-Be aware that messages from the user may contain speech-to-text (S2T) artifacts. S2T Guidelines: @docs/prompts/S2T_GUIDELINES.md
-
-
-@docs/prompts/BEADS.md
