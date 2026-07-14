@@ -5,7 +5,7 @@
     "": {
       "name": "apple-reminders-mcp",
       "devDependencies": {
-        "@justinhaaheim/justin-sdk": "github:justinhaaheim/justin-sdk#0.3.1",
+        "@justinhaaheim/justin-sdk": "github:justinhaaheim/justin-sdk#v0.7.0",
         "@types/node": "25.0.3",
         "bun-types": "1.3.5",
         "husky": "9.1.7",
@@ -15,7 +15,7 @@
     },
   },
   "packages": {
-    "@justinhaaheim/justin-sdk": ["@justinhaaheim/justin-sdk@github:justinhaaheim/justin-sdk#188b843", { "dependencies": { "yargs": "^18.0.0" }, "bin": { "justin-sdk": "./src/cli.ts", "jsdk": "./src/cli.ts", "j": "./src/cli.ts" } }, "justinhaaheim-justin-sdk-188b843", "sha512-n43B4D79J40ziQlslbq4JDFxDyLcYM1V0JTHUSWM5KcUIbZNz51MJTFkNJEDSBPjLWra0IE5+qJYNQDUVBBL+A=="],
+    "@justinhaaheim/justin-sdk": ["@justinhaaheim/justin-sdk@github:justinhaaheim/justin-sdk#42c0ed4", { "dependencies": { "yargs": "^18.0.0" }, "bin": { "justin-sdk": "./src/cli.ts", "jsdk": "./src/cli.ts", "j": "./src/cli.ts" } }, "justinhaaheim-justin-sdk-42c0ed4", "sha512-1lUk+VoSMFiQ5JmnMNExhc1sR5SNbQWeM8mptNgXYWIJVb6I65lcS7Qt59RpiSXzj4PicoPWn97Qu389xSt6Bw=="],
 
     "@types/node": ["@types/node@25.0.3", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-W609buLVRVmeW693xKfzHeIV6nJGGz98uCPfeXI1ELMLXVeKYZ9m15fAMSaUPBHYLGFsVRcMmSCksQOrZV9BYA=="],
 
