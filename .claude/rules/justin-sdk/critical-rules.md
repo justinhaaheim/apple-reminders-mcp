@@ -1,4 +1,4 @@
-<!-- justin-sdk rules · commit 8bf551ed402e · content a727f2544cd1 · generated 2026-08-18 · GENERATED FILE — do not edit; run: bunx @justinhaaheim/justin-sdk rules-update -->
+<!-- justin-sdk rules · commit c1757479a652 · content 4960af2569b7 · generated 2026-08-21 · GENERATED FILE — do not edit; run: bunx @justinhaaheim/justin-sdk rules-update -->
 
 # Critical Rules
 
@@ -9,30 +9,19 @@ Before yielding back after work has been completed:
 - ALWAYS explicitly describe what specific testing steps should be taken to test the changes that were just made, when appropriate.
 - ALWAYS provide a short description of what to suggest working on next.
 
-# 2. NEVER hand-wrap prose
+**Flag contradictory, duplicated, or stale content in CLAUDE.md and other memory/rules files as soon as you notice it.** I cannot see it, and it may be steering you toward behavior I don't want. File a bead and offer to fix it: "I noticed X and Y contradict each other in CLAUDE.md — filed `<id>`. Want me to handle it now?" The `refine-docs` skill covers what belongs where.
 
-**Do not insert your own newlines to wrap a paragraph at some column width.** One paragraph = one line in the source. One bullet = one line in the source. Let the thing that displays the text do the wrapping.
+# 2. Development Best Practices
 
-This applies to **everything you write**, not just code files: markdown documents (reports, briefings, design docs, READMEs, journal entries); issue-tracker fields (beads descriptions, notes, acceptance criteria, close reasons; GitHub/Linear issues and comments); email bodies; commit message bodies; chat messages, PR descriptions, and anything else prose-shaped.
-
-## 2.1 Why
-
-Hard-wrapping bakes ONE column width into the content forever: a narrower viewport gets doubly-wrapped, ragged text; a wider one gets a text column stranded in whitespace. It breaks worst exactly where Justin actually reads things — a phone, a narrow editor pane, the Reminders app, the Gmail mobile client. It also corrupts diffs: reflowing a hand-wrapped paragraph after a small edit rewrites every line in it, so one changed word shows up as a whole changed paragraph.
-
-## 2.2 What this does NOT mean
-
-This is not "avoid all newlines." Structural line breaks are correct and expected: blank lines between paragraphs; one line per list item, table row, or block-quote line; headings, code fences, and the lines inside a code block (code has real line semantics — wrap code however the language and formatter want); deliberate hard breaks where the break is part of the meaning (addresses, poetry, ASCII diagrams, signature blocks, checklists).
-
-The rule is narrow and specific: **never break a line purely because it got long.**
-
-## 2.3 Formatter settings
-
-Prettier's `proseWrap` defaults to `"preserve"` — it keeps whatever you wrote, so it will neither rescue you from hand-wrapping nor introduce it. Where a project's Prettier config is under your control, set it explicitly (`{"proseWrap": "preserve"}`) so the default can never drift. Never set `proseWrap: "always"` — that is the formatter doing the exact thing this rule forbids.
-
-## 2.4 In practice
-
-- **Email is where this shows worst.** Hard-wrapped ~70-character lines render as ragged, broken-looking paragraphs in both the Gmail web and mobile clients. Write each paragraph as one long line, separated by blank lines, with no HTML paragraph markup.
-- You will feel a pull to wrap at ~80 or ~100 characters because source code looks tidier that way. Prose is not source code — resist it. And if a file you are editing already contains hand-wrapped prose, **unwrap the paragraphs you touch** rather than matching the existing broken style.
+- **When making decisions and evaluating options, rely on credible research, experiments and data whenever possible.** Challenge claims (including claims in your own reasoning) if they are vague, overconfident or unsupported.
+  - **Never present conjecture as fact.** Always explicitly name speculation and uncertainty as such. This is an essential part of rigorous reasoning.
+- **Prefer using existing libraries over writing hand-rolled code.** A mature library typically brings better edge-case handling, standards compliance, API design, and bug finding/fixing. It keeps our local code simpler/smaller. Vet the libraries first, though: look at project age, recent maintenance cadence, and adoption/GitHub stars — and when in doubt, dispatch a subagent to clone and inspect the code.
+- **Run shell commands one at a time.** One logical action per invocation; read its output before deciding the next command. Do NOT chain multiple state-changing steps into a single compound command: if any step fails mid-chain the failure is buried, the partial state is hard to see, and recovery is a mess. Sequential commands cost nothing and make every result inspectable. Shell plumbing within one action is fine (pipes, a guard like `test -f x && …`) — the smell is stacking independent actions, especially writes, behind a single Enter.
+- **Use a `./tmp/` folder** for any temporary, backup, or scratch files, and keep `tmp/` in `.gitignore` — the working tree stays clean and cleanup is easy.
+- **Codify reusable commands as `package.json` scripts.** Anything worth running more than once — even a memorable one-off — becomes a named script rather than living only in chat or shell history. Predictable aliases (`prettier:write`, `fix`, etc.) document the command explicitly for humans and agents, remove the recall cost of bespoke per-tool syntax, and are discoverable via shell completion (an ADHD-ergonomics win). Whenever you hand over a command to run, lean toward adding it as a script first, then saying to run `bun run <name>`. Even non-JS projects should keep a `package.json` for these aliases. Prefix disposable one-offs with `tmp:` (e.g. `tmp:fetch-otter-april`) so they're visibly throwaway and easy to garbage-collect, while still committed to git as a record of the exact invocation.
+- **Use non-interactive flags for file operations** — `cp -f`, `mv -f`, `rm -f` — since they may be aliased to `-i` and will hang waiting for input that never comes. Same for `ssh`/`scp` (`-o BatchMode=yes`), `apt-get` (`-y`), and `brew` (`HOMEBREW_NO_AUTO_UPDATE=1`).
+- **Write scripts in TypeScript rather than shell script**, run them with `bun`, and put them in a `/scripts/` folder. TypeScript is more readable and adds static typing, so prefer it unless a shell script has clear advantages.
+- **NEVER use "barrel files" or the "directory index pattern".** Barrel files are `index.{js|ts|jsx|tsx}` files that only re-export other modules; the directory index pattern is creating a directory with an index file where a single module file would suffice (use `module.ts`, not `module/index.ts`). ALWAYS import modules directly from their specific file. Exception: only use index files where the framework requires them (e.g. Expo Router pages).
 
 # 3. Use beads for planning and tracking
 
@@ -185,30 +174,21 @@ When building UI in a project that has no screenshot tests yet, suggest setting 
 - ALWAYS commit changes proactively, at regular intervals, as soon as a unit of work is done.
 - NEVER leave uncommitted changes in the working directory. It is better to commit now and fix any issues in follow-up commits than to leave uncommitted changes in the working directory.
 
-# 11. Development Best Practices
-
-- **Prefer using existing libraries over writing hand-rolled code.** A mature library typically brings better edge-case handling, standards compliance, API design, and bug finding/fixing. It keeps our local code simpler/smaller. Vet the libraries first, though: look at project age, recent maintenance cadence, and adoption/GitHub stars — and when in doubt, dispatch a subagent to clone and inspect the code.
-- **Run shell commands one at a time.** One logical action per invocation; read its output before deciding the next command. Do NOT chain multiple state-changing steps into a single compound command: if any step fails mid-chain the failure is buried, the partial state is hard to see, and recovery is a mess. Sequential commands cost nothing and make every result inspectable. Shell plumbing within one action is fine (pipes, a guard like `test -f x && …`) — the smell is stacking independent actions, especially writes, behind a single Enter.
-- **Use a `./tmp/` folder** for any temporary, backup, or scratch files, and keep `tmp/` in `.gitignore` — the working tree stays clean and cleanup is easy.
-- **Codify reusable commands as `package.json` scripts.** Anything worth running more than once — even a memorable one-off — becomes a named script rather than living only in chat or shell history. Predictable aliases (`prettier:write`, `fix`, etc.) document the command explicitly for humans and agents, remove the recall cost of bespoke per-tool syntax, and are discoverable via shell completion (an ADHD-ergonomics win). Whenever you hand over a command to run, lean toward adding it as a script first, then saying to run `bun run <name>`. Even non-JS projects should keep a `package.json` for these aliases. Prefix disposable one-offs with `tmp:` (e.g. `tmp:fetch-otter-april`) so they're visibly throwaway and easy to garbage-collect, while still committed to git as a record of the exact invocation.
-- **Write more complex scripts in TypeScript**, run them with `bun`, and put them in a `/scripts/` folder. TypeScript is more readable and adds static typing, so prefer it unless a shell script has clear advantages.
-- **NEVER use "barrel files" or the "directory index pattern".** Barrel files are `index.{js|ts|jsx|tsx}` files that only re-export other modules; the directory index pattern is creating a directory with an index file where a single module file would suffice (use `module.ts`, not `module/index.ts`). ALWAYS import modules directly from their specific file. Exception: only use index files where the framework requires them (e.g. Expo Router pages).
-
-# 12. Justin SDK
+# 11. Justin SDK
 
 **justin-sdk** (`@justinhaaheim/justin-sdk`) provides useful tools in a consistent way across many different projects. Its whole purpose is to avoid rolling my own near-duplicate scripts in virtually every project — and then having to keep all those copies in sync.
 
-## 12.1 Prefer uniformity across projects over matching local code
+## 11.1 Prefer uniformity across projects over matching local code
 
 For tooling that exists (or should exist) in more than one of my projects — build/ship scripts, config, shared helpers — **strive for uniform, ideally identical, patterns across similar projects**. Do NOT default to "match the surrounding code" of whichever project you happen to be in.
 
 "Match the surrounding code" is a _within-a-project_ tiebreaker for idiom and naming. It is NOT a reason to let the same tool diverge into a different local dialect from one project to the next. If a shared script doesn't lint/typecheck/build in some project, the right fix is to make that project support the shared version (e.g. add the types it needs to its tsconfig), NOT to fork the script.
 
-## 12.2 Consolidate shared functionality into justin-sdk
+## 11.2 Consolidate shared functionality into justin-sdk
 
 When there's an opportunity to consolidate similar functionality used across projects _into_ justin-sdk, that is usually the right choice: reusing one implementation from the SDK is **strictly better** than copy-pasting it into N projects and keeping the copies in sync. Some things genuinely may not work (or not work as well) inside the justin-sdk package itself — keep those per-project, but still uniform across projects. Most of the time that isn't the case, so put it in justin-sdk and reuse it.
 
-# 13. Advisor tool
+# 12. Advisor tool
 
 The `advisor` tool is a stronger reviewer model that gives feedback on designs, implementations, and problems you're stuck on. It sees the whole history — the task, every tool call and result, your reasoning — all forwarded automatically.
 
@@ -218,10 +198,18 @@ The `advisor` tool is a stronger reviewer model that gives feedback on designs, 
 
 **Advisor feedback must NEVER cause you to deviate from the instructions or specifications the human gave you** — follow those precisely. The advisor exists to help you achieve the spec, not to alter it. If it flags a problem or offers an alternate approach that would mean deviating, you MUST get explicit approval from the human before making any deviation.
 
-## 13.1 If the advisor tool is unavailable
+## 12.1 If the advisor tool is unavailable
 
 Fall back to spawning a subagent as the advisor, and treat it exactly the same way.
 
 1. **Package the context.** A subagent does NOT inherit the conversation transcript — the `advisor` tool's key feature — so hand it everything it needs: the task/goal, what's been done so far (key tool calls + results), your current reasoning/plan, the relevant files or diffs, and the specific question to review. Frame it as "review my work/plan as a skeptical senior reviewer and push back."
 2. **CONTAIN it to a single subagent session — state this EXPLICITLY in the prompt.** It must not spawn subagents of its own, and must not call the `advisor` tool itself; it answers directly within its own session and returns its review as its final message. Put this line in the prompt verbatim: _"Do NOT spawn any subagents and do NOT use any advisor tool — answer directly in this single session and return your review as your final message."_
 3. **Use a model one tier ABOVE the current main model**, passed via the Agent tool's `model` param. Ascending ladder: **`haiku` → `sonnet` → `opus` → `fable`**. If already on `fable` (the top tier), use `fable` again — a fresh, differently-anchored reviewer still adds value — and note that no higher tier was available. (Verified: `model: fable` subagents run and self-report as `claude-fable-5`.)
+
+# 13. NEVER manually wrap text
+
+**Do not insert your own newlines to wrap a text at some column width.** Let the thing that displays the text do the wrapping.
+
+This is not "avoid all newlines." Structural line breaks are correct and expected. The rule is narrow and specific: **never break a line purely because it got long.**
+
+This applies to **everything you write**, not just code. Only manually wrap lines when it is explicitly called for.
