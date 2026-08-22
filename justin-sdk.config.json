@@ -1,5 +1,24 @@
 {
-  "version": "0.3.1",
-  "components": ["base-setup", "beads-setup"],
-  "lastSynced": "2026-05-05"
+  "version": "0.18.2",
+  "components": ["base-setup", "beads-setup", "critical-rules-setup"],
+  "lastSynced": "2026-08-18",
+  "componentConfig": {
+    "critical-rules": {
+      "modules": [
+        "communication",
+        "no-manual-line-wrapping",
+        "beads-workflow",
+        "stay-focused",
+        "code-style",
+        "failure-is-not-empty",
+        "do-these-first",
+        "check-signals",
+        "screenshot-tests",
+        "commit-regularly",
+        "dev-best-practices",
+        "justin-sdk",
+        "advisor-tool"
+      ]
+    }
+  }
 }

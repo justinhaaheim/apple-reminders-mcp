@@ -55,7 +55,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun run \"$CLAUDE_PROJECT_DIR/scripts/setup-env.ts\""
+            "command": "if [ \"$CLAUDE_CODE_REMOTE\" = \"true\" ]; then bunx github:justinhaaheim/justin-sdk setup-env; else bunx @justinhaaheim/justin-sdk doctor --quiet || true; fi"
           }
         ]
       }
@@ -82,5 +82,6 @@
         ]
       }
     ]
-  }
+  },
+  "claudeMdExcludes": ["/Users/jhaa/.claude/rules/justin-sdk/critical-rules.md"]
 }

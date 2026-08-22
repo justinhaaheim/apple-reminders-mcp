@@ -20,16 +20,17 @@
     "prettier:write:file": "prettier --write --ignore-unknown",
     "signal": "bun run prettier-check",
     "prepare": "husky",
-    "setup-env": "bun scripts/setup-env.ts",
+    "setup-env": "bunx @justinhaaheim/justin-sdk setup-env",
     "setup-env:sqlite": "bun scripts/setup-env-sqlite.ts",
     "setup-env:swift": "bun scripts/setup-env-swift.ts",
-    "signal:verbose": "bunx justin-sdk signal",
-    "signal:serial": "bunx justin-sdk signal --serial",
-    "doctor": "bunx justin-sdk doctor",
-    "doctor:fix": "bunx justin-sdk doctor --fix",
+    "signal:verbose": "bunx @justinhaaheim/justin-sdk signal",
+    "signal:serial": "bunx @justinhaaheim/justin-sdk signal --serial",
+    "doctor": "bunx @justinhaaheim/justin-sdk doctor",
+    "doctor:fix": "bunx @justinhaaheim/justin-sdk doctor --fix",
     "signal-source:TS": "tsc --noEmit",
     "signal-source:LINT": "eslint --report-unused-disable-directives --max-warnings 0 .",
-    "signal-source:PRETTIER": "prettier --check ."
+    "signal-source:PRETTIER": "prettier --check .",
+    "fix": "bunx @justinhaaheim/justin-sdk fix"
   },
   "devDependencies": {
     "@justinhaaheim/justin-sdk": "github:justinhaaheim/justin-sdk#v0.7.0",
