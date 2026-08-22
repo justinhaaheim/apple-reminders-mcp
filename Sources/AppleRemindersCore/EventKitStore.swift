@@ -247,6 +247,14 @@ public class EKReminderStore: ReminderStore {
         return EKCalendarWrapper(calendar)
     }
 
+    public func deleteCalendar(_ calendar: ReminderCalendar) throws {
+        guard let wrapper = calendar as? EKCalendarWrapper else {
+            throw RemindersError("Invalid calendar type")
+        }
+        // EventKit removes the calendar and all reminders it contains.
+        try eventStore.removeCalendar(wrapper.calendar, commit: true)
+    }
+
     private func findBestSource() -> EKSource? {
         if let iCloudSource = eventStore.sources.first(where: { $0.title == "iCloud" }) {
             return iCloudSource

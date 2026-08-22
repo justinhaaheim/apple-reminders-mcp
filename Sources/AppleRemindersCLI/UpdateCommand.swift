@@ -34,8 +34,11 @@ struct UpdateCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Clear due date")
     var clearDueDate: Bool = false
 
-    @Option(name: .long, help: "New priority: none, low, medium, high")
+    @Option(name: .long, help: "New priority: low, medium, high, or none (Apple ints 0/1/5/9 also accepted; or use --clear-priority)")
     var priority: String?
+
+    @Flag(name: .long, help: "Clear priority (remove it)")
+    var clearPriority: Bool = false
 
     @Flag(name: .long, help: "Mark as complete")
     var complete: Bool = false
@@ -53,6 +56,9 @@ struct UpdateCommand: AsyncParsableCommand {
         // Validate mutually exclusive flags
         if complete && incomplete {
             throw ValidationError("Cannot specify both --complete and --incomplete")
+        }
+        if priority != nil && clearPriority {
+            throw ValidationError("Cannot specify both --priority and --clear-priority")
         }
 
         let manager = try await createManager(options: globals)
@@ -84,6 +90,15 @@ struct UpdateCommand: AsyncParsableCommand {
             urlValue = nil
         }
 
+        let priorityValue: Clearable<String>?
+        if clearPriority {
+            priorityValue = .clear
+        } else if let priority = priority {
+            priorityValue = .value(priority)
+        } else {
+            priorityValue = nil
+        }
+
         let listSelector: ListSelector?
         if let listId = listId {
             listSelector = ListSelector(id: listId)
@@ -108,7 +123,7 @@ struct UpdateCommand: AsyncParsableCommand {
             notes: notesValue,
             list: listSelector,
             dueDate: dueDateValue,
-            priority: priority,
+            priority: priorityValue,
             completed: completed,
             url: urlValue
         )

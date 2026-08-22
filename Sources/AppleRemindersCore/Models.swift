@@ -69,7 +69,7 @@ public struct ReminderOutput: Codable {
     public let listId: String
     public let listName: String
     public let isCompleted: Bool
-    public let priority: String  // "none", "low", "medium", "high"
+    public let priority: String?  // "low", "medium", "high"; nil when unset
     public let dueDate: String?
     public let dueDateIncludesTime: Bool?
     public let completedDate: String?
@@ -102,7 +102,7 @@ public struct ReminderOutput: Codable {
     public init(
         id: String, title: String, notes: String?,
         listId: String, listName: String, isCompleted: Bool,
-        priority: String, dueDate: String?, dueDateIncludesTime: Bool?,
+        priority: String?, dueDate: String?, dueDateIncludesTime: Bool?,
         completedDate: String?, createdDate: String, modifiedDate: String,
         url: String?, alarms: [AlarmOutput]?, recurrenceRules: [RecurrenceRuleOutput]?,
         hashtags: [String]? = nil,
@@ -331,7 +331,7 @@ public struct UpdateReminderInput: Encodable {
     public let notes: Clearable<String>?
     public let list: ListSelector?
     public let dueDate: Clearable<String>?
-    public let priority: String?
+    public let priority: Clearable<String>?
     public let completed: Bool?
     public let completedDate: Clearable<String>?
     public let url: Clearable<String>?
@@ -342,7 +342,7 @@ public struct UpdateReminderInput: Encodable {
     public init(
         id: String, title: String? = nil, notes: Clearable<String>? = nil,
         list: ListSelector? = nil, dueDate: Clearable<String>? = nil,
-        priority: String? = nil, completed: Bool? = nil,
+        priority: Clearable<String>? = nil, completed: Bool? = nil,
         completedDate: Clearable<String>? = nil, url: Clearable<String>? = nil,
         dueDateIncludesTime: Bool? = nil, alarms: Clearable<[AlarmInput]>? = nil,
         recurrenceRule: Clearable<RecurrenceRuleInput>? = nil
@@ -422,32 +422,59 @@ public func encodeCursor(offset: Int) throws -> String {
 // MARK: - Priority Conversion
 
 public enum Priority: String, CaseIterable {
-    case none = "none"
     case low = "low"
     case medium = "medium"
     case high = "high"
 
     public var internalValue: Int {
         switch self {
-        case .none: return 0
         case .low: return 9
         case .medium: return 5
         case .high: return 1
         }
     }
 
-    public static func fromInternal(_ value: Int) -> Priority {
+    /// Maps an EventKit priority integer (0 = unset, 1-9 = bucketed)
+    /// to a Priority case. Returns nil when no priority is set.
+    public static func fromInternal(_ value: Int) -> Priority? {
         switch value {
-        case 0: return .none
+        case 0: return nil
         case 1...4: return .high
         case 5: return .medium
         case 6...9: return .low
-        default: return .none
+        default: return nil
         }
     }
 
     public static func fromString(_ string: String) -> Priority? {
         return Priority(rawValue: string.lowercased())
+    }
+
+    /// The single shared validator for user-supplied priority input, used by
+    /// both the CLI and the MCP server so they accept exactly the same values
+    /// and surface the same errors. Returns nil for "no priority".
+    ///
+    /// Accepted inputs (case-insensitive, whitespace-trimmed):
+    ///   - "low" / "medium" / "high"        → that level
+    ///   - "none" or "0"                    → nil (no priority)
+    ///   - Apple's native integers as text:  "1"→high, "5"→medium, "9"→low
+    ///
+    /// Canonical *output* is always null | low | medium | high; "none" and the
+    /// integer forms are accepted for convenience but never emitted. Throws
+    /// `RemindersError` for anything else — never a silent drop.
+    public static func parse(_ token: String) throws -> Priority? {
+        switch token.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "none", "0": return nil
+        case "high", "1": return .high
+        case "medium", "5": return .medium
+        case "low", "9": return .low
+        default:
+            throw RemindersError(
+                "Invalid priority: \"\(token)\". Accepted: \"low\", \"medium\", \"high\", "
+                    + "or \"none\"/null for no priority (Apple integer constants 0/1/5/9 also work). "
+                    + "Output is always null, low, medium, or high."
+            )
+        }
     }
 }
 

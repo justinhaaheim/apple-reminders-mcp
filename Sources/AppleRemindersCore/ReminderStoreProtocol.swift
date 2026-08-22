@@ -9,6 +9,8 @@ public protocol ReminderStore {
     func getAllCalendars() -> [ReminderCalendar]
     func getDefaultCalendar() -> ReminderCalendar?
     func createCalendar(name: String) throws -> ReminderCalendar
+    /// Permanently delete a list and every reminder it contains. Irreversible.
+    func deleteCalendar(_ calendar: ReminderCalendar) throws
     func createReminder(in calendar: ReminderCalendar) throws -> Reminder
     func fetchReminders(
         in calendars: [ReminderCalendar],
