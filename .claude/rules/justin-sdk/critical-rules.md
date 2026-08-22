@@ -1,4 +1,4 @@
-<!-- justin-sdk rules · commit c1757479a652 · content 4960af2569b7 · generated 2026-08-21 · GENERATED FILE — do not edit; run: bunx @justinhaaheim/justin-sdk rules-update -->
+<!-- justin-sdk rules · commit d7c3a0c1f998 · content 3e009f2a4c9a · generated 2026-08-22 · GENERATED FILE — do not edit; run: bunx @justinhaaheim/justin-sdk rules-update -->
 
 # Critical Rules
 
@@ -9,7 +9,7 @@ Before yielding back after work has been completed:
 - ALWAYS explicitly describe what specific testing steps should be taken to test the changes that were just made, when appropriate.
 - ALWAYS provide a short description of what to suggest working on next.
 
-**Flag contradictory, duplicated, or stale content in CLAUDE.md and other memory/rules files as soon as you notice it.** I cannot see it, and it may be steering you toward behavior I don't want. File a bead and offer to fix it: "I noticed X and Y contradict each other in CLAUDE.md — filed `<id>`. Want me to handle it now?" The `refine-docs` skill covers what belongs where.
+**Flag contradictory, duplicated, or stale content in CLAUDE.md and other memory/rules files as soon as you notice it.** I cannot see it, and it may be steering you toward behavior I don't want. File a bead and offer to fix it: "I noticed X and Y contradict each other in CLAUDE.md — filed `<id>`. Want me to handle it now?" The `memory-cleanup` skill covers what belongs where.
 
 # 2. Development Best Practices
 
@@ -17,9 +17,10 @@ Before yielding back after work has been completed:
   - **Never present conjecture as fact.** Always explicitly name speculation and uncertainty as such. This is an essential part of rigorous reasoning.
 - **Prefer using existing libraries over writing hand-rolled code.** A mature library typically brings better edge-case handling, standards compliance, API design, and bug finding/fixing. It keeps our local code simpler/smaller. Vet the libraries first, though: look at project age, recent maintenance cadence, and adoption/GitHub stars — and when in doubt, dispatch a subagent to clone and inspect the code.
 - **Run shell commands one at a time.** One logical action per invocation; read its output before deciding the next command. Do NOT chain multiple state-changing steps into a single compound command: if any step fails mid-chain the failure is buried, the partial state is hard to see, and recovery is a mess. Sequential commands cost nothing and make every result inspectable. Shell plumbing within one action is fine (pipes, a guard like `test -f x && …`) — the smell is stacking independent actions, especially writes, behind a single Enter.
-- **Use a `./tmp/` folder** for any temporary, backup, or scratch files, and keep `tmp/` in `.gitignore` — the working tree stays clean and cleanup is easy.
+- **Use a `./tmp/` folder** for genuinely disposable files — scratch data, backups, throwaway output — and keep `tmp/` in `.gitignore` so the working tree stays clean.
+- **Never leave CODE in `tmp/`.** Anything with reuse value goes in the repo proper, from the first version. `tmp/` is excluded from TypeScript, ESLint and Prettier, so code there is silently unchecked, and the directory is liable to be cleared at any moment. Commit it and prune later if it turns out not to matter — that is far cheaper than losing it or shipping something nothing ever type-checked.
+- **Create, enter, and exit git worktrees with the Claude Code worktree tools, not raw `git worktree` commands.** Removing a worktree by hand leaves its Claude transcript stranded in an orphaned project directory, where `--resume` will not find it; the tools move it back. Raw removal also destroys any unpushed commits and submodule state living in that worktree.
 - **Codify reusable commands as `package.json` scripts.** Anything worth running more than once — even a memorable one-off — becomes a named script rather than living only in chat or shell history. Predictable aliases (`prettier:write`, `fix`, etc.) document the command explicitly for humans and agents, remove the recall cost of bespoke per-tool syntax, and are discoverable via shell completion (an ADHD-ergonomics win). Whenever you hand over a command to run, lean toward adding it as a script first, then saying to run `bun run <name>`. Even non-JS projects should keep a `package.json` for these aliases. Prefix disposable one-offs with `tmp:` (e.g. `tmp:fetch-otter-april`) so they're visibly throwaway and easy to garbage-collect, while still committed to git as a record of the exact invocation.
-- **Use non-interactive flags for file operations** — `cp -f`, `mv -f`, `rm -f` — since they may be aliased to `-i` and will hang waiting for input that never comes. Same for `ssh`/`scp` (`-o BatchMode=yes`), `apt-get` (`-y`), and `brew` (`HOMEBREW_NO_AUTO_UPDATE=1`).
 - **Write scripts in TypeScript rather than shell script**, run them with `bun`, and put them in a `/scripts/` folder. TypeScript is more readable and adds static typing, so prefer it unless a shell script has clear advantages.
 - **NEVER use "barrel files" or the "directory index pattern".** Barrel files are `index.{js|ts|jsx|tsx}` files that only re-export other modules; the directory index pattern is creating a directory with an index file where a single module file would suffice (use `module.ts`, not `module/index.ts`). ALWAYS import modules directly from their specific file. Exception: only use index files where the framework requires them (e.g. Expo Router pages).
 
@@ -190,21 +191,31 @@ When there's an opportunity to consolidate similar functionality used across pro
 
 # 12. Advisor tool
 
-The `advisor` tool is a stronger reviewer model that gives feedback on designs, implementations, and problems you're stuck on. It sees the whole history — the task, every tool call and result, your reasoning — all forwarded automatically.
+The `advisor` tool is a stronger reviewer model that gives feedback on designs, implementations, and problems you're stuck on. It sees the whole conversation history automatically.
 
-**When to consult it:** BEFORE substantive work (before writing/editing/committing to an interpretation), when you believe the task is complete, when you're stuck, and when you're considering a change of approach.
+When to use the advisor:
 
-**Give its advice serious weight**, but adapt if a step fails empirically or primary-source evidence contradicts it.
+- After scoping/designing a significant feature/workstream, ask the advisor to review your spec/approach before implementing -- to identify and challenge your assumptions, and to provide constructive feedback.
+- If you are stuck debugging something ask the advisor for help before spending too much time spinning your wheels.
+- If you are considering pivoting to a different approach, but are uncertain about which approach to take or whether to pivot in the first place, ask the advisor to think it through with you.
 
-**Advisor feedback must NEVER cause you to deviate from the instructions or specifications the human gave you** — follow those precisely. The advisor exists to help you achieve the spec, not to alter it. If it flags a problem or offers an alternate approach that would mean deviating, you MUST get explicit approval from the human before making any deviation.
+When to NOT use the advisor:
+
+- When you are making small or simple changes.
+- When the task is already clearly scoped.
+- When the task has little ambiguity.
+- When the approach follows well-established patterns.
+- When the changes are easily reversible, straightforward, and entail little-to-no risk.
+
+Important: **Advisor feedback must NEVER cause you to deviate from the instructions or specifications the human gave you** — follow those precisely. The advisor exists to help you achieve the spec, not to alter it. If it flags a problem or offers an alternate approach that would mean deviating, you MUST get explicit approval from the human before making any deviation.
 
 ## 12.1 If the advisor tool is unavailable
 
-Fall back to spawning a subagent as the advisor, and treat it exactly the same way.
+Fall back to spawning a subagent as the advisor, and treat it the same way.
 
-1. **Package the context.** A subagent does NOT inherit the conversation transcript — the `advisor` tool's key feature — so hand it everything it needs: the task/goal, what's been done so far (key tool calls + results), your current reasoning/plan, the relevant files or diffs, and the specific question to review. Frame it as "review my work/plan as a skeptical senior reviewer and push back."
-2. **CONTAIN it to a single subagent session — state this EXPLICITLY in the prompt.** It must not spawn subagents of its own, and must not call the `advisor` tool itself; it answers directly within its own session and returns its review as its final message. Put this line in the prompt verbatim: _"Do NOT spawn any subagents and do NOT use any advisor tool — answer directly in this single session and return your review as your final message."_
-3. **Use a model one tier ABOVE the current main model**, passed via the Agent tool's `model` param. Ascending ladder: **`haiku` → `sonnet` → `opus` → `fable`**. If already on `fable` (the top tier), use `fable` again — a fresh, differently-anchored reviewer still adds value — and note that no higher tier was available. (Verified: `model: fable` subagents run and self-report as `claude-fable-5`.)
+1. **Package the context.** A subagent does NOT inherit the conversation transcript, so you must provide it everything it needs: the task/goal/bead id, what's been done so far (key tool calls + results), decisions/dead-ends/trade-offs, your current reasoning/plan, the relevant files or diffs, and the specific question to review. Frame it as "review my work/plan as a skeptical senior reviewer and push back."
+2. **Instruct the subagent to not spawn its own subagents or advisors.** Use this language verbatim: "Do NOT spawn any subagents and do NOT use any advisor tool — answer directly in this single session and return your review as your final message."
+3. **Use a model one tier ABOVE the current main model**, passed via the Agent tool's `model` param. Ascending ladder: **`haiku` → `sonnet` → `opus` → `fable`**. If already on `fable` (the top tier), use `fable` again — a fresh, differently-anchored reviewer still adds value.
 
 # 13. NEVER manually wrap text
 
