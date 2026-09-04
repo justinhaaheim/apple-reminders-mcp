@@ -1,4 +1,4 @@
-<!-- justin-sdk rules · commit d7c3a0c1f998 · content 3e009f2a4c9a · generated 2026-08-22 · GENERATED FILE — do not edit; run: bunx @justinhaaheim/justin-sdk rules-update -->
+<!-- justin-sdk rules · commit 44c79b132676 · content 141785f0b240 · generated 2026-09-04 · GENERATED FILE — do not edit; run: bunx @justinhaaheim/justin-sdk rules-update -->
 
 # Critical Rules
 
@@ -32,7 +32,7 @@ I use [beads_rust](https://github.com/Dicklesworthstone/beads_rust) (`br`) as th
 
 ## 3.1 Why this matters
 
-Context evaporates between sessions: chat history is gone, file diffs are lossy, and memory is fragile. Beads are the durable, externalized memory that survives — the accountability, trackability, and audit trail that outlast the conversation — so use them **rigorously**. Capture in beads:
+Context evaporates between sessions: chat history is gone, file diffs are lossy, and memory is fragile. Beads are the durable, externalized memory that survives — the accountability, trackability, and audit trail that outlast the conversation — so use them **rigorously**. Capture in the bead's own body fields (see **Keep the bead current** below):
 
 - **Decisions** made, and the reasoning behind them.
 - **Anti-decisions** — approaches considered and deliberately rejected, and why.
@@ -44,7 +44,17 @@ Context evaporates between sessions: chat history is gone, file diffs are lossy,
 
 **Acceptance criteria are essential — use them almost always.** Roughly half the value of a bead is its acceptance criteria: they define, concretely, what "fully complete" means in the way the human intended. Without them it is far too easy to do work that merely _sounds like_ the bead's title, declare it done, and close it — while missing what the human actually asked for. Write them when you create the bead, and treat them as the definition of done.
 
-## 3.2 When you start work
+## 3.2 Keep the bead current — the body is the only source of truth
+
+A bead's **title and body fields** (`description`, `design`, `acceptance_criteria`, `notes`) are the source of truth for the spec and for the state of the work. Everything listed above goes there, and nowhere else.
+
+- **They must always be accurate.** A bead is not a log of what was once believed — it describes the problem, the plan, and the status **as currently understood**. Keeping them current is critically important: a body that has gone stale actively misleads the next session, which is worse than no bead at all. Keep the title and body in sync with each other, too; a title that no longer matches the body is itself a bug.
+- **Rewrite freely — removing is not destroying.** Do NOT hesitate to change or delete anything inside a bead. Beads are tracked in git, so every prior version stays recoverable: **git history is the changelog; the body is the present tense.** Preserving a predecessor's superseded text out of deference is the failure mode here, not the careful choice.
+- **Prune aggressively.** More information is not better when it is stale, superseded, confusing, misleading, or irrelevant — cut it. The goal is that the bead is an accurate representation, at all times, of the work to be done given the current understanding of the project.
+- **Anything changes → update the title and the body, now.** A decision reversed, a spec revised, a question answered, a hypothesis ruled out: rewrite the affected fields in place so they read correctly to someone who has never seen an earlier version. Recording an abandoned approach as an anti-decision is valuable — write it as current knowledge ("X was tried and rejected because Y"), not as an append-only trail under text that still describes X as the plan.
+- **Do NOT use comments.** Never `br comments add` (decided by Justin, 2026-09-04). Comments are not surfaced by `br show` or `br list`, so anything filed there is invisible in practice — and treating them as an equally good home for updates is precisely what let spec reversals accumulate as comments while bead bodies went on describing designs that had already been abandoned. Everything that matters goes in the body; what does not matter goes nowhere. The two cases that feel like they need a comment are already covered: `br close --reason "…"` writes the `close_reason` field, and a reason for reopening goes in `notes`.
+
+## 3.3 When you start work
 
 Before doing anything, decide which case you're in:
 
@@ -74,19 +84,19 @@ Before doing anything, decide which case you're in:
    br update <id> --status=in_progress   # claim it
    ```
 
-## 3.3 During work
+## 3.4 During work
 
 - Update bead status as you go: `in_progress` when claimed, `closed` with a `--reason` when done.
 - **Carefully review the acceptance criteria before closing a bead** — confirm the work genuinely meets every criterion, not just the bead's title.
 - Discover a follow-up task? Create it: `br create "..." -t task -p N` (add `--parent EPIC` if it belongs to one).
-- Surprises, decisions, dead-ends worth remembering — append to the bead's `notes` field (`br update <id> --notes ...`) or add a comment on the bead; either is fine. The bead is the durable memory; chat history is not.
+- Surprises, decisions, dead-ends worth remembering — write them into the bead's `notes` field (`br update <id> --notes '...'`), rewriting the field so it reads as the current state of the work rather than a transcript of how you got there. `--notes` REPLACES what's there, which is the point: read the existing note, fold in what's new, cut what's now stale. The bead is the durable memory; chat history is not.
 
-## 3.4 When you finish (or hit a stopping point)
+## 3.5 When you finish (or hit a stopping point)
 
 - The `.beads/` directory IS the source of truth, and most projects **auto-flush** it to `.beads/issues.jsonl`. **But you must remember to COMMIT that file** — it happens often that beads get changed and then left uncommitted. Stage and commit it alongside your code changes so beads state travels with the branch.
-- If the work is a multi-bead epic and you're handing off mid-stream, give a **short handoff message** for the next agent: the epic id, the branch, what's done, and what's next (which bead to claim).
+- If the work is a multi-bead epic and you're handing off mid-stream, give a **short handoff message** for the next agent: the epic id, the branch, what's done, and what's next (which bead to claim). The message is a pointer, not the record — the detail must already be in the bead bodies, since the message is gone the moment the session is.
 
-## 3.5 Notes
+## 3.6 Notes
 
 - If beads doesn't appear to be set up in a project, do NOT run `br init` yourself — flag it to the human instead ("my guidance says to use beads, but it doesn't look set up here yet").
 - Beads are local to a branch / worktree. To see beads created in a worktree you must `cd` into that worktree first — if you've been told to work on a bead in a particular worktree, check out that worktree before running any `br` commands.
