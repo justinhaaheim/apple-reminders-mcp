@@ -46,3 +46,18 @@ tmp/
 # Dynamic version artifacts (local-only)
 dynamic-version.local.json
 dynamic-version.local.d.ts
+
+# justin-sdk baseline (appended)
+dist/
+build/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+*.local
+*.local.json
+.bv/
+.beads/.br_recovery/
+.beads/.local_version
+.eslintcache
+.claude/worktrees/
