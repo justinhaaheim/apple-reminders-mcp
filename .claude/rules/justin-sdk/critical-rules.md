@@ -1,4 +1,4 @@
-<!-- justin-sdk rules · commit 44c79b132676 · content 141785f0b240 · generated 2026-09-04 · GENERATED FILE — do not edit; run: bunx @justinhaaheim/justin-sdk rules-update -->
+<!-- justin-sdk rules · prompts 5d81571fbf4f (2026-09-18) · modules 5dfdf6b3ee88 · content a78398335c1b · GENERATED — run: bun run justin-sdk rules-update -->
 
 # Critical Rules
 
@@ -19,6 +19,7 @@ Before yielding back after work has been completed:
 - **Run shell commands one at a time.** One logical action per invocation; read its output before deciding the next command. Do NOT chain multiple state-changing steps into a single compound command: if any step fails mid-chain the failure is buried, the partial state is hard to see, and recovery is a mess. Sequential commands cost nothing and make every result inspectable. Shell plumbing within one action is fine (pipes, a guard like `test -f x && …`) — the smell is stacking independent actions, especially writes, behind a single Enter.
 - **Use a `./tmp/` folder** for genuinely disposable files — scratch data, backups, throwaway output — and keep `tmp/` in `.gitignore` so the working tree stays clean.
 - **Never leave CODE in `tmp/`.** Anything with reuse value goes in the repo proper, from the first version. `tmp/` is excluded from TypeScript, ESLint and Prettier, so code there is silently unchecked, and the directory is liable to be cleared at any moment. Commit it and prune later if it turns out not to matter — that is far cheaper than losing it or shipping something nothing ever type-checked.
+- Use jsonl files instead of json for logs, or whenever possible and sensible. jsonl enables appending without rewriting and is more resilient to errors.
 - **Create, enter, and exit git worktrees with the Claude Code worktree tools, not raw `git worktree` commands.** Removing a worktree by hand leaves its Claude transcript stranded in an orphaned project directory, where `--resume` will not find it; the tools move it back. Raw removal also destroys any unpushed commits and submodule state living in that worktree.
 - **Codify reusable commands as `package.json` scripts.** Anything worth running more than once — even a memorable one-off — becomes a named script rather than living only in chat or shell history. Predictable aliases (`prettier:write`, `fix`, etc.) document the command explicitly for humans and agents, remove the recall cost of bespoke per-tool syntax, and are discoverable via shell completion (an ADHD-ergonomics win). Whenever you hand over a command to run, lean toward adding it as a script first, then saying to run `bun run <name>`. Even non-JS projects should keep a `package.json` for these aliases. Prefix disposable one-offs with `tmp:` (e.g. `tmp:fetch-otter-april`) so they're visibly throwaway and easy to garbage-collect, while still committed to git as a record of the exact invocation.
 - **Write scripts in TypeScript rather than shell script**, run them with `bun`, and put them in a `/scripts/` folder. TypeScript is more readable and adds static typing, so prefer it unless a shell script has clear advantages.
@@ -103,14 +104,33 @@ Before doing anything, decide which case you're in:
 - Bead types: `task`, `bug`, `feature`, `epic`, `chore`, `docs`, `question`. Priorities are 0–4 (P0 = critical, P4 = backlog).
 - Dependency directions matter. The short version: use `--parent EPIC_ID` for epic / sub-bead; use `br dep add <waiter> <waited-on>` (default `--type blocks`) for true sequencing.
 
-# 4. Stay focused
+# 4. Where documentation goes
+
+Documenting learnings and conventions is essential — and so is landing each one in the right place. Guidance stored wrongly goes stale, misleads, is never seen, or is bloat in every future context window.
+
+**Always choose the most tightly-scoped, most future-proof home: somewhere it will still be seen when it is needed, and not seen when it is not.**
+
+- **Specific to one feature, bug, or epic** → a bead on that work.
+- **About the current state of things** ("working on X", "migrating Y") → a bead, or nowhere. It is stale the moment it is written; never put it in a CLAUDE.md.
+- **Specific to a sub-project** → that sub-project's `CLAUDE.md`, or its `--help` / `--skill` output if it has a CLI.
+- **Looked-up details about one tool, not needed most sessions** → a cheat sheet in `docs/reference/`.
+- **Dated observations, decisions, dead ends** → `JOURNAL.md` next to the repo's CLAUDE.md, newest first.
+- **Every agent in this repo needs it, every time** → the repo's `CLAUDE.md`, concisely.
+- **Every agent in every repo needs it, every time** → a rule in the prompts repo.
+- **Needed only for a particular activity** → a skill in the prompts repo, when either that activity comes up in under about half of sessions and missing it is not catastrophic, or the human invokes the skill directly. Skill loading is non-deterministic, so anything needed most sessions belongs in a CLAUDE.md instead.
+
+Before writing anything down, ask: would this help an agent working on something _else_ here in three months — and is it worth the cost of showing it to _every_ agent working on _anything_ here? If a competent agent would already know it, skip it. **If it is discoverable, write down how to discover it, not the answer** — and prefer generating it dynamically over maintaining it by hand.
+
+**Do not use project memory** — it is opaque, not reliably loaded, and not version controlled. **Do not use the user-level `~/.claude/CLAUDE.md`** — the prompts repo rules are curated, and travel with the repo to remote and web sessions.
+
+# 5. Stay focused
 
 - Focus on addressing the given task in the smartest, most direct way possible.
 - Follow the instructions you were given by the human precisely.
 - Always prioritize getting the change _working_ over fixing lint/typescript issues that arise. Return to fix the lint/ts issues at the end.
 - Do not change anything that is not directly related to the task at hand. Do not alter/remove comments or code unless it is required for the task, or explicitly instructed.
 
-# 5. Use good style
+# 6. Use good style
 
 - **NEVER disable a lint rule unless explicitly authorized to do so.**
   - The lint rules for a project were carefully chosen for a reason. These rules help prevent anti-patterns, mistakes, and hard-to-debug code.
@@ -126,19 +146,19 @@ Before doing anything, decide which case you're in:
 
 - Use the function declaration syntax for functions/components at the top level of a file. Otherwise use whatever is most idiomatic.
 
-# 6. Failure is not empty: never conflate "it failed" with "there is none"
+# 7. Failure is not empty: never conflate "it failed" with "there is none"
 
 **A failed measurement must never be representable as a normal value.** "The tool errored", "there is no value", "the value is zero", and "the list is empty" are four different facts. Any code that maps one onto another — `return 0` on a failed subprocess, `return []` on a thrown enumeration, `catch { return null }` where null also means "genuinely absent" — is manufacturing false evidence, and the damage lands downstream where nobody can see the substitution happened.
 
 This is a hard invariant for all code, not a style preference. It ranks with "never disable a lint rule."
 
-## 6.1 Why this is cardinal
+## 7.1 Why this is cardinal
 
 - **The failure mode is silence-shaped.** Fabricated neutral values produce _calm_ output: zero differences, empty lists, "nothing to do". Nothing red ever happens, so no one looks. The bug is invisible at the layer that created it and undiagnosable at the layer it detonates.
 - **Downstream consequences are unbounded** — you do not know what will be decided from your return value. Real case (repo-status, 2026-08): `if (out == null) return {ahead: 0, behind: 0}` on a failed `git rev-list` read as "0 commits ahead" → "fully merged, proven safe" → eligible for automated **remote branch deletion**; one conflated null, six sibling bugs of the same shape, worst reachable consequence irreversible data loss reported as success.
 - **The reassuring direction is the dangerous one.** A failure that degrades to "more work to do" wastes time; one that degrades to "all clear" destroys things. Audit every fallback by asking: does this substitution move the verdict TOWARD "safe/done/clean"? If yes, it is a bug right now.
 
-## 6.2 What to do instead
+## 7.2 What to do instead
 
 - **Make the type carry the distinction.** `number | null`, `T[] | null`, a `Result`/outcome union — whatever fits, but the failed state must be a _distinct type member_ the compiler forces every consumer to handle. Never a sentinel that is also a legal value (`0`, `''`, `[]`, `-1`).
 - **One nullable field, not many.** Group values that come from a single measurement so "half known" is unrepresentable (`{ahead, behind} | null`, not two nullable numbers).
@@ -148,13 +168,13 @@ This is a hard invariant for all code, not a style preference. It ranks with "ne
 
 "Use `null` when a property is absent (never `''`)" is the modeling half of this principle; this rule is the enforcement half — the null must be _load-bearing_: produced on failure, typed distinctly, impossible to mistake for a measured zero.
 
-# 7. Do these first
+# 8. Do these first
 
 - **CHECK the code before you build** - Before building something new, check the codebase for existing functionality. Make smart choices whether to augment/refactor/replace what exists, or to build something additional. It's ok to duplicate/rebuild things, but only do so intentionally and explicitly.
 - **Locate/setup VERIFICATION tooling before you build** - Agents benefit immensely from having a way to inspect and verify what they're building (web UI, iOS app, shell output, etc). If you have one, use it. If you don't, suggest this to the human. Currently preferred tools are playwright (browser), detox (react native e2e tests), ios-simulator mcp (driving the sim directly), and bun tests (incl snapshot tests).
 - **LOOK before you build** - inspect what you are building/using/doing before/during/after. DON'T BUILD BLIND. Look at the sim/page snapshot/screenshot.
 
-# 8. Check signals
+# 9. Check signals
 
 Always check work with the project's `signal` script when you're done making changes. It is usually also wired to run automatically — in a pre-commit hook, or in a PostToolUse hook (in which case there's no need to run it again by hand).
 
@@ -166,7 +186,7 @@ Most projects also expose these directly:
 - `bun run lint` - Check for lint issues
 - `bun run prettier:check` - Check for formatting issues
 
-# 9. Screenshot tests
+# 10. Screenshot tests
 
 UI screenshots are stored **as screenshot tests** — never as loose files or historical galleries.
 
@@ -177,7 +197,7 @@ UI screenshots are stored **as screenshot tests** — never as loose files or hi
 
 When building UI in a project that has no screenshot tests yet, suggest setting them up — they're cheap once the e2e harness exists, and they turn every future UI change into a reviewable image diff.
 
-# 10. Commit regularly
+# 11. Commit regularly
 
 - Commit changes regularly using `git add ...` and `git commit ...` (run them as separate commands, not chained).
 - Wrap the commit message in **single quotes**, as in `git commit -m '<message>'` — not double quotes, which let the shell interpolate backticks and `$` in the message.
@@ -185,41 +205,46 @@ When building UI in a project that has no screenshot tests yet, suggest setting 
 - ALWAYS commit changes proactively, at regular intervals, as soon as a unit of work is done.
 - NEVER leave uncommitted changes in the working directory. It is better to commit now and fix any issues in follow-up commits than to leave uncommitted changes in the working directory.
 
-# 11. Justin SDK
+# 12. Justin SDK
 
 **justin-sdk** (`@justinhaaheim/justin-sdk`) provides useful tools in a consistent way across many different projects. Its whole purpose is to avoid rolling my own near-duplicate scripts in virtually every project — and then having to keep all those copies in sync.
 
-## 11.1 Prefer uniformity across projects over matching local code
+## 12.1 Prefer uniformity across projects over matching local code
 
 For tooling that exists (or should exist) in more than one of my projects — build/ship scripts, config, shared helpers — **strive for uniform, ideally identical, patterns across similar projects**. Do NOT default to "match the surrounding code" of whichever project you happen to be in.
 
 "Match the surrounding code" is a _within-a-project_ tiebreaker for idiom and naming. It is NOT a reason to let the same tool diverge into a different local dialect from one project to the next. If a shared script doesn't lint/typecheck/build in some project, the right fix is to make that project support the shared version (e.g. add the types it needs to its tsconfig), NOT to fork the script.
 
-## 11.2 Consolidate shared functionality into justin-sdk
+## 12.2 Consolidate shared functionality into justin-sdk
 
 When there's an opportunity to consolidate similar functionality used across projects _into_ justin-sdk, that is usually the right choice: reusing one implementation from the SDK is **strictly better** than copy-pasting it into N projects and keeping the copies in sync. Some things genuinely may not work (or not work as well) inside the justin-sdk package itself — keep those per-project, but still uniform across projects. Most of the time that isn't the case, so put it in justin-sdk and reuse it.
 
-# 12. Advisor tool
+# 13. Advisor tool
 
 The `advisor` tool is a stronger reviewer model that gives feedback on designs, implementations, and problems you're stuck on. It sees the whole conversation history automatically.
 
 When to use the advisor:
 
 - After scoping/designing a significant feature/workstream, ask the advisor to review your spec/approach before implementing -- to identify and challenge your assumptions, and to provide constructive feedback.
+- At architectural decision points, especially when the decision will impact the work that many future agents/sessions will do.
 - If you are stuck debugging something ask the advisor for help before spending too much time spinning your wheels.
 - If you are considering pivoting to a different approach, but are uncertain about which approach to take or whether to pivot in the first place, ask the advisor to think it through with you.
+- If you are planning to take actions that could be destructive/irreversible, in order to check your reasoning and approach, and to identify anything you might be missing or underweighting. (Note that you must ALWAYS get explicit approval from the human before taking destructive/irreversible actions, regardless of advisor involvement. Use the advisor as an additional set of eyes.)
+- If you have any safety or security questions/concerns about your task.
 
 When to NOT use the advisor:
 
-- When you are making small or simple changes.
-- When the task is already clearly scoped.
-- When the task has little ambiguity.
-- When the approach follows well-established patterns.
-- When the changes are easily reversible, straightforward, and entail little-to-no risk.
+- If you are making small or simple changes that are low-risk.
+- If the task you've been given has little ambiguity and does not raise safety/security concerns.
+- If the changes are easily reversible, straightforward, and entail little-to-no other risk.
 
-Important: **Advisor feedback must NEVER cause you to deviate from the instructions or specifications the human gave you** — follow those precisely. The advisor exists to help you achieve the spec, not to alter it. If it flags a problem or offers an alternate approach that would mean deviating, you MUST get explicit approval from the human before making any deviation.
+## 13.1 Deviations require explicit approval from the human
 
-## 12.1 If the advisor tool is unavailable
+IMPORTANT: If the advisor recommends something that would represent a deviation from the instructions or specifications the human gave you, **you must STOP and get explicit approval from the human before proceeding.**
+
+For instance, if the human explicitly asks you to build something using package A, and the advisor for whatever reason recommends using package B, that would represent a deviation from the human's instructions. The human would likely return to the session and say "hey, I asked you to build this using package A, and you did something different." In this case you MUST get explicit approval from the human to use package B before proceeding.
+
+## 13.2 If the advisor tool is unavailable
 
 Fall back to spawning a subagent as the advisor, and treat it the same way.
 
@@ -227,10 +252,22 @@ Fall back to spawning a subagent as the advisor, and treat it the same way.
 2. **Instruct the subagent to not spawn its own subagents or advisors.** Use this language verbatim: "Do NOT spawn any subagents and do NOT use any advisor tool — answer directly in this single session and return your review as your final message."
 3. **Use a model one tier ABOVE the current main model**, passed via the Agent tool's `model` param. Ascending ladder: **`haiku` → `sonnet` → `opus` → `fable`**. If already on `fable` (the top tier), use `fable` again — a fresh, differently-anchored reviewer still adds value.
 
-# 13. NEVER manually wrap text
+# 14. NEVER manually wrap text
 
 **Do not insert your own newlines to wrap a text at some column width.** Let the thing that displays the text do the wrapping.
 
 This is not "avoid all newlines." Structural line breaks are correct and expected. The rule is narrow and specific: **never break a line purely because it got long.**
 
 This applies to **everything you write**, not just code. Only manually wrap lines when it is explicitly called for.
+
+# 15. Speech-to-text interpretation
+
+The human may be using a speech-to-text (S2T) tool for some or all of their messages. Use judgment to determine which messages appear to be S2T versus typed text. For messages that appear to be S2T:
+
+1. **Expect artifacts that do NOT represent the human's intention:** words like "code," "clothes," "close," and "cold" are frequently transcribed as "Claude"; other homophones and similar-sounding words; missing or incorrect punctuation and capitalization; run-on sentences and fragments; the grammatical inconsistencies typical of spoken language.
+
+2. **Focus on meaning over form.** Prioritize the intended meaning: use context to recover the likely word when one seems incorrect, don't get stuck on strange phrasing or sentence structure that may be a transcription artifact, and respond to the intended message.
+
+3. **Handle ambiguity carefully.** If a transcription issue makes the interpretation genuinely uncertain — especially when the meaning would change significantly depending on the ambiguous word or phrase — flag it directly with a "warning sign" emoji. Flag it in a direct message to the human, not inside the artifact being worked on.
+
+4. **Recognize the "Dakota" wake word.** "Dakota" in a message signals meta-instructions (unless context clearly indicates otherwise): what follows is a direct command to the assistant about how to interpret or respond, and must be processed separately from the regular message content. "Thanks Dakota" marks the end of the meta-instructions, though in most cases it is clear from context anyway. Common examples: "Dakota, include this point in your summary", "Dakota, edit [something]", "Dakota, scratch that last sentence".

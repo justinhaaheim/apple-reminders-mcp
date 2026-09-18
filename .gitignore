@@ -61,3 +61,6 @@ coverage/
 .beads/.local_version
 .eslintcache
 .claude/worktrees/
+
+# justin-sdk baseline (appended)
+*.local.*

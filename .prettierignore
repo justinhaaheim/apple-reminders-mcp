@@ -18,3 +18,10 @@
 
 # Beads issue tracker data
 .beads
+
+# justin-sdk baseline (appended)
+build
+coverage
+*.tsbuildinfo
+*.log
+**/.claude/worktrees/
