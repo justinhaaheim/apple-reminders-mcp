@@ -4,9 +4,14 @@
     "beads-setup",
     "critical-rules-setup",
     "gitignore-setup",
-    "prettier-setup"
+    "prettier-setup",
+    "thread-hooks-setup"
   ],
   "componentConfig": {
-    "critical-rules": {}
+    "critical-rules": {},
+    "thread": {
+      "enforce": true,
+      "startOnSessionStart": true
+    }
   }
 }

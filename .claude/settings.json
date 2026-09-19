@@ -55,6 +55,15 @@
             "command": "if [ \"$CLAUDE_CODE_REMOTE\" = \"true\" ]; then bunx github:justinhaaheim/justin-sdk setup-env; else bun run justin-sdk session-start || true; fi"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "bun run justin-sdk thread start --hook",
+            "type": "command"
+          }
+        ],
+        "matcher": "startup|resume"
       }
     ],
     "Notification": [
@@ -75,6 +84,16 @@
           {
             "type": "command",
             "command": "jq -r '.tool_input.file_path' | { read file_path; bun run prettier:write:file -- \"$file_path\"; }"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "bun run justin-sdk thread stop-check",
+            "type": "command"
           }
         ]
       }
