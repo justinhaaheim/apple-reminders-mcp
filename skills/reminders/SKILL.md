@@ -37,7 +37,11 @@ fundamentals, project-specific extensions).
 ### User preferences
 
 - Always use `--pretty` when showing output to the user.
-- Default to `--all-lists` unless the user specifies a particular list.
+- Default scope is the user's default list and incomplete reminders only.
+  Don't widen with `--all-lists`, `--include-completed`, or `--completed-only`
+  unless the user explicitly asks for that broader scope. Treat ambiguous
+  phrases like "my reminders matching X" or "json dump of X" as "the open
+  ones matching X", not "everything ever matching X".
 - Use `--detail compact` (default) for queries unless more detail is needed.
 - When searching, prefer `--search` over JMESPath for simple text matches.
   For case-insensitive JMESPath matching, use `lower()` / `upper()`:

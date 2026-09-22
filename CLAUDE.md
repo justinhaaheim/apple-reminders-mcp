@@ -94,6 +94,7 @@ Sources/
 | `create_reminders` | Create one or more reminders (batch) |
 | `update_reminders` | Update reminders including mark complete/incomplete (batch) |
 | `delete_reminders` | Delete reminders (batch) |
+| `delete_list` | Delete a reminder list and all reminders it contains. Refuses the default list and an ambiguous name; a non-empty list needs `force: true`. Returns `{deleted, failed}`. |
 | `export_reminders` | Export reminders to JSON file for backup |
 | `list_hashtags` | Master hashtag inventory with usage counts (read-only SQLite enrichment) |
 | `help` | Get documentation for any tool (MCP meta-tool) |
@@ -115,23 +116,26 @@ for the on-disk format.
 
 ## CLI Usage
 
-**Query convention**: structured CLI flags (`--list`, `--status`, `--search`,
-`--created-from/-to`, `--modified-from/-to`, `--due-from/-to`, `--sort`,
-`--per-page`) filter at fetch time; the positional `[QUERY]` JMESPath
-expression filters and projects on the result. Order on the command line
-never changes results — flags always run first. Foundation reference:
+**Query convention**: structured CLI flags (`--list`, `--include-completed`,
+`--completed-only`, `--search`, `--created-from/-to`, `--modified-from/-to`,
+`--due-from/-to`, `--sort`, `--per-page`) filter at fetch time; the
+positional `[QUERY]` JMESPath expression filters and projects on the
+result. Order on the command line never changes results — flags always
+run first. Default scope is the user's default list and incomplete only;
+don't widen with `--all-lists` / `--include-completed` / `--completed-only`
+unless the user explicitly asks. Foundation reference:
 [`docs/query-reference.md`](docs/query-reference.md).
 
 ```bash
-# Query reminders (default command)
-reminders query --list "Work" --search "meeting" --status incomplete
+# Query reminders (default command — incomplete, default list)
+reminders query --list "Work" --search "meeting"
 
 # JMESPath as positional argument
-reminders query --all-lists "[?priority == 'high']" --pretty
+reminders query "[?priority == 'high']" --pretty
 
 # Per-field date ranges
 reminders query --due-from 2026-03-07 --due-to 2026-03-14 --sort dueDate
-reminders query --created-from 2026-04-30 --status all
+reminders query --created-from 2026-04-30 --include-completed
 reminders query --modified-from 2026-05-01 --pretty
 
 # Case-insensitive matching via project-specific lower() / upper() functions
@@ -149,6 +153,10 @@ reminders update <id> --title "New title" --priority high
 
 # Delete reminders
 reminders delete <id1> <id2>
+
+# Delete a list (and everything in it) — needs --force when non-empty
+reminders delete-list "Old Project"
+reminders delete-list --list-id "x-apple-..." --force
 
 # Hashtag inventory (SQLite enrichment; needs Full Disk Access)
 reminders hashtags --pretty

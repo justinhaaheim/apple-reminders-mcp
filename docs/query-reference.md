@@ -10,7 +10,7 @@ A field guide to querying reminders. Approachable from a cold start: read top-do
 
 `reminders query` searches reminders. It runs in two stages:
 
-1. **Structured filters** — `--list`, `--status`, `--search`, the per-field date flags. Cheap, fast, applied at fetch time (some push down into EventKit's predicate).
+1. **Structured filters** — `--list`, `--include-completed` / `--completed-only`, `--search`, the per-field date flags. Cheap, fast, applied at fetch time (some push down into EventKit's predicate).
 2. **JMESPath** — a single expression as the positional `[QUERY]` argument. Runs on the result of stage 1, on the full reminder payload. Used for filtering JMESPath can express better, projection (transforming output shape), and sorting.
 
 Both stages are optional. Running `reminders` with no args returns incomplete reminders from the default list — usually what you want.
@@ -44,22 +44,28 @@ When in doubt: prefer flags for the things that have them; reach for JMESPath fo
 
 ### List selection
 
-| Flag              | Meaning                             |
-| ----------------- | ----------------------------------- |
-| `--list "Name"`   | One list by name (case-insensitive) |
-| `--list-id "..."` | One list by ID                      |
-| `--all-lists`     | Search across every list            |
-| _(omitted)_       | The default list                    |
+| Flag              | Meaning                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------- |
+| `--list "Name"`   | One list by name (case-insensitive)                                                |
+| `--list-id "..."` | One list by ID                                                                     |
+| `--all-lists`     | Search across every list — only when the user explicitly asks for cross-list scope |
+| _(omitted)_       | (default) The default list                                                         |
 
-`--list`, `--list-id`, and `--all-lists` are mutually exclusive.
+`--list`, `--list-id`, and `--all-lists` are mutually exclusive. The default
+is intentionally the default list; reach for `--all-lists` only when the
+request actually spans lists.
 
 ### Status
 
-| Flag                  | Meaning                             |
-| --------------------- | ----------------------------------- |
-| `--status incomplete` | (default) Only incomplete reminders |
-| `--status completed`  | Only completed reminders            |
-| `--status all`        | Both                                |
+| Flag                  | Meaning                                                      |
+| --------------------- | ------------------------------------------------------------ |
+| _(omitted)_           | (default) Only incomplete reminders                          |
+| `--include-completed` | Both incomplete and completed                                |
+| `--completed-only`    | Only completed reminders (mutually exclusive with the above) |
+
+Default is incomplete-only on purpose — that's almost always what's
+wanted. Widen only when the user explicitly asks for completed/archived
+items.
 
 ### Text search
 
@@ -124,7 +130,7 @@ they're `null` when the SQLite store is unreachable.
 | ----------------- | ---------------------------------- |
 | `--sort newest`   | (default) `createdDate` descending |
 | `--sort oldest`   | `createdDate` ascending            |
-| `--sort priority` | `high` → `medium` → `low` → `none` |
+| `--sort priority` | `high` → `medium` → `low` → null   |
 | `--sort dueDate`  | Soonest first, nulls last          |
 
 When you supply a JMESPath expression, `--sort` is ignored — sort inside the expression: `sort_by(@, &dueDate)` / `reverse(sort_by(@, &createdDate))`.
@@ -162,14 +168,14 @@ Pick array elements that satisfy a boolean expression. The element under inspect
 
 ```jmespath
 [?priority == 'high']                           # high-priority reminders
-[?priority != 'none']                           # any priority set
+[?priority != null]                             # any priority set
 [?isCompleted]                                  # completed
 [?!isCompleted]                                 # incomplete
 [?dueDate == null]                              # no due date
 [?dueDate >= '2026-05-07']                      # due today or later (lexical)
 [?priority == 'high' && !isCompleted]           # AND
 [?priority == 'high' || priority == 'medium']   # OR
-[?!(priority == 'none')]                        # NOT
+[?priority == null]                             # NOT (no priority)
 ```
 
 > **String comparisons** — `<`, `<=`, `>`, `>=` work on strings here even though the JMESPath spec restricts them to numbers. The Swift JMESPath implementation does lexical comparison, which is exactly what you want for ISO 8601 dates.
@@ -265,32 +271,34 @@ Quick, copy-pasteable answers to common questions. All examples assume today's d
 ### 1. Task Journal: created in last 7 days OR with any priority
 
 ```bash
-reminders query --list "Task Journal" --created-from 2026-04-30 --status all --pretty \
-  "[?priority != 'none' || createdDate >= '2026-04-30']"
+reminders query --list "Task Journal" --include-completed --pretty \
+  "[?priority != null || createdDate >= '2026-04-30']"
 ```
 
 ### 2. Task Journal: created more than 14 days ago
 
 ```bash
-reminders query --list "Task Journal" --created-to 2026-04-23 --status all --pretty
+reminders query --list "Task Journal" --include-completed --created-to 2026-04-23 --pretty
 ```
 
-### 3. High-priority incomplete reminders, all lists
+### 3. High-priority incomplete reminders (default list)
 
 ```bash
-reminders query --all-lists --pretty "[?priority == 'high']"
+reminders query --pretty "[?priority == 'high']"
+# Across all lists, only when the user asks for cross-list:
+# reminders query --all-lists --pretty "[?priority == 'high']"
 ```
 
 ### 4. Reminders due in next 7 days, sorted by due date
 
 ```bash
-reminders query --all-lists --due-from 2026-05-07 --due-to 2026-05-14 --sort dueDate --pretty
+reminders query --due-from 2026-05-07 --due-to 2026-05-14 --sort dueDate --pretty
 ```
 
 ### 5. "meeting" in title (case-insensitive), due in next 14 days
 
 ```bash
-reminders query --all-lists --due-to 2026-05-21 --pretty \
+reminders query --due-to 2026-05-21 --pretty \
   "[?contains(lower(title), 'meeting')]"
 ```
 
@@ -305,15 +313,15 @@ reminders query --list "Work" --pretty | jq '.totalCount'
 ### 7. 10 oldest reminders in Personal
 
 ```bash
-reminders query --list "Personal" --status all --sort oldest --per-page 10 --pretty
+reminders query --list "Personal" --include-completed --sort oldest --per-page 10 --pretty
 # JMESPath equivalent (when you also need filtering):
-reminders query --list "Personal" --status all --pretty "sort_by(@, &createdDate) | [:10]"
+reminders query --list "Personal" --include-completed --pretty "sort_by(@, &createdDate) | [:10]"
 ```
 
-### 8. Recently completed reminders, all lists, last 7 days
+### 8. Recently completed reminders, last 7 days
 
 ```bash
-reminders query --all-lists --status completed --detail full --pretty \
+reminders query --completed-only --detail full --pretty \
   "sort_by([?completedDate >= '2026-04-30'], &completedDate)"
 ```
 
@@ -322,13 +330,13 @@ reminders query --all-lists --status completed --detail full --pretty \
 ### 9. Reminders with no due date
 
 ```bash
-reminders query --all-lists --pretty "[?dueDate == null]"
+reminders query --pretty "[?dueDate == null]"
 ```
 
 ### 10. Reminders modified today
 
 ```bash
-reminders query --all-lists --modified-from 2026-05-07 --status all --pretty
+reminders query --modified-from 2026-05-07 --include-completed --pretty
 ```
 
 ### 11. Just titles for a quick scan
@@ -340,8 +348,11 @@ reminders query --list "Work" --pretty "[].title"
 ### 12. Multi-field projection of high-priority
 
 ```bash
-reminders query --all-lists --pretty \
+reminders query --pretty \
   "[?priority == 'high'].{title: title, due: dueDate, list: listName}"
+# Across all lists (only when explicitly cross-list):
+# reminders query --all-lists --pretty \
+#   "[?priority == 'high'].{title: title, due: dueDate, list: listName}"
 ```
 
 ---
@@ -373,7 +384,7 @@ reminders query --all-lists "[?priority == 'high']" --pretty | \
 
 - **JMESPath ignores `--detail`, `--sort`, and pagination flags.** It operates on full fields, results aren't sorted or paginated. Sort with `sort_by`, slice with `[N:M]`.
 - **JMESPath ignores `--detail` only when present.** The CLI flags pre-filter the result set before JMESPath runs, so they still work.
-- **Priority sorts lexically** (`high < low < medium < none`). Use `--sort priority` for the sensible order; in JMESPath use explicit equality.
+- **Priority sorts lexically** when string-compared (`high < low < medium`, with `null` unsorted). Use `--sort priority` for the sensible order; in JMESPath use explicit equality.
 - **Use single quotes around the JMESPath expression** in shells to avoid globbing on `[`. If your expression starts with `-`, separate with `--`: `reminders query -- "-not-an-expression-but-a-positional"`.
 - **The `--mock` flag** runs against an in-memory store — useful for testing JMESPath syntax without touching real reminders. Pair with `_seed_mock_data` in MCP, or just use literals: `reminders --mock "lower('TEST')"` returns `"test"`.
 

@@ -20,10 +20,15 @@ exports[`MCP schema snapshots initialize response server info 1`] = `
 
 exports[`MCP schema snapshots tool schemas query_reminders 1`] = `
 {
-  "description": "Search and filter reminders. Returns incomplete reminders from the default list by default. Convention: structured params (list, status, searchText, per-field date ranges) filter at fetch time; the 'query' JMESPath expression filters/projects on the result. See docs/query-reference.md and help("query_reminders") for full parameter docs.",
+  "description": "Search and filter reminders. Returns incomplete reminders from the default list by default. Convention: structured params (list, includeCompleted/completedOnly, searchText, per-field date ranges) filter at fetch time; the 'query' JMESPath expression filters/projects on the result. See docs/query-reference.md and help("query_reminders") for full parameter docs.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
+      "completedOnly": {
+        "default": false,
+        "description": "Return only completed reminders. Mutually exclusive with includeCompleted.",
+        "type": "boolean",
+      },
       "createdFrom": {
         "description": "Filter by createdDate >= this ISO 8601 date (or YYYY-MM-DD).",
         "type": "string",
@@ -44,9 +49,18 @@ exports[`MCP schema snapshots tool schemas query_reminders 1`] = `
         "description": "Filter by dueDate <= this ISO 8601 date (or YYYY-MM-DD).",
         "type": "string",
       },
+      "hashtag": {
+        "description": "Filter by hashtag name (case-insensitive). Matches reminders that have this hashtag applied. Requires SQLite enrichment (Full Disk Access on the calling process).",
+        "type": "string",
+      },
+      "includeCompleted": {
+        "default": false,
+        "description": "Include completed reminders alongside incomplete ones. Default is incomplete only; only widen when the user explicitly asks for completed/archived items. Mutually exclusive with completedOnly.",
+        "type": "boolean",
+      },
       "list": {
         "additionalProperties": false,
-        "description": "Which list to search. Omit for default list.",
+        "description": "Which list to search. Omit for default list. Set all=true only when the user explicitly asks for cross-list results.",
         "properties": {
           "all": {
             "description": "Set true to search all lists",
@@ -81,6 +95,10 @@ exports[`MCP schema snapshots tool schemas query_reminders 1`] = `
         ],
         "type": "string",
       },
+      "parentId": {
+        "description": "Filter to direct children of the given reminder UUID. Mutually exclusive with topLevelOnly. Requires SQLite enrichment.",
+        "type": "string",
+      },
       "perPage": {
         "description": "Results per page (1-1000). Omit to return all (auto-paginates at 200).",
         "maximum": 1000,
@@ -95,6 +113,10 @@ exports[`MCP schema snapshots tool schemas query_reminders 1`] = `
         "description": "Case-insensitive text search across reminder titles and notes",
         "type": "string",
       },
+      "sectionId": {
+        "description": "Filter by section (matches section UUID or display name, case-insensitive). Requires SQLite enrichment.",
+        "type": "string",
+      },
       "sortBy": {
         "default": "newest",
         "description": "Sort order. Ignored if 'query' includes sorting.",
@@ -106,15 +128,10 @@ exports[`MCP schema snapshots tool schemas query_reminders 1`] = `
         ],
         "type": "string",
       },
-      "status": {
-        "default": "incomplete",
-        "description": "Filter by completion status",
-        "enum": [
-          "incomplete",
-          "completed",
-          "all",
-        ],
-        "type": "string",
+      "topLevelOnly": {
+        "default": false,
+        "description": "Return only reminders without a parent. Mutually exclusive with parentId. Requires SQLite enrichment.",
+        "type": "boolean",
       },
     },
     "type": "object",
@@ -220,14 +237,29 @@ exports[`MCP schema snapshots tool schemas create_reminders 1`] = `
               "type": "string",
             },
             "priority": {
-              "description": "Priority level",
-              "enum": [
-                "none",
-                "low",
-                "medium",
-                "high",
+              "description": "Priority level. Canonical values: "low", "medium", "high", or null for no priority. "none" and Apple's native integers 0/1/5/9 are also accepted and normalize to those (0 / "none" / null = no priority).",
+              "oneOf": [
+                {
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                  ],
+                  "type": "string",
+                },
+                {
+                  "enum": [
+                    0,
+                    1,
+                    5,
+                    9,
+                  ],
+                  "type": "integer",
+                },
+                {
+                  "type": "null",
+                },
               ],
-              "type": "string",
             },
             "recurrenceRule": {
               "additionalProperties": false,
@@ -399,14 +431,29 @@ exports[`MCP schema snapshots tool schemas update_reminders 1`] = `
               "type": "string",
             },
             "priority": {
-              "description": "New priority level",
-              "enum": [
-                "none",
-                "low",
-                "medium",
-                "high",
+              "description": "New priority level. Canonical values: "low", "medium", "high", or null to clear. "none" and Apple's native integers 0/1/5/9 are also accepted (0 / "none" / null all clear).",
+              "oneOf": [
+                {
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                  ],
+                  "type": "string",
+                },
+                {
+                  "enum": [
+                    0,
+                    1,
+                    5,
+                    9,
+                  ],
+                  "type": "integer",
+                },
+                {
+                  "type": "null",
+                },
               ],
-              "type": "string",
             },
             "recurrenceRule": {
               "additionalProperties": false,
@@ -511,6 +558,43 @@ exports[`MCP schema snapshots tool schemas delete_reminders 1`] = `
 }
 `;
 
+exports[`MCP schema snapshots tool schemas delete_list 1`] = `
+{
+  "description": "Permanently delete a reminder list and all reminders it contains. This action cannot be undone. Specify the list by 'id' (preferred) or 'name'. The default list cannot be deleted. A non-empty list is refused unless force:true is passed.",
+  "inputSchema": {
+    "additionalProperties": false,
+    "oneOf": [
+      {
+        "required": [
+          "id",
+        ],
+      },
+      {
+        "required": [
+          "name",
+        ],
+      },
+    ],
+    "properties": {
+      "force": {
+        "description": "Required to delete a list that still contains reminders. Default false: a non-empty list is refused along with its reminder count.",
+        "type": "boolean",
+      },
+      "id": {
+        "description": "List ID (preferred — unambiguous).",
+        "type": "string",
+      },
+      "name": {
+        "description": "List name (case-insensitive). Rejected if multiple lists share the name; use id instead.",
+        "type": "string",
+      },
+    },
+    "type": "object",
+  },
+  "name": "delete_list",
+}
+`;
+
 exports[`MCP schema snapshots tool schemas export_reminders 1`] = `
 {
   "description": "Export reminders to a JSON file for backup. Writes data to a file instead of returning it in context. Optional path, list filter, and includeCompleted parameters.",
@@ -555,11 +639,13 @@ exports[`MCP schema snapshots tool schemas tool count has not changed 1`] = `
 [
   "create_list",
   "create_reminders",
+  "delete_list",
   "delete_reminders",
   "export_reminders",
   "get_lists",
   "guidance",
   "help",
+  "list_hashtags",
   "query_reminders",
   "schema",
   "update_reminders",

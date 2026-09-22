@@ -37,6 +37,9 @@
     "enabled": true,
     "excludedCommands": ["br"]
   },
+  "enabledPlugins": {
+    "swift-lsp@claude-plugins-official": true
+  },
   "hooks": {
     "SessionStart": [
       {

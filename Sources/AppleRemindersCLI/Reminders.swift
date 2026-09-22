@@ -15,6 +15,7 @@ struct Reminders: AsyncParsableCommand {
             CreateListCommand.self,
             UpdateCommand.self,
             DeleteCommand.self,
+            DeleteListCommand.self,
             ExportCommand.self,
             SnapshotCommand.self,
             AuditCommand.self,

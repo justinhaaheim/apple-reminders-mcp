@@ -497,7 +497,7 @@ public class SnapshotManager {
             notes: reminder.notes,
             listId: reminder.calendarId,
             isCompleted: reminder.isCompleted,
-            priority: Priority.fromInternal(reminder.priority).rawValue,
+            priority: Priority.fromInternal(reminder.priority)?.rawValue,
             dueDate: dueDate,
             dueDateIncludesTime: reminder.dueDateComponents != nil ? !reminder.isAllDay : nil,
             completedDate: reminder.completionDate?.toISO8601WithTimezone(),
@@ -527,7 +527,7 @@ public struct SnapshotReminderOutput: Codable {
     public let notes: String?
     public let listId: String
     public let isCompleted: Bool
-    public let priority: String
+    public let priority: String?
     public let dueDate: String?
     public let dueDateIncludesTime: Bool?
     public let completedDate: String?

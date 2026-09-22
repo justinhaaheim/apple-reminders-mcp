@@ -103,23 +103,37 @@ public class RemindersManager {
         throw RemindersError("Invalid list selector")
     }
 
-    public func resolveListForCreate(_ selector: ListSelector?) throws -> ReminderCalendar {
+    private enum DuplicateNamePolicy {
+        case useFirst  // create: take the first match
+        case reject    // delete: never guess which list to destroy
+    }
+
+    /// Shared single-list resolver. Create allows a nil selector (→ default
+    /// list) and takes the first match on a duplicate name; delete requires an
+    /// explicit selector and rejects an ambiguous name. Centralizes id/name
+    /// matching and the not-found messages so the two paths can't drift.
+    private func resolveSingleList(
+        _ selector: ListSelector?,
+        allowDefault: Bool,
+        duplicateName: DuplicateNamePolicy
+    ) throws -> ReminderCalendar {
         guard let selector = selector, !selector.isEmpty else {
-            // No selector → default list
+            guard allowDefault else {
+                throw RemindersError("A list must be specified by 'id' or 'name'.")
+            }
             guard let defaultCalendar = store.getDefaultCalendar() else {
                 throw RemindersError("No default list found")
             }
             return defaultCalendar
         }
 
-        // Validate: only name or id allowed (not all)
         if selector.all == true {
-            throw RemindersError("Cannot create reminder in 'all' lists. Specify a single list by name or ID.")
+            throw RemindersError("Cannot use 'all' here. Specify a single list by 'id' or 'name'.")
         }
 
         let setCount = [selector.id != nil, selector.name != nil].filter { $0 }.count
-        if setCount != 1 {
-            throw RemindersError("List selector must specify exactly one of: 'id' or 'name'")
+        guard setCount == 1 else {
+            throw RemindersError("List selector must specify exactly one of: 'id' or 'name'.")
         }
 
         let allCalendars = store.getAllCalendars()
@@ -131,17 +145,29 @@ public class RemindersManager {
             return match
         }
 
-        if let name = selector.name {
-            guard let match = allCalendars.first(where: {
-                $0.name.caseInsensitiveCompare(name) == .orderedSame
-            }) else {
-                let available = allCalendars.map { $0.name }.joined(separator: ", ")
-                throw RemindersError("No list found with name: '\(name)'. Available lists: \(available).")
+        let name = selector.name ?? ""
+        let matches = allCalendars.filter { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        switch matches.count {
+        case 0:
+            let available = allCalendars.map { $0.name }.joined(separator: ", ")
+            throw RemindersError("No list found with name: '\(name)'. Available lists: \(available).")
+        case 1:
+            return matches[0]
+        default:
+            switch duplicateName {
+            case .useFirst:
+                return matches[0]
+            case .reject:
+                let ids = matches.map { $0.id }.joined(separator: ", ")
+                throw RemindersError(
+                    "Multiple lists named '\(name)' (\(matches.count)). Delete by 'id' instead. Matching ids: \(ids)"
+                )
             }
-            return match
         }
+    }
 
-        throw RemindersError("Invalid list selector")
+    public func resolveListForCreate(_ selector: ListSelector?) throws -> ReminderCalendar {
+        return try resolveSingleList(selector, allowDefault: true, duplicateName: .useFirst)
     }
 
     public func createList(name: String) throws -> ReminderListOutput {
@@ -172,6 +198,61 @@ public class RemindersManager {
         )
 
         return output
+    }
+
+    /// Permanently delete a list and every reminder it contains. Irreversible.
+    /// Refuses to delete the default list, refuses an ambiguous name, and
+    /// refuses a non-empty list unless `force` is true (reporting the count).
+    /// Returns the deleted list's id.
+    public func deleteList(selector: ListSelector, force: Bool) async throws -> String {
+        let calendar = try resolveSingleList(selector, allowDefault: false, duplicateName: .reject)
+
+        // Default-list protection (Apple's UI enforces this too).
+        if let defaultCalendar = store.getDefaultCalendar(), defaultCalendar.id == calendar.id {
+            throw RemindersError(
+                "Cannot delete the default list ('\(calendar.name)'). The default list for new reminders cannot be removed."
+            )
+        }
+
+        // Test mode validation (mirrors deleteSingleReminder).
+        if TestModeConfig.isEnabled && !TestModeConfig.isTestList(calendar.name) {
+            throw RemindersError(
+                "TEST MODE: Cannot delete list '\(calendar.name)'. " +
+                "List name must start with '\(TestModeConfig.testListPrefix)'"
+            )
+        }
+
+        // Non-empty safety guard: refuse unless force is set.
+        let contained = await store.fetchReminders(
+            in: [calendar],
+            status: .all,
+            dueDateStart: nil,
+            dueDateEnd: nil
+        )
+        if !contained.isEmpty && !force {
+            throw RemindersError(
+                "List '\(calendar.name)' contains \(contained.count) reminder(s). " +
+                "This action cannot be undone. Pass force:true to delete the list and everything in it."
+            )
+        }
+
+        let beforeState: [String: Any] = [
+            "id": calendar.id,
+            "name": calendar.name,
+            "reminderCount": contained.count,
+        ]
+
+        try store.deleteCalendar(calendar)
+        log("Deleted reminder list '\(calendar.name)' (\(contained.count) reminder(s))")
+
+        AuditLogger.shared.logDelete(
+            action: "delete_list",
+            args: ["id": calendar.id, "name": calendar.name, "force": force],
+            result: .success,
+            beforeState: beforeState
+        )
+
+        return calendar.id
     }
 
     // MARK: - ID Resolution
@@ -235,7 +316,8 @@ public class RemindersManager {
 
     public func queryReminders(
         list: ListSelector?,
-        status: String?,
+        includeCompleted: Bool = false,
+        completedOnly: Bool = false,
         sortBy: String?,
         query: String?,
         perPage: Int?,
@@ -256,6 +338,9 @@ public class RemindersManager {
         if parentId != nil && topLevelOnly {
             throw RemindersError("--parent and --top-level are mutually exclusive")
         }
+        if includeCompleted && completedOnly {
+            throw RemindersError("includeCompleted and completedOnly are mutually exclusive")
+        }
         let startTime = Date()
         log("Starting queryReminders")
 
@@ -263,15 +348,15 @@ public class RemindersManager {
         let calendars = try resolveList(list)
         log("Resolved \(calendars.count) calendar(s)")
 
-        // 2. Fetch reminders with status filter
+        // 2. Fetch reminders with status filter. Default is incomplete only;
+        //    --include-completed widens to both; --completed-only narrows to completed.
         let reminderStatus: ReminderStatus
-        switch status ?? "incomplete" {
-        case "completed":
+        if completedOnly {
             reminderStatus = .completed
-        case "incomplete":
-            reminderStatus = .incomplete
-        default:
+        } else if includeCompleted {
             reminderStatus = .all
+        } else {
+            reminderStatus = .incomplete
         }
 
         // Parse all date filters up-front so we can fail fast on bad input.
@@ -425,6 +510,7 @@ public class RemindersManager {
         // 3. Apply JMESPath if provided — always uses full fields, outputDetail is ignored
         //    When JMESPath is used, return full result with no pagination (users can use JMESPath slicing)
         if let jmesQuery = query, !jmesQuery.isEmpty {
+            try validatePriorityLiteralsInQuery(jmesQuery)
             do {
                 let result = try applyJMESPath(reminderOutputs, query: jmesQuery)
                 if let arrayResult = result as? [Any] {
@@ -522,6 +608,36 @@ public class RemindersManager {
             throw RemindersError("Invalid \(fieldName) format: '\(value)'. Expected ISO 8601 (e.g. '2026-04-30' or '2026-04-30T17:00:00-08:00').")
         }
         return date
+    }
+
+    /// Conservatively guards against a JMESPath comparison of `priority`
+    /// against a string literal it can never equal (output priority is
+    /// null | "low" | "medium" | "high"). For example `[?priority == 'none']`
+    /// would silently return `[]`; instead we throw with a hint so the caller
+    /// fixes the query rather than trusting an empty result. Only single-quoted
+    /// literals (JMESPath string-literal syntax) compared directly to the
+    /// `priority` field are flagged — every other expression is left untouched.
+    private func validatePriorityLiteralsInQuery(_ query: String) throws {
+        let valid: Set<String> = ["low", "medium", "high"]
+        let patterns = [
+            "\\bpriority\\b\\s*[=!]=\\s*'([^']*)'",   // priority == 'x'
+            "'([^']*)'\\s*[=!]=\\s*\\bpriority\\b",   // 'x' == priority
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            let range = NSRange(query.startIndex..., in: query)
+            for match in regex.matches(in: query, options: [], range: range) {
+                guard let literalRange = Range(match.range(at: 1), in: query) else { continue }
+                let literal = String(query[literalRange])
+                if !valid.contains(literal) {
+                    throw RemindersError(
+                        "JMESPath compares priority to '\(literal)', which it can never equal — "
+                            + "priority is null, \"low\", \"medium\", or \"high\". For \"no priority\" "
+                            + "compare to null (e.g. [?priority == null]); for a level use 'low', 'medium', or 'high'."
+                    )
+                }
+            }
+        }
     }
 
     private func applyJMESPath(_ reminders: [ReminderOutput], query: String) throws -> Any {
@@ -622,7 +738,7 @@ public class RemindersManager {
             "listId": reminder.listId,
             "listName": reminder.listName,
             "isCompleted": reminder.isCompleted,
-            "priority": reminder.priority,
+            "priority": reminder.priority as Any? ?? NSNull(),
             "dueDate": reminder.dueDate as Any? ?? NSNull(),
             "dueDateIncludesTime": reminder.dueDateIncludesTime as Any? ?? NSNull(),
             "completedDate": reminder.completedDate as Any? ?? NSNull(),
@@ -699,12 +815,12 @@ public class RemindersManager {
         }
     }
 
-    private func prioritySortOrder(_ priority: String) -> Int {
+    private func prioritySortOrder(_ priority: String?) -> Int {
         switch priority {
         case "high": return 0
         case "medium": return 1
         case "low": return 2
-        default: return 3  // "none"
+        default: return 3  // nil / unset
         }
     }
 
@@ -745,7 +861,7 @@ public class RemindersManager {
             listId: reminder.calendarId,
             listName: reminder.getCalendarName(from: store),
             isCompleted: reminder.isCompleted,
-            priority: Priority.fromInternal(reminder.priority).rawValue,
+            priority: Priority.fromInternal(reminder.priority)?.rawValue,
             dueDate: {
                 guard var components = reminder.dueDateComponents else { return nil }
                 if components.calendar == nil { components.calendar = Calendar.current }
@@ -817,11 +933,9 @@ public class RemindersManager {
             }
         }
 
-        if let priorityString = input.priority {
-            guard let priority = Priority.fromString(priorityString) else {
-                throw RemindersError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
-            }
-            mutableReminder.priority = priority.internalValue
+        if let priorityToken = input.priority {
+            // Shared validator: low/medium/high/none/0/1/5/9; nil = no priority.
+            mutableReminder.priority = (try Priority.parse(priorityToken))?.internalValue ?? 0
         }
 
         if let urlString = input.url {
@@ -944,12 +1058,15 @@ public class RemindersManager {
             }
         }
 
-        // Update priority
-        if let priorityString = input.priority {
-            guard let priority = Priority.fromString(priorityString) else {
-                throw RemindersError("Invalid priority: '\(priorityString)'. Must be one of: none, low, medium, high.")
+        // Update priority (can be cleared with null)
+        if let priorityValue = input.priority {
+            switch priorityValue {
+            case .clear:
+                reminder.priority = 0
+            case .value(let priorityToken):
+                // "none"/"0"/null clear; low/medium/high/1/5/9 set the level.
+                reminder.priority = (try Priority.parse(priorityToken))?.internalValue ?? 0
             }
-            reminder.priority = priority.internalValue
         }
 
         // Handle completion - completedDate takes precedence over completed

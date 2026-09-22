@@ -22,11 +22,14 @@ struct QueryCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Filter by list ID")
     var listId: String?
 
-    @Flag(name: .long, help: "Search across all lists")
+    @Flag(name: .long, help: "Search across all lists (default is the configured default list — only widen when the user asks for cross-list results)")
     var allLists: Bool = false
 
-    @Option(name: .long, help: "Status filter: incomplete, completed, or all")
-    var status: String?
+    @Flag(name: .long, help: "Include completed reminders alongside incomplete (default is incomplete only)")
+    var includeCompleted: Bool = false
+
+    @Flag(name: .long, help: "Return only completed reminders (mutually exclusive with --include-completed)")
+    var completedOnly: Bool = false
 
     @Option(name: .long, help: "Search text in titles and notes")
     var search: String?
@@ -73,15 +76,11 @@ struct QueryCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Filter by section (matches section UUID or display name, case-insensitive)")
     var section: String?
 
-    private static let validStatuses = ["incomplete", "completed", "all"]
     private static let validSorts = ["newest", "oldest", "priority", "dueDate"]
     private static let validDetails = ["minimal", "compact", "full"]
 
     func run() async throws {
         // Validate enum-like options
-        if let status = status, !Self.validStatuses.contains(status) {
-            throw ValidationError("Invalid --status '\(status)'. Must be one of: \(Self.validStatuses.joined(separator: ", "))")
-        }
         if let sort = sort, !Self.validSorts.contains(sort) {
             throw ValidationError("Invalid --sort '\(sort)'. Must be one of: \(Self.validSorts.joined(separator: ", "))")
         }
@@ -93,6 +92,10 @@ struct QueryCommand: AsyncParsableCommand {
         let listOptionCount = [list != nil, listId != nil, allLists].filter { $0 }.count
         if listOptionCount > 1 {
             throw ValidationError("Specify only one of --list, --list-id, or --all-lists")
+        }
+
+        if includeCompleted && completedOnly {
+            throw ValidationError("--include-completed and --completed-only are mutually exclusive")
         }
 
         if parent != nil && topLevel {
@@ -114,7 +117,8 @@ struct QueryCommand: AsyncParsableCommand {
 
         let result = try await manager.queryReminders(
             list: listSelector,
-            status: status,
+            includeCompleted: includeCompleted,
+            completedOnly: completedOnly,
             sortBy: sort,
             query: query,
             perPage: perPage,

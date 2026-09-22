@@ -216,13 +216,13 @@ public class MCPServer {
             // query_reminders
             MCPResponse.Result.Tool(
                 name: "query_reminders",
-                description: "Search and filter reminders. Returns incomplete reminders from the default list by default. Convention: structured params (list, status, searchText, per-field date ranges) filter at fetch time; the 'query' JMESPath expression filters/projects on the result. See docs/query-reference.md and help(\"query_reminders\") for full parameter docs.",
+                description: "Search and filter reminders. Returns incomplete reminders from the default list by default. Convention: structured params (list, includeCompleted/completedOnly, searchText, per-field date ranges) filter at fetch time; the 'query' JMESPath expression filters/projects on the result. See docs/query-reference.md and help(\"query_reminders\") for full parameter docs.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
                         "list": .object([
                             "type": .string("object"),
-                            "description": .string("Which list to search. Omit for default list."),
+                            "description": .string("Which list to search. Omit for default list. Set all=true only when the user explicitly asks for cross-list results."),
                             "properties": .object([
                                 "name": .object(["type": .string("string"), "description": .string("List name (case-insensitive match)")]),
                                 "id": .object(["type": .string("string"), "description": .string("Exact list ID")]),
@@ -230,11 +230,15 @@ public class MCPServer {
                             ]),
                             "additionalProperties": .bool(false)
                         ]),
-                        "status": .object([
-                            "type": .string("string"),
-                            "enum": .array([.string("incomplete"), .string("completed"), .string("all")]),
-                            "default": .string("incomplete"),
-                            "description": .string("Filter by completion status")
+                        "includeCompleted": .object([
+                            "type": .string("boolean"),
+                            "default": .bool(false),
+                            "description": .string("Include completed reminders alongside incomplete ones. Default is incomplete only; only widen when the user explicitly asks for completed/archived items. Mutually exclusive with completedOnly.")
+                        ]),
+                        "completedOnly": .object([
+                            "type": .string("boolean"),
+                            "default": .bool(false),
+                            "description": .string("Return only completed reminders. Mutually exclusive with includeCompleted.")
                         ]),
                         "searchText": .object([
                             "type": .string("string"),
@@ -380,11 +384,9 @@ public class MCPServer {
                                         "type": .string("boolean"),
                                         "description": .string("Whether the due date includes a specific time. Set false for all-day reminders. Default: true.")
                                     ]),
-                                    "priority": .object([
-                                        "type": .string("string"),
-                                        "enum": .array([.string("none"), .string("low"), .string("medium"), .string("high")]),
-                                        "description": .string("Priority level")
-                                    ]),
+                                    "priority": prioritySchema(
+                                        description: "Priority level. Canonical values: \"low\", \"medium\", \"high\", or null for no priority. \"none\" and Apple's native integers 0/1/5/9 are also accepted and normalize to those (0 / \"none\" / null = no priority)."
+                                    ),
                                     "url": .object([
                                         "type": .string("string"),
                                         "description": .string("URL to associate with the reminder")
@@ -513,11 +515,9 @@ public class MCPServer {
                                         "type": .string("boolean"),
                                         "description": .string("Whether the due date includes a specific time. Set false for all-day reminders.")
                                     ]),
-                                    "priority": .object([
-                                        "type": .string("string"),
-                                        "enum": .array([.string("none"), .string("low"), .string("medium"), .string("high")]),
-                                        "description": .string("New priority level")
-                                    ]),
+                                    "priority": prioritySchema(
+                                        description: "New priority level. Canonical values: \"low\", \"medium\", \"high\", or null to clear. \"none\" and Apple's native integers 0/1/5/9 are also accepted (0 / \"none\" / null all clear)."
+                                    ),
                                     "completed": .object([
                                         "type": .string("boolean"),
                                         "description": .string("Set true to complete, false to uncomplete")
@@ -598,6 +598,34 @@ public class MCPServer {
                             ]),
                             "description": .string("Array of reminder IDs to delete (full or abbreviated prefixes)")
                         ])
+                    ]),
+                    "additionalProperties": .bool(false)
+                ])
+            ),
+
+            // delete_list
+            MCPResponse.Result.Tool(
+                name: "delete_list",
+                description: "Permanently delete a reminder list and all reminders it contains. This action cannot be undone. Specify the list by 'id' (preferred) or 'name'. The default list cannot be deleted. A non-empty list is refused unless force:true is passed.",
+                inputSchema: .object([
+                    "type": .string("object"),
+                    "properties": .object([
+                        "id": .object([
+                            "type": .string("string"),
+                            "description": .string("List ID (preferred — unambiguous).")
+                        ]),
+                        "name": .object([
+                            "type": .string("string"),
+                            "description": .string("List name (case-insensitive). Rejected if multiple lists share the name; use id instead.")
+                        ]),
+                        "force": .object([
+                            "type": .string("boolean"),
+                            "description": .string("Required to delete a list that still contains reminders. Default false: a non-empty list is refused along with its reminder count.")
+                        ])
+                    ]),
+                    "oneOf": .array([
+                        .object(["required": .array([.string("id")])]),
+                        .object(["required": .array([.string("name")])])
                     ]),
                     "additionalProperties": .bool(false)
                 ])
@@ -727,29 +755,30 @@ public class MCPServer {
             return try toJSON(createdList)
 
         case "query_reminders":
-            let listDict = arguments["list"]?.value as? [String: Any]
-            let listSelector = ListSelector(from: listDict)
-            let status = arguments["status"]?.value as? String
-            let sortBy = arguments["sortBy"]?.value as? String
-            let query = arguments["query"]?.value as? String
-            let perPage = arguments["perPage"]?.value as? Int
-            let cursor = arguments["cursor"]?.value as? String
-            let searchText = arguments["searchText"]?.value as? String
-            let createdFrom = arguments["createdFrom"]?.value as? String
-            let createdTo = arguments["createdTo"]?.value as? String
-            let modifiedFrom = arguments["modifiedFrom"]?.value as? String
-            let modifiedTo = arguments["modifiedTo"]?.value as? String
-            let dueFrom = arguments["dueFrom"]?.value as? String
-            let dueTo = arguments["dueTo"]?.value as? String
-            let outputDetail = arguments["outputDetail"]?.value as? String
-            let hashtag = arguments["hashtag"]?.value as? String
-            let parentId = arguments["parentId"]?.value as? String
-            let topLevelOnly = arguments["topLevelOnly"]?.value as? Bool ?? false
-            let sectionId = arguments["sectionId"]?.value as? String
+            let listSelector = try parseListSelector(arguments["list"]?.value)
+            let includeCompleted = try requireBoolOrNil(arguments["includeCompleted"]?.value, field: "includeCompleted") ?? false
+            let completedOnly = try requireBoolOrNil(arguments["completedOnly"]?.value, field: "completedOnly") ?? false
+            let sortBy = try requireStringOrNil(arguments["sortBy"]?.value, field: "sortBy")
+            let query = try requireStringOrNil(arguments["query"]?.value, field: "query")
+            let perPage = try requireIntOrNil(arguments["perPage"]?.value, field: "perPage")
+            let cursor = try requireStringOrNil(arguments["cursor"]?.value, field: "cursor")
+            let searchText = try requireStringOrNil(arguments["searchText"]?.value, field: "searchText")
+            let createdFrom = try requireStringOrNil(arguments["createdFrom"]?.value, field: "createdFrom")
+            let createdTo = try requireStringOrNil(arguments["createdTo"]?.value, field: "createdTo")
+            let modifiedFrom = try requireStringOrNil(arguments["modifiedFrom"]?.value, field: "modifiedFrom")
+            let modifiedTo = try requireStringOrNil(arguments["modifiedTo"]?.value, field: "modifiedTo")
+            let dueFrom = try requireStringOrNil(arguments["dueFrom"]?.value, field: "dueFrom")
+            let dueTo = try requireStringOrNil(arguments["dueTo"]?.value, field: "dueTo")
+            let outputDetail = try requireStringOrNil(arguments["outputDetail"]?.value, field: "outputDetail")
+            let hashtag = try requireStringOrNil(arguments["hashtag"]?.value, field: "hashtag")
+            let parentId = try requireStringOrNil(arguments["parentId"]?.value, field: "parentId")
+            let topLevelOnly = try requireBoolOrNil(arguments["topLevelOnly"]?.value, field: "topLevelOnly") ?? false
+            let sectionId = try requireStringOrNil(arguments["sectionId"]?.value, field: "sectionId")
 
             let result = try await remindersManager.queryReminders(
-                list: listDict == nil ? nil : listSelector,
-                status: status,
+                list: listSelector,
+                includeCompleted: includeCompleted,
+                completedOnly: completedOnly,
                 sortBy: sortBy,
                 query: query,
                 perPage: perPage,
@@ -782,39 +811,29 @@ public class MCPServer {
                 }
                 // Parse alarm inputs
                 var alarmInputs: [AlarmInput]? = nil
-                if let alarmsArray = dict["alarms"] as? [[String: Any]] {
-                    alarmInputs = alarmsArray.map { alarmDict in
-                        AlarmInput(
-                            type: alarmDict["type"] as? String ?? "relative",
-                            date: alarmDict["date"] as? String,
-                            offset: alarmDict["offset"] as? Int
-                        )
+                if let alarmsRaw = dict["alarms"], !(alarmsRaw is NSNull) {
+                    guard let alarmsArray = alarmsRaw as? [Any] else {
+                        throw RemindersError("Field 'alarms' must be an array of alarm objects, but received: \(alarmsRaw).")
+                    }
+                    alarmInputs = try alarmsArray.enumerated().map {
+                        try parseAlarmInput(from: $0.element, index: $0.offset)
                     }
                 }
 
                 // Parse recurrence rule input
                 var recurrenceInput: RecurrenceRuleInput? = nil
-                if let ruleDict = dict["recurrenceRule"] as? [String: Any] {
-                    recurrenceInput = RecurrenceRuleInput(
-                        frequency: ruleDict["frequency"] as? String ?? "daily",
-                        interval: ruleDict["interval"] as? Int,
-                        daysOfWeek: ruleDict["daysOfWeek"] as? [Int],
-                        daysOfMonth: ruleDict["daysOfMonth"] as? [Int],
-                        monthsOfYear: ruleDict["monthsOfYear"] as? [Int],
-                        weekPosition: ruleDict["weekPosition"] as? Int,
-                        endDate: ruleDict["endDate"] as? String,
-                        endCount: ruleDict["endCount"] as? Int
-                    )
+                if let ruleRaw = dict["recurrenceRule"], !(ruleRaw is NSNull) {
+                    recurrenceInput = try parseRecurrenceRuleInput(from: ruleRaw)
                 }
 
                 inputs.append(CreateReminderInput(
                     title: title,
-                    notes: dict["notes"] as? String,
-                    list: ListSelector(from: dict["list"] as? [String: Any]),
-                    dueDate: dict["dueDate"] as? String,
-                    priority: dict["priority"] as? String,
-                    url: dict["url"] as? String,
-                    dueDateIncludesTime: dict["dueDateIncludesTime"] as? Bool,
+                    notes: try requireStringOrNil(dict["notes"], field: "notes"),
+                    list: try parseListSelector(dict["list"]),
+                    dueDate: try requireStringOrNil(dict["dueDate"], field: "dueDate"),
+                    priority: priorityToken(from: dict["priority"]),
+                    url: try requireStringOrNil(dict["url"], field: "url"),
+                    dueDateIncludesTime: try requireBoolOrNil(dict["dueDateIncludesTime"], field: "dueDateIncludesTime"),
                     alarms: alarmInputs,
                     recurrenceRule: recurrenceInput
                 ))
@@ -849,13 +868,12 @@ public class MCPServer {
                 if let alarmsRaw = dict["alarms"] {
                     if alarmsRaw is NSNull {
                         alarmsClearable = .clear
-                    } else if let alarmsArray = alarmsRaw as? [[String: Any]] {
-                        alarmsClearable = .value(alarmsArray.map { alarmDict in
-                            AlarmInput(
-                                type: alarmDict["type"] as? String ?? "relative",
-                                date: alarmDict["date"] as? String,
-                                offset: alarmDict["offset"] as? Int
-                            )
+                    } else {
+                        guard let alarmsArray = alarmsRaw as? [Any] else {
+                            throw RemindersError("Field 'alarms' must be an array of alarm objects or null, but received: \(alarmsRaw).")
+                        }
+                        alarmsClearable = .value(try alarmsArray.enumerated().map {
+                            try parseAlarmInput(from: $0.element, index: $0.offset)
                         })
                     }
                 }
@@ -865,31 +883,22 @@ public class MCPServer {
                 if let ruleRaw = dict["recurrenceRule"] {
                     if ruleRaw is NSNull {
                         recurrenceClearable = .clear
-                    } else if let ruleDict = ruleRaw as? [String: Any] {
-                        recurrenceClearable = .value(RecurrenceRuleInput(
-                            frequency: ruleDict["frequency"] as? String ?? "daily",
-                            interval: ruleDict["interval"] as? Int,
-                            daysOfWeek: ruleDict["daysOfWeek"] as? [Int],
-                            daysOfMonth: ruleDict["daysOfMonth"] as? [Int],
-                            monthsOfYear: ruleDict["monthsOfYear"] as? [Int],
-                            weekPosition: ruleDict["weekPosition"] as? Int,
-                            endDate: ruleDict["endDate"] as? String,
-                            endCount: ruleDict["endCount"] as? Int
-                        ))
+                    } else {
+                        recurrenceClearable = .value(try parseRecurrenceRuleInput(from: ruleRaw))
                     }
                 }
 
                 inputs.append(UpdateReminderInput(
                     id: id,
-                    title: dict["title"] as? String,
-                    notes: parseClearable(dict["notes"]),
-                    list: ListSelector(from: dict["list"] as? [String: Any]),
-                    dueDate: parseClearable(dict["dueDate"]),
-                    priority: dict["priority"] as? String,
-                    completed: dict["completed"] as? Bool,
-                    completedDate: parseClearable(dict["completedDate"]),
-                    url: parseClearable(dict["url"]),
-                    dueDateIncludesTime: dict["dueDateIncludesTime"] as? Bool,
+                    title: try requireStringOrNil(dict["title"], field: "title"),
+                    notes: try parseClearable(dict["notes"], field: "notes"),
+                    list: try parseListSelector(dict["list"]),
+                    dueDate: try parseClearable(dict["dueDate"], field: "dueDate"),
+                    priority: priorityClearable(from: dict["priority"]),
+                    completed: try requireBoolOrNil(dict["completed"], field: "completed"),
+                    completedDate: try parseClearable(dict["completedDate"], field: "completedDate"),
+                    url: try parseClearable(dict["url"], field: "url"),
+                    dueDateIncludesTime: try requireBoolOrNil(dict["dueDateIncludesTime"], field: "dueDateIncludesTime"),
                     alarms: alarmsClearable,
                     recurrenceRule: recurrenceClearable
                 ))
@@ -924,13 +933,32 @@ public class MCPServer {
             let response: [String: Any] = ["deleted": deleted, "failed": failedOutput]
             return try toJSON(response)
 
+        case "delete_list":
+            let selector = ListSelector(
+                name: arguments["name"]?.value as? String,
+                id: arguments["id"]?.value as? String
+            )
+            let force = arguments["force"]?.value as? Bool ?? false
+
+            let deletedId = try await remindersManager.deleteList(selector: selector, force: force)
+            await autoSnapshot(reason: "delete_list")
+
+            // Mirror delete_reminders' shape so batch-style callers stay uniform.
+            let response: [String: Any] = ["deleted": [deletedId], "failed": []]
+            return try toJSON(response)
+
         case "export_reminders":
-            let path = arguments["path"]?.value as? String
-            let includeCompleted = arguments["includeCompleted"]?.value as? Bool ?? true
+            let path = try requireStringOrNil(arguments["path"]?.value, field: "path")
+            let includeCompleted = try requireBoolOrNil(arguments["includeCompleted"]?.value, field: "includeCompleted") ?? true
 
             // Parse lists array if provided
             var listSelectors: [ListSelector]? = nil
-            if let listsArray = arguments["lists"]?.value as? [[String: Any]] {
+            if let listsRaw = arguments["lists"]?.value, !(listsRaw is NSNull) {
+                guard let listsArray = listsRaw as? [[String: Any]] else {
+                    throw RemindersError(
+                        "Field 'lists' must be an array of objects like [{\"name\": \"...\"}], but received: \(listsRaw)."
+                    )
+                }
                 listSelectors = listsArray.map { ListSelector(from: $0) }
             }
 
@@ -958,11 +986,11 @@ public class MCPServer {
             return try getToolSchema(toolName: toolName)
 
         case "guidance":
-            let topic = arguments["topic"]?.value as? String
+            let topic = try requireStringOrNil(arguments["topic"]?.value, field: "topic")
             return getGuidance(topic: topic)
 
         case "list_hashtags":
-            let includeUnused = arguments["includeUnused"]?.value as? Bool ?? false
+            let includeUnused = try requireBoolOrNil(arguments["includeUnused"]?.value, field: "includeUnused") ?? false
             let entries = remindersManager.listHashtags(includeUnused: includeUnused)
             return try toJSON(entries)
 
@@ -988,6 +1016,7 @@ public class MCPServer {
         "create_reminders": "create",
         "update_reminders": "update",
         "delete_reminders": "delete",
+        "delete_list": "delete-list",
         "export_reminders": "export",
     ]
 
@@ -1037,11 +1066,148 @@ public class MCPServer {
     }
 
     /// Parses a JSON value into a Clearable: NSNull → .clear, castable T → .value(T), absent key → nil
-    private func parseClearable<T>(_ raw: Any?) -> Clearable<T>? {
+    /// Parses a Clearable field. Absent → nil (leave unchanged); null → .clear;
+    /// correct type → .value. A present-but-wrong-type value THROWS rather than
+    /// being silently dropped — a silent no-op reads as success to the caller.
+    private func parseClearable<T>(_ raw: Any?, field: String) throws -> Clearable<T>? {
         guard let raw = raw else { return nil }
         if raw is NSNull { return .clear }
         if let value = raw as? T { return .value(value) }
-        return nil
+        throw RemindersError(
+            "Field '\(field)' must be a \(T.self) or null, but received: \(raw)."
+        )
+    }
+
+    /// Extracts an optional string field, throwing on a present-but-wrong-type
+    /// value instead of silently dropping it. Absent or null → nil.
+    private func requireStringOrNil(_ raw: Any?, field: String) throws -> String? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        guard let string = raw as? String else {
+            throw RemindersError("Field '\(field)' must be a string or null, but received: \(raw).")
+        }
+        return string
+    }
+
+    /// Extracts an optional boolean field, throwing on a present-but-wrong-type
+    /// value (e.g. `completed: 1` or `completed: "true"`) instead of silently
+    /// dropping it. Absent or null → nil.
+    private func requireBoolOrNil(_ raw: Any?, field: String) throws -> Bool? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        guard let bool = raw as? Bool else {
+            throw RemindersError("Field '\(field)' must be a boolean or null, but received: \(raw).")
+        }
+        return bool
+    }
+
+    /// Extracts an optional integer field, throwing on a present-but-wrong-type
+    /// value (e.g. perPage: "10") instead of silently dropping it. Absent or
+    /// null → nil. (A JSON boolean decodes to Swift Bool, which does not cast to
+    /// Int, so it is rejected here too.)
+    private func requireIntOrNil(_ raw: Any?, field: String) throws -> Int? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        guard let int = raw as? Int, !(raw is Bool) else {
+            throw RemindersError("Field '\(field)' must be an integer or null, but received: \(raw).")
+        }
+        return int
+    }
+
+    /// Parses a list selector object. Absent or null → nil (caller's default).
+    /// A present-but-non-object value (e.g. the bare string "Work" instead of
+    /// {"name":"Work"}) THROWS — otherwise it would silently fall back to the
+    /// default list and write to the wrong place.
+    private func parseListSelector(_ raw: Any?, field: String = "list") throws -> ListSelector? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        guard let dict = raw as? [String: Any] else {
+            throw RemindersError(
+                "Field '\(field)' must be an object like {\"name\": \"...\"} or {\"id\": \"...\"}, but received: \(raw)."
+            )
+        }
+        return ListSelector(from: dict)
+    }
+
+    /// Extracts an optional array-of-integers field (e.g. recurrence
+    /// daysOfWeek), throwing on a present-but-wrong-type value instead of
+    /// silently dropping it. Absent or null → nil.
+    private func requireIntArrayOrNil(_ raw: Any?, field: String) throws -> [Int]? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        guard let array = raw as? [Int] else {
+            throw RemindersError("Field '\(field)' must be an array of integers or null, but received: \(raw).")
+        }
+        return array
+    }
+
+    /// Parses one alarm object, throwing on a non-object or a wrong-typed
+    /// sub-field rather than silently dropping/defaulting it. Value validation
+    /// (relative vs absolute, required offset/date) stays in RemindersManager.
+    private func parseAlarmInput(from raw: Any, index: Int) throws -> AlarmInput {
+        guard let dict = raw as? [String: Any] else {
+            throw RemindersError("Field 'alarms' entry at index \(index) must be an object, but received: \(raw).")
+        }
+        return AlarmInput(
+            type: try requireStringOrNil(dict["type"], field: "alarms[\(index)].type") ?? "relative",
+            date: try requireStringOrNil(dict["date"], field: "alarms[\(index)].date"),
+            offset: try requireIntOrNil(dict["offset"], field: "alarms[\(index)].offset")
+        )
+    }
+
+    /// Parses a recurrence-rule object, throwing on a non-object or a
+    /// wrong-typed sub-field. Frequency/interval value validation stays in
+    /// RemindersManager.
+    private func parseRecurrenceRuleInput(from raw: Any) throws -> RecurrenceRuleInput {
+        guard let dict = raw as? [String: Any] else {
+            throw RemindersError("Field 'recurrenceRule' must be an object, but received: \(raw).")
+        }
+        return RecurrenceRuleInput(
+            frequency: try requireStringOrNil(dict["frequency"], field: "recurrenceRule.frequency") ?? "daily",
+            interval: try requireIntOrNil(dict["interval"], field: "recurrenceRule.interval"),
+            daysOfWeek: try requireIntArrayOrNil(dict["daysOfWeek"], field: "recurrenceRule.daysOfWeek"),
+            daysOfMonth: try requireIntArrayOrNil(dict["daysOfMonth"], field: "recurrenceRule.daysOfMonth"),
+            monthsOfYear: try requireIntArrayOrNil(dict["monthsOfYear"], field: "recurrenceRule.monthsOfYear"),
+            weekPosition: try requireIntOrNil(dict["weekPosition"], field: "recurrenceRule.weekPosition"),
+            endDate: try requireStringOrNil(dict["endDate"], field: "recurrenceRule.endDate"),
+            endCount: try requireIntOrNil(dict["endCount"], field: "recurrenceRule.endCount")
+        )
+    }
+
+    /// The shared `priority` parameter schema. Canonical values are low/
+    /// medium/high or null; "none" and Apple integers 0/1/5/9 are also accepted
+    /// (see Priority.parse) but intentionally not enumerated here. Used by both
+    /// create_reminders and update_reminders so the two schemas never drift.
+    private func prioritySchema(description: String) -> JSONValue {
+        .object([
+            "description": .string(description),
+            "oneOf": .array([
+                .object([
+                    "type": .string("string"),
+                    "enum": .array([.string("low"), .string("medium"), .string("high")])
+                ]),
+                .object([
+                    "type": .string("integer"),
+                    "enum": .array([.int(0), .int(1), .int(5), .int(9)])
+                ]),
+                .object(["type": .string("null")])
+            ])
+        ])
+    }
+
+    /// Extracts a raw create-priority token from a JSON value. Absent or null
+    /// → nil (no priority). Other scalars are stringified (int 1 → "1") and
+    /// validated by `Priority.parse` in the manager, so an invalid value
+    /// surfaces as a per-item failure instead of being silently dropped.
+    private func priorityToken(from raw: Any?) -> String? {
+        guard let raw = raw, !(raw is NSNull) else { return nil }
+        if let string = raw as? String { return string }
+        return "\(raw)"
+    }
+
+    /// Extracts a Clearable update-priority token. Absent → nil (unchanged);
+    /// null → .clear; otherwise the stringified token (the manager treats
+    /// "none"/"0" as a clear via `Priority.parse`).
+    private func priorityClearable(from raw: Any?) -> Clearable<String>? {
+        guard let raw = raw else { return nil }
+        if raw is NSNull { return .clear }
+        if let string = raw as? String { return .value(string) }
+        return .value("\(raw)")
     }
 
     private func encodableArray(_ reminders: [ReminderOutput]) -> [[String: Any]] {
@@ -1052,10 +1218,12 @@ public class MCPServer {
                 "listId": reminder.listId,
                 "listName": reminder.listName,
                 "isCompleted": reminder.isCompleted,
-                "priority": reminder.priority,
                 "createdDate": reminder.createdDate,
                 "modifiedDate": reminder.modifiedDate
             ]
+            if let priority = reminder.priority {
+                dict["priority"] = priority
+            }
             if let notes = reminder.notes {
                 dict["notes"] = notes
             }
