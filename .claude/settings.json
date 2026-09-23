@@ -96,6 +96,24 @@
             "type": "command"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "bun run justin-sdk thread capture",
+            "type": "command"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "command": "bun run justin-sdk thread capture",
+            "type": "command"
+          }
+        ]
       }
     ]
   },
