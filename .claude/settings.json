@@ -105,6 +105,14 @@
             "type": "command"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "bun run justin-sdk repo-state --hook",
+            "type": "command"
+          }
+        ]
       }
     ]
   },
