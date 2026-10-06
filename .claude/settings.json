@@ -55,15 +55,6 @@
             "command": "if [ \"$CLAUDE_CODE_REMOTE\" = \"true\" ]; then bunx github:justinhaaheim/justin-sdk setup-env; else bun run justin-sdk session-start || true; fi"
           }
         ]
-      },
-      {
-        "hooks": [
-          {
-            "command": "bun run justin-sdk thread start --hook",
-            "type": "command"
-          }
-        ],
-        "matcher": "startup|resume"
       }
     ],
     "Notification": [
