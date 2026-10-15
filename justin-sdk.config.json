@@ -10,7 +10,9 @@
   "componentConfig": {
     "critical-rules": {},
     "thread": {
-      "enforce": true,
+      "enforce": false,
+      "enforceMode": "workTurns",
+      "sessionBeads": true,
       "startOnSessionStart": true
     }
   }
