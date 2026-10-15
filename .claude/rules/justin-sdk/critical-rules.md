@@ -1,4 +1,4 @@
-<!-- justin-sdk rules · prompts b9276fe9f3eb (2026-10-06) · modules 5dfdf6b3ee88 · content 15f928723a52 · GENERATED — run: bun run justin-sdk rules-update -->
+<!-- justin-sdk rules · prompts 12aac3db5b44 (2026-10-15) · modules 5dfdf6b3ee88 · content 83bd2527f0cc · GENERATED — run: bun run justin-sdk rules-update -->
 
 # Critical Rules
 
@@ -51,6 +51,7 @@ Context evaporates between sessions: chat history is gone, file diffs are lossy,
 A bead's **title and body fields** (`description`, `design`, `acceptance_criteria`, `notes`) are the source of truth for the spec and for the state of the work. Everything listed above goes there, and nowhere else.
 
 - **They must always be accurate.** A bead is not a log of what was once believed — it describes the problem, the plan, and the status **as currently understood**. Keeping them current is critically important: a body that has gone stale actively misleads the next session, which is worse than no bead at all. Keep the title and body in sync with each other, too; a title that no longer matches the body is itself a bug.
+- **Write titles in plain words.** Justin reads them, often without remembering the work: bead lists, his session inbox and status reports print them. Say what the work does, not how the code does it. Before: `thread capture: seed a session log from its transcript on the first capture, so sessions already running when hooks land converge immediately`. After: `Record the messages of sessions that were already running when the recorder was installed`. Leave old titles alone until you next touch that bead.
 - **Rewrite freely — removing is not destroying.** Do NOT hesitate to change or delete anything inside a bead. Beads are tracked in git, so every prior version stays recoverable: **git history is the changelog; the body is the present tense.** Preserving a predecessor's superseded text out of deference is the failure mode here, not the careful choice.
 - **Prune aggressively.** More information is not better when it is stale, superseded, confusing, misleading, or irrelevant — cut it. The goal is that the bead is an accurate representation, at all times, of the work to be done given the current understanding of the project.
 - **Anything changes → update the title and the body, now.** A decision reversed, a spec revised, a question answered, a hypothesis ruled out: rewrite the affected fields in place so they read correctly to someone who has never seen an earlier version. Recording an abandoned approach as an anti-decision is valuable — write it as current knowledge ("X was tried and rejected because Y"), not as an append-only trail under text that still describes X as the plan.

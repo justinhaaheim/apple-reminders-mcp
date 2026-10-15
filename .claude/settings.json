@@ -77,6 +77,15 @@
             "command": "jq -r '.tool_input.file_path' | { read file_path; bun run prettier:write:file -- \"$file_path\"; }"
           }
         ]
+      },
+      {
+        "hooks": [
+          {
+            "command": "bun run justin-sdk thread nudge",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
       }
     ],
     "Stop": [
