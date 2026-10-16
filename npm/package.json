@@ -1,18 +1,27 @@
 {
-  "name": "apple-reminders-mcp-cli",
+  "name": "@justinhaaheim/apple-reminders",
   "version": "0.1.0",
-  "description": "Apple Reminders MCP server and CLI for macOS — access reminders from Claude Desktop and the command line",
+  "description": "Apple Reminders CLI and MCP server for macOS — access reminders from Claude Desktop / Claude cowork and the command line",
   "license": "MIT",
+  "author": "Justin Haaheim",
   "repository": {
     "type": "git",
-    "url": "https://github.com/justinhaaheim/apple-reminders-mcp"
+    "url": "git+https://github.com/justinhaaheim/apple-reminders-mcp.git"
+  },
+  "homepage": "https://github.com/justinhaaheim/apple-reminders-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/justinhaaheim/apple-reminders-mcp/issues"
   },
   "os": [
     "darwin"
   ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
   "bin": {
-    "apple-reminders-mcp": "./bin/reminders",
-    "apple-reminders": "./bin/reminders"
+    "apple-reminders": "./bin/reminders",
+    "apple-reminders-mcp": "./bin/reminders"
   },
   "files": [
     "bin/",
@@ -20,11 +29,13 @@
   ],
   "keywords": [
     "mcp",
+    "model-context-protocol",
     "apple-reminders",
     "reminders",
     "macos",
     "eventkit",
     "claude",
-    "model-context-protocol"
+    "claude-desktop",
+    "cli"
   ]
 }

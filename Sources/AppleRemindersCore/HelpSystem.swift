@@ -41,9 +41,9 @@ public enum HelpSystem {
                 print(content)
             } else if let cmd = subcommand {
                 fputs("No skill guidance available for '\(cmd)'\n", stderr)
-                _exit(1)
+                exit(1)
             }
-            _exit(0)
+            exit(0)
         }
 
         if hasHelp && hasVerbose {
@@ -51,9 +51,9 @@ public enum HelpSystem {
                 print(content)
             } else if let cmd = subcommand {
                 fputs("No verbose help available for '\(cmd)'\n", stderr)
-                _exit(1)
+                exit(1)
             }
-            _exit(0)
+            exit(0)
         }
 
         // Plain --help: use our concise content (with self-referencing footer)
@@ -64,7 +64,7 @@ public enum HelpSystem {
                 // Unknown subcommand — fall through to let ArgumentParser handle it
                 return
             }
-            _exit(0)
+            exit(0)
         }
     }
 

@@ -93,7 +93,7 @@ authoritative for writes.
 
 1. **Test enrichment on macOS with real data** — Build the binary on a Mac with FDA, run `reminders query --pretty` and verify hashtags / parentId / childIds / section populate. Run `reminders hashtags --pretty`. Confirm `--hashtag`, `--parent`, `--section` filters work end-to-end.
 
-2. **Performance validation** — Bead 9py acceptance: enrichment of 1,000 reminders should add < 100ms. Time `reminders query --all-lists --status all --pretty | wc -l` on a fresh build with real data.
+2. **Performance validation** — Bead 9py acceptance: enrichment of 1,000 reminders should add < 100ms. Time `reminders query --all-lists --include-completed --pretty | wc -l` on a fresh build with real data.
 
 3. **Urgent-alarm decoding (deferred)** — `ZURGENTPRESENTATIONALARMSASDATA` is a binary blob; would surface a few users' notifications-only urgent alarm rules. Follow-on to the SQLite enrichment epic.
 
@@ -109,7 +109,7 @@ authoritative for writes.
 
 ### Features
 
-- [x] Priority enum (none/low/medium/high) instead of 0-9 integers
+- [x] Priority enum (low/medium/high with null for unset) instead of 0-9 integers
 - [x] Code refactoring to multiple Swift files (completed 2026-02-28)
 - [x] Multi-target restructure (core library + CLI + MCP) (completed 2026-03-05)
 - [ ] `--format markdown` for human-readable CLI output

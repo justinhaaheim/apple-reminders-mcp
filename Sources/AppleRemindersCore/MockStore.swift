@@ -172,6 +172,18 @@ public class MockReminderStore: ReminderStore {
         return calendar
     }
 
+    public func deleteCalendar(_ calendar: ReminderCalendar) throws {
+        guard let index = calendars.firstIndex(where: { $0.id == calendar.id }) else {
+            throw RemindersError("List not found")
+        }
+        calendars.remove(at: index)
+        // Deleting a list also deletes every reminder it contains.
+        reminders.removeAll { $0.calendarId == calendar.id }
+        if defaultCalendarId == calendar.id {
+            defaultCalendarId = nil
+        }
+    }
+
     public func fetchReminders(
         in calendars: [ReminderCalendar],
         status: ReminderStatus,
