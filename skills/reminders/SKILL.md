@@ -5,12 +5,12 @@ description: >
   and lists. Use when the user asks about their reminders, wants to create
   tasks, check what's due, mark things complete, or manage their task lists.
   Also use for backup/export of reminder data.
-allowed-tools: Bash(reminders *), Bash(${CLAUDE_PLUGIN_ROOT}/.build/release/reminders *)
+allowed-tools: Bash(reminders *)
 ---
 
 ## Using reminders
 
-`reminders` is a CLI for managing Apple Reminders on macOS. Before first use, run:
+`reminders` is a CLI for managing Apple Reminders on macOS, installed at `~/.local/bin/reminders` by `bun run install:local` in the apple-reminders-mcp repo. Before first use, run:
 
     reminders --help=skill
 

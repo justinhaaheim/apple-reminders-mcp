@@ -26,17 +26,24 @@ Apple Reminders Tools — A multi-target Swift project providing access to Apple
 - `.build/release/reminders mcp` - Start MCP server via CLI
 - `.build/release/apple-reminders-mcp` - Run standalone MCP server
 
+### Installing for everyday use
+- `bun run install:local` - Build the committed sources into `.build-install/` and install `~/.local/bin/reminders` (keeps `reminders.prev`; logs the commit to `~/.local/share/apple-reminders-mcp/installs.jsonl`)
+
+`.build/` is for development only. Claude Desktop, other repos and launchd jobs must run `/Users/jhaa/.local/bin/reminders` (or `${HOME}/.local/bin/reminders` in `.mcp.json`), never this checkout's `.build/`: a rebuild or branch switch here would change what they run. Why: JOURNAL.md, 2026-10-16.
+
 ### Code Quality
 - `bun run signal` - Check formatting with Prettier
 - `bun run prettier` - Format all files
 - `bun run prettier-check` - Check formatting without modifying
 
 ### Testing
-- `bun run test` - Run TypeScript tests (isolated to test lists, safe)
+- `bun test ./test` - Run this repo's TypeScript tests against `.build/release/` (plain `bun run test` also picks up justin-sdk's own tests from `tmp/`; bead apple-reminders-mcp-rxn)
 - `bun run test:cleanup` - Delete leftover test lists (with confirmation prompt)
 - `./test/interactive.sh` - Interactive MCP protocol debugging
 
-**Test Safety**: Tests run with `AR_MCP_TEST_MODE=1` which restricts all write operations to lists prefixed with `[AR-MCP TEST]`. This prevents tests from modifying your real reminders.
+**Test Safety**: Tests use the in-memory mock store (`--mock` / `AR_MCP_MOCK_MODE=1`) and never touch real reminders. A client created with real EventKit defaults to `AR_MCP_TEST_MODE=1`, which restricts writes to lists prefixed with `[AR-MCP TEST]`.
+
+**Run tests outside the Claude Code sandbox.** Inside it, the export and auto-snapshot tests fail (8 of 149 on 2026-10-16) because the binary's temp-file and git writes are blocked; outside, all pass.
 
 **SQLite test fixture**: `test/fixtures/jtest1-reminders-db/` contains a snapshot of a real Apple Reminders Core Data store layout (5 `Data-*.sqlite` files, ~4.2 MB total) captured from a dedicated test macOS account. Used by tests for the read-only SQLite enrichment path (epic `apple-reminders-mcp-rbf` — hashtags, parent/child, sections). All synthetic data, no PII. See [`test/fixtures/jtest1-reminders-db/README.md`](test/fixtures/jtest1-reminders-db/README.md).
 
@@ -51,44 +58,18 @@ Apple Reminders Tools — A multi-target Swift project providing access to Apple
 - Requires Full Disk Access / Reminders permission on first run
 
 ### Source Structure
-```
-Sources/
-├── AppleRemindersCore/          # Shared library target
-│   ├── Logging.swift            # Shared log()/logError() utilities
-│   ├── RemindersError.swift     # Generic error type (replaces MCPToolError)
-│   ├── Configuration.swift      # TestModeConfig, MockModeConfig
-│   ├── ReminderStoreProtocol.swift # ReminderStore protocol, model types
-│   ├── EventKitStore.swift      # EKCalendarWrapper, EKReminderWrapper, EKReminderStore
-│   ├── MockStore.swift          # MockCalendar, MockReminder, MockReminderStore
-│   ├── Models.swift             # API data models, input/output types, Priority, Date ext
-│   ├── RemindersManager.swift   # RemindersManager class (business logic)
-│   ├── MCPServer.swift          # MCPServer class (protocol handling, tool definitions)
-│   ├── MCPTypes.swift           # MCPRequest, MCPResponse, JSONValue, AnyCodable
-│   ├── SnapshotManager.swift    # Git-backed snapshot system
-│   ├── HelpContent.swift        # Tiered help content for all commands
-│   ├── HelpSystem.swift         # Pre-parse interception for --help flags
-│   └── AuditLogger.swift        # JSONL audit logger for mutations
-├── AppleRemindersMCP/           # Standalone MCP server executable
-│   └── main.swift               # Entry point (delegates to MCPServer)
-└── AppleRemindersCLI/           # CLI executable
-    ├── Reminders.swift          # Root command + global options + helpers
-    ├── QueryCommand.swift       # reminders query
-    ├── ListsCommand.swift       # reminders lists
-    ├── CreateCommand.swift      # reminders create
-    ├── CreateListCommand.swift  # reminders create-list
-    ├── UpdateCommand.swift      # reminders update
-    ├── DeleteCommand.swift      # reminders delete
-    ├── ExportCommand.swift      # reminders export
-    ├── SnapshotCommand.swift    # reminders snapshot [take|status|diff]
-    ├── AuditCommand.swift       # reminders audit
-    └── MCPCommand.swift         # reminders mcp
-```
+
+Three targets under `Sources/` (`ls Sources/*/` for the files):
+
+- `AppleRemindersCore/` — all logic: `RemindersManager` (business logic), `MCPServer` (protocol handling and tool definitions), the `ReminderStore` protocol with its EventKit and mock implementations, the read-only SQLite enrichment reader, snapshots, the audit logger, and `HelpContent` / `HelpSystem` for tiered help.
+- `AppleRemindersCLI/` — one `<Name>Command.swift` per `reminders` subcommand, plus `Reminders.swift` (root command and global options).
+- `AppleRemindersMCP/` — standalone MCP server entry point, delegating to `MCPServer`.
 
 ## Available Tools
 
 | Tool | Description |
 |------|-------------|
-| `query_reminders` | Search and filter reminders. Convention: structured params (list, status, searchText, per-field date ranges, hashtag, parentId/topLevelOnly, sectionId) filter at fetch time; the JMESPath `query` filters/projects on the result. Output reminders include `hashtags`, `parentId`, `childIds`, `section` when SQLite enrichment is available. See [`docs/query-reference.md`](docs/query-reference.md). |
+| `query_reminders` | Search and filter reminders. Convention: structured params (list, includeCompleted/completedOnly, searchText, per-field date ranges, hashtag, parentId/topLevelOnly, sectionId) filter at fetch time; the JMESPath `query` filters/projects on the result. Output reminders include `hashtags`, `parentId`, `childIds`, `section` when SQLite enrichment is available. See [`docs/query-reference.md`](docs/query-reference.md). |
 | `get_lists` | Get all reminder lists. Each list includes a `sections` array when SQLite enrichment is available. |
 | `create_list` | Create a new list |
 | `create_reminders` | Create one or more reminders (batch) |
@@ -195,26 +176,14 @@ For the full CLI skill reference (common patterns, piping with jq, JMESPath quer
 
 ## Claude Desktop Configuration
 
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Run `bun run install:local`, then add to `~/Library/Application Support/Claude/claude_desktop_config.json` (Claude Desktop does not expand `${HOME}`, so use the absolute path):
 
 ```json
 {
   "mcpServers": {
     "apple-reminders": {
-      "command": "/path/to/.build/release/reminders",
+      "command": "/Users/jhaa/.local/bin/reminders",
       "args": ["mcp"]
-    }
-  }
-}
-```
-
-Or use the standalone binary (backward compatible):
-
-```json
-{
-  "mcpServers": {
-    "apple-reminders": {
-      "command": "/path/to/.build/release/apple-reminders-mcp"
     }
   }
 }
@@ -228,7 +197,7 @@ For auto-snapshots via MCP server, set environment variables:
 {
   "mcpServers": {
     "apple-reminders": {
-      "command": "/path/to/.build/release/reminders",
+      "command": "/Users/jhaa/.local/bin/reminders",
       "args": ["mcp"],
       "env": {
         "AR_MCP_SNAPSHOT_ENABLED": "1",
@@ -251,36 +220,6 @@ A pre-snapshot also runs when the repo is uninitialized or its last snapshot
 is more than 7 days old. Snapshot failures warn to stderr but never abort
 the mutation.
 
-## Completed Enhancements
+## Planning and history
 
-- [x] Add alarm support (absolute + relative)
-- [x] Add recurrence/RRULE support
-- [x] Add text search in reminder titles/notes
-- [x] Add date range filtering
-- [x] Add batch operations
-- [x] Match Claude iOS API more closely
-- [x] Multi-target restructure (core library + CLI + MCP)
-- [x] CLI tool with ArgumentParser
-- [x] Git-backed snapshot system
-- [x] MCP server auto-snapshot integration
-
-## Issue Tracking with Beads
-
-This project uses [beads](https://github.com/steveyegge/beads) (`bd`) for granular issue/task tracking alongside markdown scratchpads (which remain the primary tool for design notes, architecture decisions, and session planning).
-
-### When to Use Beads vs Scratchpads
-
-- **Beads**: Concrete tasks, bugs, TODOs, trackable work items with status and dependencies
-- **Scratchpads**: Design exploration, architecture decisions, session context, work plans
-
-### Installation (Local)
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/steveyegge/beads/main/scripts/install.sh | bash
-```
-
-On Claude Code Web, `bd` is installed automatically via the SessionStart hook.
-
-## Important Guidelines
-
-Follow the protocol in @docs/prompts/PROJECT_STATE_PROTOCOLS.md
+Work is tracked in beads (`br`), as `.claude/rules/justin-sdk/critical-rules.md` §3 describes. Dated decisions and dead ends go in [`JOURNAL.md`](JOURNAL.md), newest first.

@@ -1,54 +1,53 @@
-# Apple Reminders MCP Server
+# Apple Reminders MCP Server and CLI
 
-A Model Context Protocol (MCP) server that integrates Apple Reminders with Claude Desktop, enabling **comprehensive task management and reminders** directly through conversations with Claude.
-
-**Built entirely in Swift** using EventKit for native, fast, and reliable access to Apple Reminders.
-
-## Why Use This?
-
-Apple Reminders is a full-featured **task management system**, not just for simple reminders. This MCP server unlocks the full power of Apple Reminders for:
-
-- **Task Management**: Create, organize, and track tasks and todo items
-- **Project Organization**: Manage projects with separate lists and due dates
-- **Daily Planning**: Review what's due today or overdue with `list_today_reminders`
-- **Flexible Scheduling**: Set reminders with specific times or just dates
-- **Priority Management**: Organize tasks by priority levels (high/medium/low)
+Native Swift access to Apple Reminders on macOS through EventKit, as both an MCP server (for Claude Desktop and Claude Code) and a `reminders` command-line tool for humans and LLMs. Forked from [farmerajf/apple-reminders-mcp](https://github.com/farmerajf/apple-reminders-mcp).
 
 ## Features
 
-- **List Management**: Create and list reminder lists (task categories)
-- **Task Operations**: Create, update, complete, and delete reminders
-- **Smart Filtering**: View today's tasks, filter by list or completion status
-- **Flexible Dates**: Support for both date-only and datetime formats
-- **Priority Levels**: Set task priority (0=none, 1-4=high, 5=medium, 6-9=low)
-- **Native Swift**: EventKit integration for maximum performance and reliability
+- Query reminders with structured filters (list, completion, text search, created / modified / due date ranges, hashtag, parent, section) plus JMESPath for filtering and projecting the result
+- Create, update, complete and delete reminders in batches, with alarms, recurrence, URLs and priorities
+- Create and delete lists
+- Read-only enrichment from Apple's Reminders database: hashtags, subtasks (parent / child) and list sections, which EventKit does not expose
+- Export to JSON, git-backed snapshots, and a JSONL audit log of every change
+- Tiered help: `reminders --help`, `--help --verbose`, `--help=skill`
 
-## Prerequisites
+## Requirements
 
-- macOS 14.0 (Sonoma) or later
+- macOS 14 (Sonoma) or later
 - Swift 5.9 or later
-- Claude Desktop app
+- [Bun](https://bun.sh) for the build and install scripts
 
-## Installation
-
-1. Clone this repository
-2. Build the Swift package:
+## Install
 
 ```bash
-swift build -c release
+bun run install:local
 ```
 
-3. The executable will be built at `.build/release/apple-reminders-mcp`
+This builds the committed sources and installs `~/.local/bin/reminders`, keeping the previous binary as `reminders.prev`. Point every tool at the installed copy, not at `.build/`, so that rebuilding the repo never changes what they run.
 
-## Configuration
+## Configure
 
-Add this server to your Claude Desktop configuration file at `~/Library/Application Support/Claude/claude_desktop_config.json`:
+Claude Desktop (`~/Library/Application Support/Claude/claude_desktop_config.json`; use the absolute path):
 
 ```json
 {
   "mcpServers": {
     "apple-reminders": {
-      "command": "/absolute/path/to/apple-reminders-mcp/.build/release/apple-reminders-mcp"
+      "command": "/Users/<you>/.local/bin/reminders",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Claude Code (`.mcp.json` in a project, which expands `${HOME}`):
+
+```json
+{
+  "mcpServers": {
+    "apple-reminders": {
+      "command": "${HOME}/.local/bin/reminders",
+      "args": ["mcp"]
     }
   }
 }
@@ -56,7 +55,15 @@ Add this server to your Claude Desktop configuration file at `~/Library/Applicat
 
 ## Permissions
 
-The first time you run this, macOS will prompt you to grant Reminders access. Click "Allow".
+- **Reminders**: macOS asks the first time the tool reads or writes reminders. Click Allow.
+- **Full Disk Access** for the app that runs the tool (Terminal, Claude Desktop, …): needed only for the hashtag, subtask and section fields. Without it those fields are `null` and one warning goes to stderr.
+
+## Documentation
+
+- [`SKILL.md`](SKILL.md) — CLI reference and common patterns
+- [`docs/query-reference.md`](docs/query-reference.md) — query flags, JMESPath, recipes
+- [`docs/sqlite-schema-notes.md`](docs/sqlite-schema-notes.md) — the Reminders database layout behind enrichment
+- [`TESTING.md`](TESTING.md) — running the tests
 
 ## License
 

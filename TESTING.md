@@ -1,154 +1,29 @@
-# Testing the Apple Reminders MCP Server
+# Testing
 
-This document explains how to test the MCP server without integrating it into Claude Desktop.
-
-## Quick Test
-
-The simplest way to test is with the provided test script:
+## Automated tests
 
 ```bash
-# Show help
-./test.sh
-
-# List all available MCP tools
-./test.sh list-tools
-
-# List all your reminder lists
-./test.sh list-lists
-
-# Create a new reminder list
-./test.sh create-list "Shopping"
-
-# Get today's and past due reminders
-./test.sh today
-
-# List all incomplete reminders
-./test.sh list-reminders
-
-# List reminders from a specific list
-./test.sh list-reminders "Work Tasks"
-
-# Create a test reminder
-./test.sh create "Test Reminder"
-
-# Create a reminder in a specific list
-./test.sh create "Buy milk" "Shopping"
-
-# Update a reminder
-./test.sh update <reminder-id> --title "New Title"
-./test.sh update <reminder-id> --notes "Updated notes" --priority 5
+bun run build      # tests run the binaries in .build/release/
+bun test ./test    # this repo's tests only
 ```
 
-## How It Works
+- The tests use the in-memory mock store (`--mock` / `AR_MCP_MOCK_MODE=1`), so they never touch real reminders.
+- A test client created with real EventKit (`MCPClient.createWithRealEventKit()` in `test/mcp-client.ts`) defaults to test mode (`AR_MCP_TEST_MODE=1`), which only allows writes to lists whose names start with `[AR-MCP TEST]`. `bun run test:cleanup` deletes leftover test lists after asking.
+- Plain `bun test` also runs justin-sdk's own tests from the install cache in `tmp/`; use `bun test ./test`.
+- In the Claude Code sandbox, the export and auto-snapshot tests fail because the binary's temp-file and git writes are blocked. Run the suite outside the sandbox.
 
-The MCP server communicates via JSON-RPC over stdin/stdout. The test scripts send JSON requests and parse JSON responses.
-
-### Example Request/Response
-
-**Request** (list all reminder lists):
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "list_reminder_lists",
-    "arguments": {}
-  }
-}
-```
-
-**Response**:
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "content": [
-      {
-        "type": "text",
-        "text": "{\"lists\":[{\"id\":\"...\",\"name\":\"Work Tasks\"}],\"count\":1}"
-      }
-    ]
-  }
-}
-```
-
-## Manual Testing
-
-You can also test manually by running the server and typing JSON requests:
+## Talking to the MCP server by hand
 
 ```bash
-# Start the server
-.build/release/apple-reminders-mcp
-
-# Then paste this request and press Enter:
-{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}
-
-# Press Ctrl+C to exit
+./test/interactive.sh
 ```
 
-## Interactive Testing
-
-Use the interactive test script for a live session:
+Or pipe one JSON-RPC request into the server, using the mock store so nothing real changes:
 
 ```bash
-./test-interactive.sh
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | .build/release/reminders mcp --mock
 ```
 
-This starts the server and waits for you to paste JSON-RPC requests.
+## Trying a dev build in Claude Desktop or another tool
 
-## Checking Logs
-
-The server logs to stderr, which you can see by redirecting:
-
-```bash
-./test.sh list-lists 2>&1 | grep "^\["
-```
-
-Example log output:
-
-```
-[2025-11-10T04:46:21Z] Successfully obtained access to Reminders
-[2025-11-10T04:46:21Z] Apple Reminders MCP Server running on stdio
-[2025-11-10T04:46:22Z] Starting listReminders for list: Work Tasks
-[2025-11-10T04:46:22Z] Fetched 345 reminders in 234ms
-[2025-11-10T04:46:22Z] After filtering: 53 reminders (showCompleted=false)
-[2025-11-10T04:46:22Z] Total operation took 236ms
-```
-
-## Available Tools
-
-1. **list_reminder_lists** - Get all reminder lists
-2. **create_reminder_list** - Create a new reminder list
-3. **list_today_reminders** - Get all incomplete reminders due today or past due (includes pastDue flag)
-4. **list_reminders** - Get reminders (with optional list_name and completed filters)
-5. **create_reminder** - Create a new reminder
-6. **update_reminder** - Update an existing reminder's title, notes, due date, or priority
-7. **complete_reminder** - Mark a reminder as completed (needs reminder_id)
-8. **delete_reminder** - Delete a reminder (needs reminder_id)
-
-## Integration with Claude Desktop
-
-Once testing is complete, integrate with Claude Desktop by adding to:
-`~/Library/Application Support/Claude/claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "apple-reminders": {
-      "command": "/absolute/path/to/apple-reminders-mcp/.build/release/apple-reminders-mcp"
-    }
-  }
-}
-```
-
-Then restart Claude Desktop. The server implements the full MCP protocol including:
-
-- `initialize` - Initial handshake with protocol version, capabilities, and usage instructions
-- `tools/list` - Lists all available tools
-- `tools/call` - Executes a specific tool
-
-**Usage Instructions**: When the server connects, it sends comprehensive usage instructions to Claude, explaining that Apple Reminders can be used for task management, not just simple reminders. This helps Claude understand how to best utilize the tools for project management, daily planning, and task organization.
+Run `bun run install:local` and point the tool at `~/.local/bin/reminders`; roll back with `mv ~/.local/bin/reminders.prev ~/.local/bin/reminders`. Do not point tools at `.build/`: a later rebuild or branch switch would change what they run.
