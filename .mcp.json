@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "apple-reminders": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/.build/release/reminders",
+      "command": "${HOME}/.local/bin/reminders",
       "args": ["mcp"]
     }
   }
