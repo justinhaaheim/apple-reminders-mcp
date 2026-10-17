@@ -1,4 +1,4 @@
-<!-- justin-sdk rules · prompts 12aac3db5b44 (2026-10-15) · modules 5dfdf6b3ee88 · content 83bd2527f0cc · GENERATED — run: bun run justin-sdk rules-update -->
+<!-- justin-sdk rules · prompts b2a83c7f5668 (2026-10-17) · modules 5dfdf6b3ee88 · content 4309cdbf5a5a · GENERATED — run: bun run justin-sdk rules-update -->
 
 # Critical Rules
 
@@ -205,6 +205,8 @@ When building UI in a project that has no screenshot tests yet, suggest setting 
 - Wrap the commit message in **single quotes**, as in `git commit -m '<message>'` — not double quotes, which let the shell interpolate backticks and `$` in the message.
 - Follow the Conventional Commits specification when writing commit messages.
 - ALWAYS commit changes proactively, at regular intervals, as soon as a unit of work is done.
+- ALWAYS push changes to remote proactively, but only via a normal push.
+  - NEVER force push or rewrite history in any way without explicit user approval.
 - NEVER leave uncommitted changes in the working directory. It is better to commit now and fix any issues in follow-up commits than to leave uncommitted changes in the working directory.
 
 # 12. Justin SDK
@@ -240,13 +242,19 @@ When to NOT use the advisor:
 - If the task you've been given has little ambiguity and does not raise safety/security concerns.
 - If the changes are easily reversible, straightforward, and entail little-to-no other risk.
 
-## 13.1 Deviations require explicit approval from the human
+## 13.1 Always report back what the advisor says
+
+Advisor tool responses are not visible/accessible by the user, but it's important that the user understand what the advisor's feedback was.
+
+- ALWAYS share the advisor's feedback with the user after ALL advisor tool calls. Distill the feedback down into concise nested bullet points, and share them immediately after the advisor tool call.
+
+## 13.2 Deviations require explicit approval from the human
 
 IMPORTANT: If the advisor recommends something that would represent a deviation from the instructions or specifications the human gave you, **you must STOP and get explicit approval from the human before proceeding.**
 
 For instance, if the human explicitly asks you to build something using package A, and the advisor for whatever reason recommends using package B, that would represent a deviation from the human's instructions. The human would likely return to the session and say "hey, I asked you to build this using package A, and you did something different." In this case you MUST get explicit approval from the human to use package B before proceeding.
 
-## 13.2 If the advisor tool is unavailable
+## 13.3 If the advisor tool is unavailable
 
 Fall back to spawning a subagent as the advisor, and treat it the same way.
 
