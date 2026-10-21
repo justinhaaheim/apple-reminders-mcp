@@ -5,7 +5,8 @@
     "critical-rules-setup",
     "gitignore-setup",
     "prettier-setup",
-    "thread-hooks-setup"
+    "thread-hooks-setup",
+    "thread-rules-setup"
   ],
   "componentConfig": {
     "critical-rules": {},
