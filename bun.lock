@@ -5,7 +5,7 @@
     "": {
       "name": "apple-reminders-mcp",
       "devDependencies": {
-        "@justinhaaheim/justin-sdk": "github:justinhaaheim/justin-sdk#v0.47.1",
+        "@justinhaaheim/justin-sdk": "github:justinhaaheim/justin-sdk#v0.49.3",
         "@types/node": "25.0.3",
         "bun-types": "1.3.5",
         "husky": "9.1.7",
@@ -15,7 +15,7 @@
     },
   },
   "packages": {
-    "@justinhaaheim/justin-sdk": ["@justinhaaheim/justin-sdk@github:justinhaaheim/justin-sdk#0c879c3", { "dependencies": { "ignore": "^7.0.6", "semver": "^7.8.5", "yargs": "^18.0.0", "zod": "^4.6.1" }, "bin": { "justin-sdk": "./src/cli.ts", "repo-status": "./src/repo-status/repo-status.ts" } }, "justinhaaheim-justin-sdk-0c879c3", "sha512-aSgJWFuHH9VkFQhlXngy3b0rNLCIBxCi1tpLo2kXVHvCOOAIz65xbXKzh01hhpGEUEmK5L9pMwBVi59RrxL/zw=="],
+    "@justinhaaheim/justin-sdk": ["@justinhaaheim/justin-sdk@github:justinhaaheim/justin-sdk#cf50edb", { "dependencies": { "ignore": "^7.0.6", "semver": "^7.8.5", "yargs": "^18.0.0", "zod": "^4.6.1" }, "bin": { "justin-sdk": "./src/cli.ts", "repo-status": "./src/repo-status/repo-status.ts" } }, "justinhaaheim-justin-sdk-cf50edb", "sha512-IjCDJysQ6ILqH3oP5IbgtyVSm9uKC9TUke5uXZTrfrpDBz3IXOob9J7VwLnEIvUhLtdWcdpHijgqFfXyfr66JA=="],
 
     "@types/node": ["@types/node@25.0.3", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-W609buLVRVmeW693xKfzHeIV6nJGGz98uCPfeXI1ELMLXVeKYZ9m15fAMSaUPBHYLGFsVRcMmSCksQOrZV9BYA=="],
 

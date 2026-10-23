@@ -10,7 +10,7 @@ Rewritten 2026-10-11 for status report v4. Why it has this shape, in Justin's wo
 ## The report has two parts
 
 1. **Part 1 is generated.** Before you yield, run `bun run justin-sdk thread status` again: the same command that decided the branch at the start of the turn (below), not a second decision. Paste the block it prints, from the 🛑 line through the `────` line, verbatim at the top of your final message. Never type or edit any of it: the tool builds it from beads, git, the message log and the transcript. Keep its empty lines exactly as printed; it puts two between list items on purpose (see the writing rules below).
-2. **Part 2 is your own message**, below that line. Write it under the Know-your-reader rule: bullets, short, for a reader who does not remember this session. Use these headings, in this order. Deviations appears on every work turn; the others appear only when they have content.
+2. **Part 2 is your own message**, below that line. When the prime directive requires its `Prime directive check:` paragraph in this reply, that paragraph comes first in Part 2, above the headings (prime-directive.md). Write it under the Know-your-reader rule: bullets, short, for a reader who does not remember this session. Use these headings, in this order. Deviations appears on every work turn; the others appear only when they have content.
    - **Answers** — restate each question he asked, then answer it.
    - **Things you should know** — what he needs in order to decide or act, and nothing more.
    - **Deviations** — anything that departs from what he asked for or from the spec. "none" is a claim that you checked.
