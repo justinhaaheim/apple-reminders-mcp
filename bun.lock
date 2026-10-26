@@ -5,7 +5,7 @@
     "": {
       "name": "apple-reminders-mcp",
       "devDependencies": {
-        "@justinhaaheim/justin-sdk": "github:justinhaaheim/justin-sdk#v0.49.3",
+        "@justinhaaheim/justin-sdk": "github:justinhaaheim/justin-sdk#v0.50.0",
         "@types/node": "25.0.3",
         "bun-types": "1.3.5",
         "husky": "9.1.7",
@@ -15,7 +15,7 @@
     },
   },
   "packages": {
-    "@justinhaaheim/justin-sdk": ["@justinhaaheim/justin-sdk@github:justinhaaheim/justin-sdk#cf50edb", { "dependencies": { "ignore": "^7.0.6", "semver": "^7.8.5", "yargs": "^18.0.0", "zod": "^4.6.1" }, "bin": { "justin-sdk": "./src/cli.ts", "repo-status": "./src/repo-status/repo-status.ts" } }, "justinhaaheim-justin-sdk-cf50edb", "sha512-IjCDJysQ6ILqH3oP5IbgtyVSm9uKC9TUke5uXZTrfrpDBz3IXOob9J7VwLnEIvUhLtdWcdpHijgqFfXyfr66JA=="],
+    "@justinhaaheim/justin-sdk": ["@justinhaaheim/justin-sdk@github:justinhaaheim/justin-sdk#fae7c80", { "dependencies": { "ignore": "^7.0.6", "semver": "^7.8.5", "yargs": "^18.0.0", "zod": "^4.6.1" }, "bin": { "justin-sdk": "./src/cli.ts", "repo-status": "./src/repo-status/repo-status.ts" } }, "justinhaaheim-justin-sdk-fae7c80", "sha512-cVPsdFc2DQd45oAbhSp7W+Gm5raKCc1BeRONPKGQUI9ecUwyyp5GOgWOgcs0XdPpGTCr0w5buK8oYvCDOhDF4A=="],
 
     "@types/node": ["@types/node@25.0.3", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-W609buLVRVmeW693xKfzHeIV6nJGGz98uCPfeXI1ELMLXVeKYZ9m15fAMSaUPBHYLGFsVRcMmSCksQOrZV9BYA=="],
 
@@ -67,7 +67,7 @@
 
     "husky": ["husky@9.1.7", "", { "bin": { "husky": "bin.js" } }, "sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA=="],
 
-    "ignore": ["ignore@7.0.13", "", {}, "sha512-2E8Q6rh+1RRSq/YdaGsNfXsEZy9FVqv6BSSrkmZJP7BnaoPnRfKL+YaofPvP+5rzdk144qSm6i4+hvPgUcbV4Q=="],
+    "ignore": ["ignore@7.0.14", "", {}, "sha512-wCBiZ77u1tuWde6G/nfOtLaCTYcFDU5yCzARzK10y+rLhzYoL7a7yEemcopcc2Mzow7gZOIjnV2ym1NYmdiJOQ=="],
 
     "is-fullwidth-code-point": ["is-fullwidth-code-point@4.0.0", "", {}, "sha512-O4L094N2/dZ7xqVdrXhh9r1KODPJpFms8B5sGdJLPy664AgvXsreZUyCQQNItZRDlYug4xStLjNp/sz3HvBowQ=="],
 
