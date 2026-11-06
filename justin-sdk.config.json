@@ -14,7 +14,10 @@
       "enforce": false,
       "enforceMode": "workTurns",
       "sessionBeads": true,
-      "startOnSessionStart": true
+      "startOnSessionStart": true,
+      "handoff": {
+        "successor": true
+      }
     }
   }
 }
