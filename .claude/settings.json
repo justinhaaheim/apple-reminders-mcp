@@ -101,6 +101,17 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "bun run --cwd \"${CLAUDE_PROJECT_DIR:-.}\" justin-sdk hook PreToolUse",
+            "type": "command"
+          }
+        ],
+        "matcher": "Bash"
+      }
     ]
   },
   "claudeMdExcludes": ["/Users/jhaa/.claude/rules/justin-sdk/critical-rules.md"]
