@@ -65,3 +65,12 @@ coverage/
 
 # justin-sdk baseline (appended)
 *.local.*
+
+# br 0.7.6 local files: DB sidecars, recovery copies, br doctor runs
+.beads/*.db-wal*
+.beads/*-fsqlite-ns-gate
+.beads/*-fsqlite-ns-use
+.beads/*.vacuum-wal-cert*
+.beads/*.fsqlite-migration-state
+.beads/.br-wal-index-*/
+.doctor/
